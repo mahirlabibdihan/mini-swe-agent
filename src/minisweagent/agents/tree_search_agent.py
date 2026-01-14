@@ -76,6 +76,9 @@ class TreeSearchAgent(DefaultAgent):
         print(">> Committing changes to the repository...")
         self.env.execute("git add .")
         self.env.execute(f'git commit -m "{message}"')
+
+    def get_commit_hash(self):
+        """Get the current commit hash"""
         return self.env.execute("git rev-parse HEAD")["output"].strip()
 
     def step(self) -> dict:
@@ -108,10 +111,10 @@ class TreeSearchAgent(DefaultAgent):
         self.get_observation(best_node.last_action["command"])
         
         if self.repo_has_changes():
-            best_node.commit = self.commit_changes(f"Commit after: {best_node.last_action['command']}")
+            self.commit_changes(f"Commit after: {best_node.last_action['command']}")
             print(f">> New commit created: {best_node.commit}")
-        else:
-            best_node.commit = best_node.parent.commit
+
+        best_node.commit = self.get_commit_hash()
             
         return best_node.observation
     
