@@ -17,3 +17,9 @@ class TreeSearchNode:
         
     def prune(self):
         self.visible = False
+        
+    def is_expanded(self):
+        for child in self.children:
+            if child.branch:
+                return True
+        return False

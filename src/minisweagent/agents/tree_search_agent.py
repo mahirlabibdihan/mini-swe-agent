@@ -76,6 +76,7 @@ class TreeSearchAgent(DefaultAgent):
         print(">> Committing changes to the repository...")
         self.env.execute("git add .")
         self.env.execute(f'git commit -m "{message}"')
+        return self.env.execute("git rev-parse HEAD")["output"].strip()
 
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
@@ -96,12 +97,21 @@ class TreeSearchAgent(DefaultAgent):
             print("Best node is not a child of the current node, re-adjusting the tree...")
             flag = False
             
-        best_node.branch = self.create_unique_branch(base_name="ts-agent")
-        print(f">> Switching to branch: {best_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
+        if best_node.parent is None or best_node.parent.is_expanded():
+            best_node.branch = self.create_unique_branch(base_name="ts-agent")
+            print(f">> Switching to branch: {best_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
+        else:
+            best_node.branch = best_node.parent.branch
+            print(f">> Staying on branch: {best_node.branch}")
+        
         self.add_message("assistant", **{"content": best_node.last_action["thought"], "extra": best_node.last_action.get("extra", {})})
         self.get_observation(best_node.last_action["command"])
+        
         if self.repo_has_changes():
-            self.commit_changes(f"Commit after: {best_node.last_action['command']}")
+            best_node.commit = self.commit_changes(f"Commit after: {best_node.last_action['command']}")
+        else:
+            best_node.commit = best_node.parent.commit
+            
         return best_node.observation
     
         
