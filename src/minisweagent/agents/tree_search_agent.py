@@ -103,7 +103,7 @@ class TreeSearchAgent(DefaultAgent):
                 self.env.execute(f"git checkout {best_node.parent.commit}")
                 self.tree_node = best_node
                 self.n_backtracks += 1
-                self.add_message("system", f"```bash\ngit checkout {best_node.parent.commit}\n```")
+                self.add_message("system", f"THOUGHT: [{best_node.parent.branch}:{best_node.parent.commit[:7]}] is the highest-rewarded state. Backtracking to this state.\n\n```bash\ngit checkout {best_node.parent.commit}\n```")
                 break
             
             print("Best node is not a child of the current node, re-adjusting the tree...")
