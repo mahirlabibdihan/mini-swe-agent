@@ -2,7 +2,6 @@ patch.txt
 exit_statuses*.yaml
 preds.json
 *.traj.json
-.env
 traj.json
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
@@ -182,3 +181,18 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+# Custom
+.api_key
+.keys
+.vscode/
+*.jsonl
+*.jsonl.*
+*.patch
+*.DS_Store
+data/repos/copies
+notebooks/
+*logs/
+
+
+output/
+evaluation/
