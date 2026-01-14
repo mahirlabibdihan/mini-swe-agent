@@ -109,6 +109,7 @@ class TreeSearchAgent(DefaultAgent):
         
         if self.repo_has_changes():
             best_node.commit = self.commit_changes(f"Commit after: {best_node.last_action['command']}")
+            print(f">> New commit created: {best_node.commit}")
         else:
             best_node.commit = best_node.parent.commit
             
