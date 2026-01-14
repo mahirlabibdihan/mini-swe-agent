@@ -64,7 +64,7 @@ class TreeSearchAgent(DefaultAgent):
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         branch_name = f"{base_name}-{timestamp}"
         self.env.execute(f"git checkout -b {branch_name}")
-        self.add_message("system", f'THOUGHT: Detached HEAD, need to create a new branch to continue work. ```bash\ngit checkout -b {branch_name}\n```')
+        self.add_message("system", f'THOUGHT: Need to create a new branch before committing changes. ```bash\ngit checkout -b {branch_name}\n```')
         return branch_name
 
     def repo_has_changes(self):
@@ -108,6 +108,7 @@ class TreeSearchAgent(DefaultAgent):
                     # env.execute(f"git checkout {best_node.parent.branch}")
                     self.env.execute(f"git checkout {best_node.parent.commit}")
                     self.add_message("system", f"THOUGHT: Backtrack needed to execute the highest-rewarded action.\n\n```bash\ngit checkout {best_node.parent.commit}\n```")
+                print(">> Backtrack needed to execute the highest-rewarded action.")
                     
                 self.tree_node = best_node
                 self.n_backtracks += 1
@@ -167,6 +168,8 @@ class TreeSearchAgent(DefaultAgent):
             output = self.env.execute(node.last_action["command"])
             observation = self.render_template(self.config.action_observation_template, output=output)
             node.observation = observation # One-Step-Lookup
+            # Undo changes
+            self.env.execute("git restore .")
             
         action_list = ActionProcessor.evaluate_actions(tree_nodes, self.extra_template_vars["task"])
         final_action_list = ActionProcessor.merge_actions(action_list)
