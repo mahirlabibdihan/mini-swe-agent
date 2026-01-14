@@ -64,6 +64,7 @@ class TreeSearchAgent(DefaultAgent):
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         branch_name = f"{base_name}-{timestamp}"
         self.env.execute(f"git checkout -b {branch_name}")
+        self.add_message("system", f'```bash\ngit checkout -b {branch_name}\n```')
         return branch_name
 
     def repo_has_changes(self):
@@ -76,7 +77,12 @@ class TreeSearchAgent(DefaultAgent):
         print(">> Committing changes to the repository...")
         self.env.execute("git add .")
         self.env.execute(f'git commit -m "{message}"')
-
+        output = self.env.execute("git rev-parse HEAD")
+        self.add_message("system", f'```bash\ngit add . >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
+        observation = self.render_template(self.config.action_observation_template, output=output)
+        self.add_message("user", observation)
+        return output["output"].strip()
+        
     def get_commit_hash(self):
         """Get the current commit hash"""
         return self.env.execute("git rev-parse HEAD")["output"].strip()
@@ -92,9 +98,10 @@ class TreeSearchAgent(DefaultAgent):
                 self.tree_node = best_node
                 break
             elif self.backtrack_manager is not None:
-                BacktrackManager.backtrack(self.tree_node, best_node, self.env)
+                BacktrackManager.backtrack(self.tree_node, best_node.parent, self.env)
                 self.tree_node = best_node
                 self.n_backtracks += 1
+                self.add_message("system", f"```bash\ngit checkout {best_node.parent.commit}\n```")
                 break
             
             print("Best node is not a child of the current node, re-adjusting the tree...")
@@ -108,15 +115,18 @@ class TreeSearchAgent(DefaultAgent):
             print(f">> Staying on branch: {best_node.branch}")
         
         self.add_message("assistant", **{"content": best_node.last_action["thought"], "extra": best_node.last_action.get("extra", {})})
-        self.get_observation(best_node.last_action["command"])
+        output = self.get_observation(best_node.last_action["command"])
+        observation = self.render_template(self.config.action_observation_template, output=output)
+        self.add_message("user", observation)
+        best_node.observation = observation
         
         if self.repo_has_changes():
-            self.commit_changes(f"Commit after: {best_node.last_action['command']}")
+            best_node.commit = self.commit_changes(f"Commit after: {best_node.last_action['command']}")
+            print(f">> New commit created: {best_node.commit}")
+        else:
+            best_node.commit = self.get_commit_hash()
+            print(f">> No changes detected, staying on commit: {best_node.commit}")
             
-
-        best_node.commit = self.get_commit_hash()
-        print(f">> New commit created: {best_node.commit}")
-        
         return best_node.observation
     
         
@@ -124,8 +134,6 @@ class TreeSearchAgent(DefaultAgent):
         """Execute the action and return the observation."""
         self.n_expanded += 1
         output = self.execute_action(action)
-        observation = self.render_template(self.config.action_observation_template, output=output)
-        self.add_message("user", observation)
         return output
     
     def query(self) -> dict:
@@ -142,6 +150,9 @@ class TreeSearchAgent(DefaultAgent):
         print(f"# {len(tree_nodes)} new actions generated at level {self.tree_node.level}:")
         for node in tree_nodes:
             print(f"- {node.last_action['command']}")
+            output = self.get_observation(node.last_action["command"])
+            observation = self.render_template(self.config.action_observation_template, output=output)
+            node.observation = observation # One-Step-Lookup
             
         action_list = ActionProcessor.evaluate_actions(tree_nodes, self.extra_template_vars["task"])
         final_action_list = ActionProcessor.merge_actions(action_list)
