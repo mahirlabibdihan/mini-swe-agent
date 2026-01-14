@@ -103,12 +103,14 @@ class TreeSearchAgent(DefaultAgent):
                 self.tree_node = best_node
                 break
             elif self.backtrack_manager is not None:
-                print(f">> Backtracking to [{best_node.parent.branch} {best_node.parent.commit[:7]}]")
-                # env.execute(f"git checkout {best_node.parent.branch}")
-                self.env.execute(f"git checkout {best_node.parent.commit}")
+                if best_node.parent.commit != self.tree_node.commit:
+                    print(f">> Backtracking to [{best_node.parent.branch} {best_node.parent.commit[:7]}]")
+                    # env.execute(f"git checkout {best_node.parent.branch}")
+                    self.env.execute(f"git checkout {best_node.parent.commit}")
+                    self.add_message("system", f"THOUGHT: Backtrack needed to execute the highest-rewarded action.\n\n```bash\ngit checkout {best_node.parent.commit}\n```")
+                    
                 self.tree_node = best_node
                 self.n_backtracks += 1
-                self.add_message("system", f"THOUGHT: [{best_node.parent.branch} {best_node.parent.commit[:7]}] is the highest-rewarded state. Backtracking to this state.\n\n```bash\ngit checkout {best_node.parent.commit}\n```")
                 break
             
             print("Best node is not a child of the current node, re-adjusting the tree...")
