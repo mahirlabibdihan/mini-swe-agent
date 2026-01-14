@@ -116,7 +116,11 @@ class TreeSearchAgent(DefaultAgent):
             best_node.branch = best_node.parent.branch
             print(f">> Staying on branch: {best_node.branch}")
         
-        self.add_message("assistant", **{"content": best_node.last_action["thought"], "extra": best_node.last_action.get("extra", {})})
+        if best_node.last_action["extra"]:
+            self.add_message("assistant", **{"content": best_node.last_action["thought"], "extra": best_node.last_action.get("extra", {})})
+        else:
+            self.add_message("system", best_node.last_action["thought"])
+        
         output = self.get_observation(best_node.last_action["command"])
         observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
@@ -152,7 +156,7 @@ class TreeSearchAgent(DefaultAgent):
         print(f"# {len(tree_nodes)} new actions generated at level {self.tree_node.level}:")
         for node in tree_nodes:
             print(f"- {node.last_action['command']}")
-            output = self.get_observation(node.last_action["command"])
+            output = self.env.execute(node.last_action["command"])
             observation = self.render_template(self.config.action_observation_template, output=output)
             node.observation = observation # One-Step-Lookup
             

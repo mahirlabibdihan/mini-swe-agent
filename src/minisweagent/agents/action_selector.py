@@ -39,7 +39,8 @@ class ActionSelector:
         node = TreeSearchNode(
             last_action={
                 "command": f"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached",
-                "thought": None,
+                "thought": "THOUGHT: MAX STEPS REACHED ```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+                "extra": None
             },
         )
         node.value = 0.0
