@@ -97,7 +97,7 @@ class TreeSearchAgent(DefaultAgent):
             print("Best node is not a child of the current node, re-adjusting the tree...")
             flag = False
             
-        if best_node.parent is None or best_node.parent.is_expanded():
+        if best_node.parent is None or best_node.parent.branch is None or best_node.parent.is_expanded():
             best_node.branch = self.create_unique_branch(base_name="ts-agent")
             print(f">> Switching to branch: {best_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
         else:
