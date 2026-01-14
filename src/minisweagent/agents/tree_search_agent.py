@@ -34,7 +34,7 @@ class TreeSearchAgent(DefaultAgent):
         self.backtrack_manager = backtrack_manager
         if self.action_selector is not None:
             self.action_selector.reset()
-    
+        
     def generate_new_actions(self):
         actions = []
         for _ in range(self.config.breadth_limit):
@@ -112,10 +112,11 @@ class TreeSearchAgent(DefaultAgent):
         
         if self.repo_has_changes():
             self.commit_changes(f"Commit after: {best_node.last_action['command']}")
-            print(f">> New commit created: {best_node.commit}")
+            
 
         best_node.commit = self.get_commit_hash()
-            
+        print(f">> New commit created: {best_node.commit}")
+        
         return best_node.observation
     
         
