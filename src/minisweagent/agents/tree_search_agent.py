@@ -64,7 +64,7 @@ class TreeSearchAgent(DefaultAgent):
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         branch_name = f"{base_name}-{timestamp}"
         self.env.execute(f"git checkout -b {branch_name}")
-        self.add_message("system", f'```bash\ngit checkout -b {branch_name}\n```')
+        self.add_message("system", f'THOUGHT: Detached HEAD, need to create a new branch to continue work. ```bash\ngit checkout -b {branch_name}\n```')
         return branch_name
 
     def repo_has_changes(self):
@@ -78,7 +78,7 @@ class TreeSearchAgent(DefaultAgent):
         self.env.execute("git add .")
         self.env.execute(f'git commit -m "{message}"')
         output = self.env.execute("git rev-parse HEAD")
-        self.add_message("system", f'```bash\ngit add . >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
+        self.add_message("system", f'THOUGHT: Commit changes of the last command.\n\n```bash\ngit add . >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
         observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
         return output["output"].strip()
@@ -87,6 +87,11 @@ class TreeSearchAgent(DefaultAgent):
         """Get the current commit hash"""
         return self.env.execute("git rev-parse HEAD")["output"].strip()
 
+    def is_detached_head(self):
+        """Check if the current HEAD is detached"""
+        status = self.env.execute("git status")
+        return "HEAD detached at" in status["output"]
+    
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
         actions = self.generate_new_actions()
@@ -108,14 +113,7 @@ class TreeSearchAgent(DefaultAgent):
             
             print("Best node is not a child of the current node, re-adjusting the tree...")
             flag = False
-            
-        if best_node.parent is None or best_node.parent.branch is None or best_node.parent.is_expanded():
-            best_node.branch = self.create_unique_branch(base_name="ts-agent")
-            print(f">> Switching to branch: {best_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
-        else:
-            best_node.branch = best_node.parent.branch
-            print(f">> Staying on branch: {best_node.branch}")
-        
+                    
         if best_node.last_action["extra"]:
             self.add_message("assistant", **{"content": best_node.last_action["thought"], "extra": best_node.last_action.get("extra", {})})
         else:
@@ -127,10 +125,18 @@ class TreeSearchAgent(DefaultAgent):
         best_node.observation = observation
         
         if self.repo_has_changes():
+            if best_node.parent is None or best_node.parent.branch is None or self.is_detached_head():
+                best_node.branch = self.create_unique_branch(base_name="ts-agent")
+                print(f">> Switching to branch: {best_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
+            else:
+                best_node.branch = best_node.parent.branch
+                print(f">> Staying on branch: {best_node.branch}")
+            
             best_node.commit = self.commit_changes(f"Commit after: {best_node.last_action['command']}")
             print(f">> New commit created: {best_node.commit}")
         else:
             best_node.commit = self.get_commit_hash()
+            best_node.branch = best_node.parent.branch
             print(f">> No changes detected, staying on commit: {best_node.commit}")
             
         return best_node.observation
