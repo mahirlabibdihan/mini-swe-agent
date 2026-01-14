@@ -89,8 +89,8 @@ class TreeSearchAgent(DefaultAgent):
                 self.tree_node = best_node
                 break
             elif self.backtrack_manager is not None:
-                self.tree_node = best_node
                 BacktrackManager.backtrack(self.tree_node, best_node, self.env)
+                self.tree_node = best_node
                 self.n_backtracks += 1
                 break
             
