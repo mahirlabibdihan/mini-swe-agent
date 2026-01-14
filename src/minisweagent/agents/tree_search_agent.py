@@ -98,7 +98,9 @@ class TreeSearchAgent(DefaultAgent):
                 self.tree_node = best_node
                 break
             elif self.backtrack_manager is not None:
-                BacktrackManager.backtrack(self.tree_node, best_node.parent, self.env)
+                print(f">> Backtracking to [{best_node.parent.branch}:{best_node.parent.commit[:7]}]")
+                # env.execute(f"git checkout {best_node.parent.branch}")
+                self.env.execute(f"git checkout {best_node.parent.commit}")
                 self.tree_node = best_node
                 self.n_backtracks += 1
                 self.add_message("system", f"```bash\ngit checkout {best_node.parent.commit}\n```")
