@@ -38,18 +38,39 @@ class TreeSearchAgent(DefaultAgent):
         self.tree_node.branch = self.env.execute("git branch --show-current")["output"].strip()
         self.tree_node.commit = self.get_commit_hash()
         
-    def generate_new_actions(self):
-        actions = []
+    def generate_new_nodes(self) -> List[TreeSearchNode]:
+        nodes = []
+        # flag = True
         for _ in range(self.config.breadth_limit):
             action = self.parse_action(self.query())
-            actions.append({
-                "command": action["action"],
-                "thought": action["content"],
-                "extra": action["extra"]
-            })
             print(f"Generated action: {action['action']}")
+            
+            # Convert action to node
+            new_node = TreeSearchNode(
+                last_action={
+                    "command": action["action"],
+                    "thought": action["content"],
+                    "extra": action["extra"]
+                },
+            )
+            nodes.append(new_node)
+            
+            # Execute action to get observation
+            output = self.env.execute(action["action"])
+            observation = self.render_template(self.config.action_observation_template, output=output)
+            new_node.observation = observation
+            if self.repo_has_changes():
+                # Rollback changes
+                print(">> Write-task detected.")
+                # flag = False
+                self.env.execute("git restore .")
+                self.tree_node.has_write_child = True
+            
             time.sleep(2)  # To avoid rate limiting
-        return actions
+            # if flag:
+            #     print("No write-task detected, stopping further action generation.")
+            #     break
+        return nodes
     
     def execute_action(self, action: dict) -> dict:
         try:
@@ -97,11 +118,11 @@ class TreeSearchAgent(DefaultAgent):
     
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
-        actions = self.generate_new_actions()
+        tree_nodes = self.generate_new_nodes()
 
         flag = True
         while True:
-            best_node = self.adjust_tree(actions, add_actions=flag)
+            best_node = self.adjust_tree(tree_nodes, add_nodes=flag)
             if best_node.parent == self.tree_node:
                 self.tree_node = best_node
                 break
@@ -181,24 +202,17 @@ class TreeSearchAgent(DefaultAgent):
         response = self.model.query(self.messages)
         return response
     
-    def process_actions(self, actions: List[str]) -> List[dict]:
-        tree_nodes = ActionProcessor.convert_action_to_nodes(actions, self.tree_node)
+    def process_nodes(self, tree_nodes: List[str]) -> List[dict]:
         self.n_actions += len(self.tree_node.children)
-        
-        print(f"# {len(tree_nodes)} new actions generated at level {self.tree_node.level}:")
+        print(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
         for node in tree_nodes:
             print(f"- {node.last_action['command']}")
-            output = self.env.execute(node.last_action["command"])
-            observation = self.render_template(self.config.action_observation_template, output=output)
-            node.observation = observation # One-Step-Lookup
-            # Undo changes
-            self.env.execute("git restore .")
             
-        action_list = ActionProcessor.evaluate_actions(tree_nodes, self.extra_template_vars["task"])
-        final_action_list = ActionProcessor.merge_actions(action_list)
+        node_list = ActionProcessor.evaluate_nodes(tree_nodes, self.extra_template_vars["task"])
+        final_node_list = ActionProcessor.merge_nodes(node_list)
 
         reward_data = []
-        for score, new_node in final_action_list:
+        for score, new_node in final_node_list:
             self.n_explored += 1
             reward_data.append(
                 [
@@ -222,17 +236,25 @@ class TreeSearchAgent(DefaultAgent):
                 )
             )
             
-        return final_action_list
+        return final_node_list
     
-    def adjust_tree(self, actions, add_actions=True):
-        if add_actions:
-            actions = self.process_actions(actions)
+    def adjust_tree(self, tree_nodes, add_nodes=True):
+        if add_nodes or len(tree_nodes) > 0:
+            tree_nodes = self.process_nodes(tree_nodes)
+            
+            if self.tree_node.has_write_child:
+                for score, node in tree_nodes:
+                    self.tree_node.add_child(node)
+            else:
+                # Add the node with the highest score as a child
+                best_score, best_node = max(tree_nodes, key=lambda x: x[0])
+                self.tree_node.add_child(best_node)
+                
             if self.action_selector is not None:
-                self.action_selector.add_actions(self.tree_node, actions)
+                self.action_selector.add_actions(self.tree_node, tree_nodes)
         else:
-            actions = []
-
-        # Choose best action based on selection strategy
+            tree_nodes = []
+        # Choose best node based on selection strategy
         if self.action_selector is not None:
             best_node = self.action_selector.select_action(
                 self.tree_node, self.n_expanded
@@ -240,7 +262,7 @@ class TreeSearchAgent(DefaultAgent):
             return best_node
         else:
             # Default: choose the first action
-            if len(actions) == 0:
+            if len(tree_nodes) == 0:
                 raise RuntimeError("No actions to select from.")
-            return actions[0][1]
+            return tree_nodes[0][1]
     
