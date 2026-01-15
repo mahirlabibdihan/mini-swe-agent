@@ -249,6 +249,7 @@ class TreeSearchAgent(DefaultAgent):
                 # Add the node with the highest score as a child
                 best_score, best_node = max(tree_nodes, key=lambda x: x[0])
                 self.tree_node.add_child(best_node)
+                tree_nodes = [(best_score, best_node)]
                 
             if self.action_selector is not None:
                 self.action_selector.add_actions(self.tree_node, tree_nodes)
