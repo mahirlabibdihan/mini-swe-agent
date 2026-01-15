@@ -208,11 +208,11 @@ class TreeSearchAgent(DefaultAgent):
         for node in tree_nodes:
             print(f"- {node.last_action['command']}")
             
-        node_list = ActionProcessor.evaluate_nodes(tree_nodes, self.extra_template_vars["task"])
-        final_node_list = ActionProcessor.merge_nodes(node_list)
+        ActionProcessor.evaluate_nodes(tree_nodes, self.extra_template_vars["task"])
+        score_node_list = ActionProcessor.merge_nodes(tree_nodes)
 
         reward_data = []
-        for score, new_node in final_node_list:
+        for score, new_node in score_node_list:
             self.n_explored += 1
             reward_data.append(
                 [
@@ -236,7 +236,7 @@ class TreeSearchAgent(DefaultAgent):
                 )
             )
             
-        return final_node_list
+        return score_node_list
     
     def adjust_tree(self, tree_nodes, add_nodes=True):
         if add_nodes or len(tree_nodes) > 0:
