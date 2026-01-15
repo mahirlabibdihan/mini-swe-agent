@@ -212,6 +212,27 @@ Read more in our [documentation](https://mini-swe-agent.com/latest/):
 * [FAQ](https://mini-swe-agent.com/latest/faq/)
 * [Contribute!](https://mini-swe-agent.com/latest/contributing/)
 
+## SWE-Bench Evaluation
+
+```bash
+mini-extra swebench-ts-single \
+--model-class minisweagent.models.openrouter_model.OpenRouterModel --model openai/gpt-5-mini
+``
+```bash
+mini-extra swebench-ts --subset verified --split test \
+  --model-class minisweagent.models.openrouter_model.OpenRouterModel --model openai/gpt-5-mini \
+  --output output/verified.test.01/openai__gpt-5-mini --slice 0:5 --redo-existing
+```
+
+```bash
+python -m swebench.harness.run_evaluation \
+    --dataset_name princeton-nlp/SWE-bench_Verified \
+    --predictions_path output/verified.test.01/openai__gpt-5-mini/preds.json \
+    --max_workers 1 \
+    --run_id verified.test.01 \
+    --report_dir evaluation
+```
+
 ## Attribution
 
 If you found this work helpful, please consider citing the [SWE-agent paper](https://arxiv.org/abs/2405.15793) in your work:
