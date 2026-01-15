@@ -37,7 +37,7 @@ class TreeSearchAgent(DefaultAgent):
         
     def generate_new_nodes(self) -> List[TreeSearchNode]:
         nodes = []
-        flag = True
+        # flag = True
         for _ in range(self.config.breadth_limit):
             action = self.parse_action(self.query())
             print(f"Generated action: {action['action']}")
@@ -59,13 +59,14 @@ class TreeSearchAgent(DefaultAgent):
             if self.repo_has_changes():
                 # Rollback changes
                 print(">> Write-task detected.")
-                flag = False
+                # flag = False
                 self.env.execute("git restore .")
+                self.tree_node.has_write_child = True
             
             time.sleep(2)  # To avoid rate limiting
-            if flag:
-                print("No write-task detected, stopping further action generation.")
-                break
+            # if flag:
+            #     print("No write-task detected, stopping further action generation.")
+            #     break
         return nodes
     
     def execute_action(self, action: dict) -> dict:
@@ -215,10 +216,17 @@ class TreeSearchAgent(DefaultAgent):
         return final_node_list
     
     def adjust_tree(self, tree_nodes, add_nodes=True):
-        if add_nodes:
+        if add_nodes or len(tree_nodes) > 0:
             tree_nodes = self.process_nodes(tree_nodes)
-            for node, _ in tree_nodes:
-                self.tree_node.add_child(node)
+            
+            if self.tree_node.has_write_child:
+                for score, node in tree_nodes:
+                    self.tree_node.add_child(node)
+            else:
+                # Add the node with the highest score as a child
+                best_score, best_node = max(tree_nodes, key=lambda x: x[0])
+                self.tree_node.add_child(best_node)
+                
             if self.action_selector is not None:
                 self.action_selector.add_actions(self.tree_node, tree_nodes)
         else:
