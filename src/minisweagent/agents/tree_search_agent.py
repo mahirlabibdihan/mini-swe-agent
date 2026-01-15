@@ -35,6 +35,9 @@ class TreeSearchAgent(DefaultAgent):
         if self.action_selector is not None:
             self.action_selector.reset()
         
+        self.tree_node.branch = self.env.execute("git branch --show-current")["output"].strip()
+        self.tree_node.commit = self.get_commit_hash()
+        
     def generate_new_nodes(self) -> List[TreeSearchNode]:
         nodes = []
         # flag = True
@@ -143,13 +146,34 @@ class TreeSearchAgent(DefaultAgent):
         else:
             self.add_message("system", best_node.last_action["thought"])
         
+        # If this is a terminating action,
+        # self.env.execute(f"git checkout {self.tree_root.branch}")
+        # self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
+        
+        # Undo
+        # git restore . 
+        # git checkout -
+        
+        potential_termination = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in best_node.last_action["command"]
+        
+        if potential_termination:
+            print(">> Potentially terminating action detected, preparing final output...")
+            self.env.execute(f"git checkout {self.tree_root.branch}")
+            self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
+            
         output = self.get_observation(best_node.last_action["command"])
+        
+        if potential_termination:
+            print(">> Wasn't terminating after all, reverting to previous state.")
+            self.env.execute("git restore .")
+            self.env.execute(f"git checkout -")
+            
         observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
         best_node.observation = observation
         
         if self.repo_has_changes():
-            if best_node.parent is None or best_node.parent.branch is None or self.is_detached_head():
+            if best_node.parent.branch == self.tree_root.branch or self.is_detached_head():
                 best_node.branch = self.create_unique_branch(base_name="ts-agent")
                 print(f">> Switching to branch: {best_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
             else:
@@ -165,7 +189,6 @@ class TreeSearchAgent(DefaultAgent):
             
         return best_node.observation
     
-        
     def get_observation(self, action: dict) -> dict:
         """Execute the action and return the observation."""
         self.n_expanded += 1
