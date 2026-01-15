@@ -160,6 +160,7 @@ class TreeSearchAgent(DefaultAgent):
             print(">> Potentially terminating action detected, preparing final output...")
             self.env.execute(f"git checkout {self.tree_root.branch}")
             self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
+            self.add_message("system", "THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply\n```")
             
         output = self.get_observation(best_node.last_action["command"])
         
@@ -167,6 +168,7 @@ class TreeSearchAgent(DefaultAgent):
             print(">> Wasn't terminating after all, reverting to previous state.")
             self.env.execute("git restore .")
             self.env.execute(f"git checkout -")
+            self.add_message("system", "THOUGHT: Reverting changes as the submission failed.\n\n```bash\ngit restore . && git checkout -\n```")
             
         observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
