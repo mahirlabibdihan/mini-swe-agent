@@ -177,7 +177,7 @@ class TreeSearchAgent(DefaultAgent):
             self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
             self.add_message("system", "THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply\n```")
             
-        if best_node.last_action["command"] is None:
+        if best_node.last_action["command"] is None or (not potential_termination and not best_node.modifies_code): # For read-only action, no need to re-execute
             observation = best_node.observation
         else:
             output = self.get_observation(best_node.last_action["command"])
