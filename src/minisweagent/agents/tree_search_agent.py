@@ -43,25 +43,31 @@ class TreeSearchAgent(DefaultAgent):
         nodes = []
         # flag = True
         for i in range(self.config.breadth_limit):
-            action = self.parse_action(self.query())
-            print(f"Generated action #{i+1}: {action['action']}")
-            
-            # Convert action to node
-            new_node = TreeSearchNode(
-                last_action={
-                    "command": action["action"],
-                    "thought": action["content"],
-                    "extra": action["extra"]
-                },
-            )
-            nodes.append(new_node)
-            
             # Execute action to get observation
             try:
+                response = self.query()
+                action = self.parse_action(response)
+                print(f"Generated action #{i+1}: {action['action']}")
                 output = self.env.execute(action["action"])
                 observation = self.render_template(self.config.action_observation_template, output=output)
+                new_node = TreeSearchNode(
+                    last_action={
+                        "command": action["action"],
+                        "thought": action["content"],
+                        "extra": action["extra"]
+                    },
+                )
             except NonTerminatingException as e:
                 observation = str(e)
+                new_node = TreeSearchNode(
+                    last_action={
+                        "command": None,
+                        "thought": response["content"],
+                        "extra": response["extra"]
+                    },
+                )
+            # Convert action to node
+            nodes.append(new_node)
 
             new_node.observation = observation
             if self.repo_has_changes():
