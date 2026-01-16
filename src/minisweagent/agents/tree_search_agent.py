@@ -60,6 +60,7 @@ class TreeSearchAgent(DefaultAgent):
                     self.env.execute("git checkout -")
                 
                 observation = self.render_template(self.config.action_observation_template, output=output)
+                # Convert action to node
                 new_node = TreeSearchNode(
                     last_action={
                         "command": action["action"],
@@ -69,6 +70,7 @@ class TreeSearchAgent(DefaultAgent):
                 )
             except NonTerminatingException as e:
                 observation = str(e)
+                # Convert action to node
                 new_node = TreeSearchNode(
                     last_action={
                         "command": None,
@@ -79,12 +81,14 @@ class TreeSearchAgent(DefaultAgent):
             except (TimeoutError, subprocess.TimeoutExpired) as e:
                 output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
                 observation = self.render_template(self.config.timeout_template, action=action["action"], output=output)
-            # Convert action to node
             
-
             new_node.observation = observation
-            if self.has_finished(output):
-                new_node.is_terminating = True
+            
+            # Check for terminating action
+            lines = output.get("output", "").lstrip().splitlines(keepends=True)
+            if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
+                new_node.is_terminating = True   
+            # Check for code modifications
             elif self.repo_has_changes():
                 new_node.modifies_code = True
                 # Rollback changes
