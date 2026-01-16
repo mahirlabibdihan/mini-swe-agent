@@ -145,9 +145,7 @@ class TreeSearchAgent(DefaultAgent):
         """Stage all changes and commit"""
         print(">> Committing changes to the repository...")
         output = self.env.execute("git add .")
-        print(output["output"])
         output = self.env.execute(f'git commit -m "{message}"')
-        print(output["output"])
         
         output = self.env.execute("git rev-parse HEAD")
         self.add_message("system", f'THOUGHT: Commit changes of the last command.\n\n```bash\ngit add . >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
@@ -220,7 +218,7 @@ class TreeSearchAgent(DefaultAgent):
                 best_node.branch = best_node.parent.branch
                 print(f">> Staying on branch: {best_node.branch}")
             
-            best_node.commit = self.commit_changes(f"Commit after: {best_node.last_action['command']}")
+            best_node.commit = self.commit_changes()
             print(f">> New commit created: {best_node.commit}")
         else:
             best_node.commit = self.get_commit_hash()
