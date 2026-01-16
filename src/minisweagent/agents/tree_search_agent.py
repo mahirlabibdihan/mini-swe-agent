@@ -144,8 +144,11 @@ class TreeSearchAgent(DefaultAgent):
     def commit_changes(self, message="Automated commit"):
         """Stage all changes and commit"""
         print(">> Committing changes to the repository...")
-        self.env.execute("git add .")
-        self.env.execute(f'git commit -m "{message}"')
+        output = self.env.execute("git add .")
+        print(output["output"])
+        output = self.env.execute(f'git commit -m "{message}"')
+        print(output["output"])
+        
         output = self.env.execute("git rev-parse HEAD")
         self.add_message("system", f'THOUGHT: Commit changes of the last command.\n\n```bash\ngit add . >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
         observation = self.render_template(self.config.action_observation_template, output=output)
