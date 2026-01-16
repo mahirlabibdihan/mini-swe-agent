@@ -229,17 +229,16 @@ class TreeSearchAgent(DefaultAgent):
         messages = []
         curr = self.tree_node
         while curr.last_action is not None:
-            messages.append({
-                "role": "user", 
-                "content": curr.observation, 
-                "timestamp": time.time(),
-            })
+            messages.append(
+                {
+                    "role": "user", 
+                    "content": curr.observation, 
+                }
+            )
             messages.append(
                 {
                     "role": "assistant",
                     "content": curr.last_action["thought"],
-                    "extra": curr.last_action.get("extra", {}),
-                    "timestamp": time.time(),
                 }
             )   
             curr = curr.parent
