@@ -70,6 +70,9 @@ class TreeSearchAgent(DefaultAgent):
                 )
             except NonTerminatingException as e:
                 observation = str(e)
+                output = {
+                    "output": observation
+                }
                 # Convert action to node
                 new_node = TreeSearchNode(
                     last_action={
