@@ -1,6 +1,6 @@
 from minisweagent.agents.action_queue_manager import ActionQueueManager
 from minisweagent.agents.tree_search_node import TreeSearchNode
-
+from minisweagent.agents.action_analyzer import is_terminating
 
 class ActionSelector:
     frontier_budget: int = 4
@@ -29,8 +29,8 @@ class ActionSelector:
             print(f"Queue size {self.action_queue_manager.length()}. Adding new actions...")
             
         for score, new_node in actions:
-            if new_node.level >= self.max_depth:
-                print(f"Non-terminating Node {new_node.last_action['code']} exceeded max depth {self.max_depth}, skipping...")
+            if not is_terminating(new_node.last_action) and new_node.level >= self.max_depth:
+                print(f"Non-terminating Node {new_node.last_action['command']} exceeded max depth {self.max_depth}, skipping...")
                 new_node.prune()
                 continue
             self.action_queue_manager.push(-score, new_node)

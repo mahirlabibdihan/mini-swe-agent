@@ -3,6 +3,7 @@ from minisweagent.agents.tree_search_node import TreeSearchNode
 from minisweagent.agents.action_selector import ActionSelector
 from minisweagent.agents.action_processor import ActionProcessor
 from minisweagent.agents.backtrack_manager import BacktrackManager
+from minisweagent.agents.action_analyzer import is_terminating
 from typing import List, Any, Optional
 from tabulate import tabulate
 import time
@@ -155,7 +156,7 @@ class TreeSearchAgent(DefaultAgent):
         # git restore . 
         # git checkout -
         
-        potential_termination = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in best_node.last_action["command"]
+        potential_termination = is_terminating(best_node.last_action)
         
         if potential_termination:
             print(">> Potentially terminating action detected, preparing final output...")
