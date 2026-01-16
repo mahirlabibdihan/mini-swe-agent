@@ -87,6 +87,7 @@ class TreeSearchAgent(DefaultAgent):
             # Check for terminating action
             lines = output.get("output", "").lstrip().splitlines(keepends=True)
             if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
+                print(">> Terminating action detected.")
                 new_node.is_terminating = True   
             # Check for code modifications
             elif self.repo_has_changes():
