@@ -48,7 +48,17 @@ class TreeSearchAgent(DefaultAgent):
                 response = self.query()
                 action = self.parse_action(response)
                 print(f"Generated action #{i+1}: {action['action']}")
+                
+                # Be-aware of potential terminating actions
+                potential_termination = is_terminating(action)
+                if potential_termination:
+                    self.env.execute(f"git checkout {self.tree_root.branch}")
+                    self.env.execute(f"git diff {self.tree_root.branch}..{self.tree_node.branch} | git apply")
                 output = self.env.execute(action["action"])
+                if potential_termination:
+                    self.env.execute("git restore .")
+                    self.env.execute("git checkout -")
+                
                 observation = self.render_template(self.config.action_observation_template, output=output)
                 new_node = TreeSearchNode(
                     last_action={
@@ -70,16 +80,23 @@ class TreeSearchAgent(DefaultAgent):
                 output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
                 observation = self.render_template(self.config.timeout_template, action=action["action"], output=output)
             # Convert action to node
-            nodes.append(new_node)
+            
 
             new_node.observation = observation
-            if self.repo_has_changes():
+            if self.has_finished(output):
+                new_node.is_terminating = True
+            elif self.repo_has_changes():
                 new_node.modifies_code = True
                 # Rollback changes
                 print(">> Write-task detected.")
                 # flag = False
                 self.env.execute("git restore .")
                 self.tree_node.has_write_child = True
+            
+            if new_node.is_terminating != potential_termination:
+                print(">> Warning: Invalid terminating action detected. Skipping this action...")
+            else:
+                nodes.append(new_node)
             
             time.sleep(2)  # To avoid rate limiting
             # if flag:
@@ -156,39 +173,23 @@ class TreeSearchAgent(DefaultAgent):
             print("Best node is not a child of the current node, re-adjusting the tree...")
             flag = False
                     
+        
+        if best_node.is_terminating:
+            self.env.execute(f"git checkout {self.tree_root.branch}")
+            self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
+            self.add_message("system", "THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply\n```")
+        
         if best_node.last_action["extra"]:
             self.add_message("assistant", **{"content": best_node.last_action["thought"], "extra": best_node.last_action.get("extra", {})})
         else:
             self.add_message("system", best_node.last_action["thought"])
-        
-        # If this is a terminating action,
-        # self.env.execute(f"git checkout {self.tree_root.branch}")
-        # self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
-        
-        # Undo
-        # git restore . 
-        # git checkout -
-        
-        potential_termination = is_terminating(best_node.last_action)
-        
-        if potential_termination:
-            print(">> Potentially terminating action detected, preparing final output...")
-            self.env.execute(f"git checkout {self.tree_root.branch}")
-            self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
-            self.add_message("system", "THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply\n```")
             
-        if best_node.last_action["command"] is None or (not potential_termination and not best_node.modifies_code): # For read-only action, no need to re-execute
+        if best_node.last_action["command"] is None or (not best_node.is_terminating and not best_node.modifies_code): # For read-only action, no need to re-execute
             observation = best_node.observation
         else:
             output = self.get_observation(best_node.last_action["command"])
             observation = self.render_template(self.config.action_observation_template, output=output)
-        
-        if potential_termination:
-            print(">> Wasn't terminating after all, reverting to previous state.")
-            self.env.execute("git restore .")
-            self.env.execute(f"git checkout -")
-            self.add_message("system", "THOUGHT: Reverting changes as the submission failed.\n\n```bash\ngit restore . && git checkout -\n```")
-            
+
         self.add_message("user", observation)
         best_node.observation = observation
         
