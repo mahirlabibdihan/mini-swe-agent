@@ -50,7 +50,7 @@ class TreeSearchAgent(DefaultAgent):
                 print(f"Generated action #{i+1}: {action['action']}")
                 
                 # Be-aware of potential terminating actions
-                potential_termination = is_terminating(action)
+                potential_termination = is_terminating(action['action'])
                 if potential_termination:
                     self.env.execute(f"git checkout {self.tree_root.branch}")
                     self.env.execute(f"git diff {self.tree_root.branch}..{self.tree_node.branch} | git apply")
