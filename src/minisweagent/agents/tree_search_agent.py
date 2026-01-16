@@ -66,6 +66,9 @@ class TreeSearchAgent(DefaultAgent):
                         "extra": response["extra"]
                     },
                 )
+            except (TimeoutError, subprocess.TimeoutExpired) as e:
+                output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
+                observation = self.render_template(self.config.timeout_template, action=action["action"], output=output)
             # Convert action to node
             nodes.append(new_node)
 
