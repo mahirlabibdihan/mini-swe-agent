@@ -190,6 +190,7 @@ class TreeSearchAgent(DefaultAgent):
         else:
             self.add_message("system", best_node.last_action["thought"])
             
+        print(f">> Executing selected action: {best_node.last_action['command']}")
         if best_node.last_action["command"] is None or (not best_node.is_terminating and not best_node.modifies_code): # For read-only action, no need to re-execute
             observation = best_node.observation
         else:
