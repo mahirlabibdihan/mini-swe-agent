@@ -201,7 +201,37 @@ class TreeSearchAgent(DefaultAgent):
         """Query the model and return the response."""
         if 0 < self.config.step_limit <= self.model.n_calls or 0 < self.config.cost_limit <= self.model.cost:
             raise LimitsExceeded()
-        response = self.model.query(self.messages)
+        
+        messages = []
+        curr = self.tree_node
+        while curr.last_action is not None:
+            self.messages.append({
+                "role": "user", 
+                "content": curr.observation, 
+                "timestamp": time.time(),
+            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": curr.last_action["thought"],
+                    "extra": curr.last_action.get("extra", {}),
+                    "timestamp": time.time(),
+                }
+            )   
+            curr = curr.parent
+        
+        messages.append({
+            "role": "user",
+            "content": self.render_template(self.config.instance_template),
+            "timestamp": time.time(),
+        })
+        messages.append({
+            "role": "system",
+            "content": self.render_template(self.config.system_template),
+            "timestamp": time.time(),
+        })
+        messages.reverse()
+        response = self.model.query(messages)
         return response
     
     def process_nodes(self, tree_nodes: List[str]) -> List[dict]:
