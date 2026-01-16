@@ -132,6 +132,9 @@ class TreeSearchAgent(DefaultAgent):
     def repo_has_changes(self):
         """Check if there are any unstaged or uncommitted changes"""
         observation = self.env.execute("git status --porcelain")
+        if bool(observation["output"]):
+            print(">> Repository has unstaged or uncommitted changes.")
+            print(observation["output"])
         return bool(observation["output"])
     
     def commit_changes(self, message="Automated commit"):
