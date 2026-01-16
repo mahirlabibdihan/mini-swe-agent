@@ -42,9 +42,9 @@ class TreeSearchAgent(DefaultAgent):
     def generate_new_nodes(self) -> List[TreeSearchNode]:
         nodes = []
         # flag = True
-        for _ in range(self.config.breadth_limit):
+        for i in range(self.config.breadth_limit):
             action = self.parse_action(self.query())
-            print(f"Generated action: {action['action']}")
+            print(f"Generated action #{i+1}: {action['action']}")
             
             # Convert action to node
             new_node = TreeSearchNode(
