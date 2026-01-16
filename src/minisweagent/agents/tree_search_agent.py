@@ -174,7 +174,11 @@ class TreeSearchAgent(DefaultAgent):
             self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
             self.add_message("system", "THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply\n```")
             
-        output = self.get_observation(best_node.last_action["command"])
+        if best_node.last_action["command"] is None:
+            observation = best_node.observation
+        else:
+            output = self.get_observation(best_node.last_action["command"])
+            observation = self.render_template(self.config.action_observation_template, output=output)
         
         if potential_termination:
             print(">> Wasn't terminating after all, reverting to previous state.")
@@ -182,7 +186,6 @@ class TreeSearchAgent(DefaultAgent):
             self.env.execute(f"git checkout -")
             self.add_message("system", "THOUGHT: Reverting changes as the submission failed.\n\n```bash\ngit restore . && git checkout -\n```")
             
-        observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
         best_node.observation = observation
         
@@ -262,7 +265,7 @@ class TreeSearchAgent(DefaultAgent):
                 [
                     (
                         (new_node.last_action["command"][:100] + "...")
-                        if len(new_node.last_action["command"]) > 100
+                        if new_node.last_action is not None and len(new_node.last_action["command"]) > 100
                         else new_node.last_action["command"]
                     ),
                     f"{new_node.value:.6f}",
