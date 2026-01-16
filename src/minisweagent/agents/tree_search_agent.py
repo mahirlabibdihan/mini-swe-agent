@@ -44,6 +44,7 @@ class TreeSearchAgent(DefaultAgent):
         # flag = True
         for i in range(self.config.breadth_limit):
             # Execute action to get observation
+            potential_termination = False
             try:
                 response = self.query()
                 action = self.parse_action(response)
@@ -81,7 +82,7 @@ class TreeSearchAgent(DefaultAgent):
                         "extra": response["extra"]
                     },
                 )
-                print(f">> Invalid Response: {observation}")
+                print(f">> Invalid Response: {response}")
             except (TimeoutError, subprocess.TimeoutExpired) as e:
                 output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
                 observation = self.render_template(self.config.timeout_template, action=action["action"], output=output)
