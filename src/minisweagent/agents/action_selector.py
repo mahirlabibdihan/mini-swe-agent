@@ -10,10 +10,12 @@ class ActionSelector:
     def __init__(self):
         self.action_queue_manager = ActionQueueManager(frontier_budget=self.frontier_budget)
         self.n_prune = 0
+        self.n_submissions = 0
         
     def reset(self):
         self.action_queue_manager.reset()
         self.n_prune = 0
+        self.n_submissions = 0
         
     @classmethod
     def configure(cls, frontier_budget=4, max_depth=20):
@@ -29,7 +31,9 @@ class ActionSelector:
             print(f"Queue size {self.action_queue_manager.length()}. Adding new actions...")
             
         for score, new_node in actions:
-            if not is_terminating(new_node.last_action) and new_node.level >= self.max_depth:
+            if is_terminating(new_node.last_action):
+                self.n_submissions += 1
+            if new_node.level >= self.max_depth:
                 print(f"Non-terminating Node {new_node.last_action['command']} exceeded max depth {self.max_depth}, skipping...")
                 new_node.prune()
                 continue

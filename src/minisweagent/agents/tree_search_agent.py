@@ -207,7 +207,7 @@ class TreeSearchAgent(DefaultAgent):
         messages = []
         curr = self.tree_node
         while curr.last_action is not None:
-            self.messages.append({
+            messages.append({
                 "role": "user", 
                 "content": curr.observation, 
                 "timestamp": time.time(),
