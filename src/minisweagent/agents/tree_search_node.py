@@ -13,6 +13,7 @@ class TreeSearchNode:
         self.visible = True
         self.level = 0
         self.has_write_child = False
+        self.modifies_code = False
         
     def add_child(self, child_node):
         self.children.append(child_node)

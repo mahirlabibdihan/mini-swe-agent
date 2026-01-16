@@ -60,6 +60,7 @@ class TreeSearchAgent(DefaultAgent):
             observation = self.render_template(self.config.action_observation_template, output=output)
             new_node.observation = observation
             if self.repo_has_changes():
+                new_node.modifies_code = True
                 # Rollback changes
                 print(">> Write-task detected.")
                 # flag = False
@@ -174,7 +175,7 @@ class TreeSearchAgent(DefaultAgent):
         self.add_message("user", observation)
         best_node.observation = observation
         
-        if self.repo_has_changes():
+        if best_node.modifies_code:
             if best_node.parent.branch == self.tree_root.branch or self.is_detached_head():
                 best_node.branch = self.create_unique_branch(base_name="ts-agent")
                 print(f">> Switching to branch: {best_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
@@ -273,15 +274,14 @@ class TreeSearchAgent(DefaultAgent):
     def adjust_tree(self, tree_nodes, add_nodes=True):
         if add_nodes or len(tree_nodes) > 0:
             tree_nodes = self.process_nodes(tree_nodes)
-            
-            if self.tree_node.has_write_child:
+            # Add the node with the highest score as a child
+            best_score, best_node = max(tree_nodes, key=lambda x: x[0])
+            if best_node.modifies_code:
                 for score, node in tree_nodes:
                     self.tree_node.add_child(node)
             else:
-                # Add the node with the highest score as a child
-                best_score, best_node = max(tree_nodes, key=lambda x: x[0])
                 self.tree_node.add_child(best_node)
-                tree_nodes = [(best_score, best_node)]
+                tree_nodes = [(best_score, best_node)]  
                 
             if self.action_selector is not None:
                 self.action_selector.add_actions(self.tree_node, tree_nodes)
