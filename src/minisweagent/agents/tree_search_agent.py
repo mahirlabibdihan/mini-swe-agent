@@ -57,8 +57,12 @@ class TreeSearchAgent(DefaultAgent):
             nodes.append(new_node)
             
             # Execute action to get observation
-            output = self.env.execute(action["action"])
-            observation = self.render_template(self.config.action_observation_template, output=output)
+            try:
+                output = self.env.execute(action["action"])
+                observation = self.render_template(self.config.action_observation_template, output=output)
+            except NonTerminatingException as e:
+                observation = str(e)
+
             new_node.observation = observation
             if self.repo_has_changes():
                 new_node.modifies_code = True
