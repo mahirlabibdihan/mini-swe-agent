@@ -150,6 +150,8 @@ class TreeSearchAgent(DefaultAgent):
         self.add_message("system", f'THOUGHT: Commit changes of the last command.\n\n```bash\ngit add . >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
         observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
+        if self.repo_has_changes():
+            raise Exception(">> Warning: Changes still detected after commit.")
         return output["output"].strip()
         
     def get_commit_hash(self):
