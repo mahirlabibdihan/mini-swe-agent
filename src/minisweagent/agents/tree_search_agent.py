@@ -267,9 +267,9 @@ class TreeSearchAgent(DefaultAgent):
             reward_data.append(
                 [
                     (
-                        (new_node.last_action["command"][:100] + "...")
-                        if new_node.last_action is not None and len(new_node.last_action["command"]) > 100
-                        else new_node.last_action["command"]
+                        new_node.last_action["command"]
+                        if new_node.last_action is None or len(new_node.last_action["command"]) <= 100
+                        else (new_node.last_action["command"][:100] + "...")
                     ),
                     f"{new_node.value:.6f}",
                     f"{score:.6f}",
