@@ -8,7 +8,7 @@ import yaml
 from datasets import load_dataset
 
 from minisweagent import global_config_dir
-from minisweagent.agents.interactive import InteractiveAgent
+from minisweagent.agents.interactive_ts import InteractiveAgent
 from minisweagent.agents.tree_search_agent import TreeSearchAgent
 from minisweagent.agents.action_selector import ActionSelector
 from minisweagent.agents.backtrack_manager import BacktrackManager
@@ -61,7 +61,7 @@ def main(
     if exit_immediately:
         config.setdefault("agent", {})["confirm_exit"] = False
     env = get_sb_environment(config, instance)
-    agent = TreeSearchAgent(
+    agent = InteractiveAgent(
         get_model(model_name, config.get("model", {})),
         env,
         **({"mode": "yolo"} | config.get("agent", {})),
