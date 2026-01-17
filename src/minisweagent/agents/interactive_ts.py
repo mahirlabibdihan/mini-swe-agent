@@ -29,7 +29,7 @@ class InteractiveAgentConfig(TreeSearchAgentConfig):
     """Whether to confirm actions."""
     whitelist_actions: list[str] = []
     """Never confirm actions that match these regular expressions."""
-    confirm_exit: bool = True
+    confirm_exit: bool = False
     """If the agent wants to finish, do we ask for confirmation from user?"""
 
 
@@ -45,7 +45,7 @@ class InteractiveAgent(TreeSearchAgent):
         super().add_message(role, content, **kwargs)
         if role == "assistant":
             console.print(
-                f"\n[red][bold]mini-swe-agent[/bold] (step [bold]{self.model.n_calls}[/bold], [bold]${self.model.cost:.2f}[/bold]):[/red]\n",
+                f"\n[red][bold]mini-swe-agent[/bold] (step [bold]{self.n_expanded + 1}[/bold], [bold]${self.model.cost:.2f}[/bold]):[/red]\n",
                 end="",
                 highlight=False,
             )

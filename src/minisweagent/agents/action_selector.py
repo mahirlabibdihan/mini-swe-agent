@@ -48,6 +48,7 @@ class ActionSelector:
             },
         )
         node.value = 0.0
+        node.is_terminating = True
         curr_node.add_child(node)
         return node
     
@@ -56,7 +57,7 @@ class ActionSelector:
             return None
         return self._make_terminating_action(curr_node)
     
-    def select_action(self, curr_node, n_expanded):
+    def _select_action(self, curr_node, n_expanded):
         # 1. Handle max-step pruning
         node = self._handle_max_steps(n_expanded, curr_node)
         if node: return node
@@ -66,4 +67,8 @@ class ActionSelector:
         else:
             best_node = self._make_terminating_action(curr_node)
             print("Action queue empty. Forcing terminating action.")
+        return best_node
+    
+    def select_action(self, curr_node, n_expanded):
+        best_node = self._select_action(curr_node, n_expanded)
         return best_node

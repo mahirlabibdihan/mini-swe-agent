@@ -1,4 +1,4 @@
-from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, Submitted, ExecutionTimeoutError
+from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, TerminatingException, Submitted, ExecutionTimeoutError
 from minisweagent.agents.tree_search_node import TreeSearchNode   
 from minisweagent.agents.action_selector import ActionSelector
 from minisweagent.agents.action_processor import ActionProcessor
@@ -9,6 +9,7 @@ from tabulate import tabulate
 import time
 import subprocess
 import datetime
+import json
 
 class TreeSearchAgentConfig(AgentConfig):
     search_depth: int = 5
@@ -24,20 +25,67 @@ class TreeSearchAgent(DefaultAgent):
                  config_class=TreeSearchAgentConfig, 
                  **kwargs):
         super().__init__(*args, config_class=config_class, **kwargs)
-        self.tree_root = self.tree_node = TreeSearchNode(
-            last_action=None,
-        )
+        self.tree_root = self.tree_node = None
         self.n_actions = 0
         self.n_explored = 0
         self.n_expanded = 0
         self.n_backtracks = 0
         self.action_selector = action_selector
         self.backtrack_manager = backtrack_manager
+        
+    
+    def run(self, task: str, **kwargs) -> tuple[str, str]:
+        """Run step() until agent is finished. Return exit status & message"""
+        self.extra_template_vars |= {"task": task, **kwargs}
+        self.messages = []
+        
         if self.action_selector is not None:
             self.action_selector.reset()
+            
+        self.tree_root = self.tree_node = TreeSearchNode(
+            last_action=None,
+        )
         
-        self.tree_node.branch = self.env.execute("git branch --show-current")["output"].strip()
+        self.tree_root.branch = self.env.execute("git branch --show-current")["output"].strip()
+        self.tree_root.commit = self.get_commit_hash()
+        
+        if self.repo_has_changes():
+            self.env.execute(f"git checkout -b ts-agent-root")
+            self.env.execute(f"git add .")
+            self.env.execute(f"git commit -m 'Committing changes before starting tree search'")
+            action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git add . >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' >/dev/null 2>&1 && git rev-parse HEAD"
+            self.add_message("system", f"THOUGHT: Need to commit changes before starting tree search.\n\n```bash\n{action}\n```")
+        else:
+            self.env.execute(f"git checkout -b ts-agent-root")
+            action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git rev-parse HEAD"
+            self.add_message("system", f"THOUGHT: Switching to new branch before starting tree search.\n\n```bash\n{action}\n```")
+            
+        output = self.env.execute("git rev-parse HEAD")
+        observation = self.render_template(self.config.action_observation_template, output=output)
+        self.add_message("user", observation)
+        
+        self.tree_node = TreeSearchNode(
+            last_action=None
+        )
+        self.tree_root.add_child(
+            self.tree_node
+        )
+        self.tree_node.branch = f"ts-agent-root"
         self.tree_node.commit = self.get_commit_hash()
+        self.tree_node.observation = self.render_template(self.config.instance_template)
+              
+        self.add_message("system", self.render_template(self.config.system_template))
+        self.add_message("user", self.render_template(self.config.instance_template))
+        while True:
+            try:
+                self.step()
+            except NonTerminatingException as e:
+                self.add_message("user", str(e))
+                self.tree_node.observation = str(e)
+            except TerminatingException as e:
+                self.add_message("user", str(e))
+                self.tree_node.observation = str(e)
+                return type(e).__name__, str(e)
         
     def generate_new_nodes(self) -> List[TreeSearchNode]:
         nodes = []
@@ -116,14 +164,14 @@ class TreeSearchAgent(DefaultAgent):
     
     def execute_action(self, action: dict) -> dict:
         try:
-            output = self.env.execute(action)
+            output = self.env.execute(action["action"])
         except (TimeoutError, subprocess.TimeoutExpired) as e:
             output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
             raise ExecutionTimeoutError(
-                self.render_template(self.config.timeout_template, action=action, output=output)
+                self.render_template(self.config.timeout_template, action=action["action"], output=output)
             )
         self.has_finished(output)
-        return output | {"action": action}
+        return output | {"action": action["action"]}
     
     def create_unique_branch(self, base_name="auto"):
         """Create a new branch with a unique name"""
@@ -158,6 +206,10 @@ class TreeSearchAgent(DefaultAgent):
     def get_commit_hash(self):
         """Get the current commit hash"""
         return self.env.execute("git rev-parse HEAD")["output"].strip()
+    
+    def get_branch_head(self, branch_name):
+        """Get the commit hash of the head of a branch"""
+        return self.env.execute(f"git rev-parse {branch_name}")["output"].strip()
 
     def is_detached_head(self):
         """Check if the current HEAD is detached"""
@@ -178,7 +230,11 @@ class TreeSearchAgent(DefaultAgent):
                 if best_node.parent.commit != self.tree_node.commit:
                     print(f">> Backtracking to [{best_node.parent.branch} {best_node.parent.commit[:7]}]")
                     # env.execute(f"git checkout {best_node.parent.branch}")
-                    self.env.execute(f"git checkout {best_node.parent.commit}")
+                    if self.get_branch_head(best_node.parent.branch) != best_node.parent.commit:
+                        self.env.execute(f"git checkout {best_node.parent.commit}")
+                    else:
+                        self.env.execute(f"git checkout {best_node.parent.branch}")
+                        
                     self.add_message("system", f"THOUGHT: Backtrack needed to execute the highest-rewarded action.\n\n```bash\ngit checkout {best_node.parent.commit}\n```")
                 print(">> Backtrack needed to execute the highest-rewarded action.")
                     
@@ -193,25 +249,31 @@ class TreeSearchAgent(DefaultAgent):
         if best_node.is_terminating:
             self.env.execute(f"git checkout {self.tree_root.branch}")
             self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
-            self.add_message("system", "THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply\n```")
-        
+            self.env.execute(f"git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D") # Clean up temp branches
+            self.add_message("system", "THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D\n```")
+            self.action_selector.reset()
+ 
         if best_node.last_action["extra"]:
             self.add_message("assistant", **{"content": best_node.last_action["thought"], "extra": best_node.last_action.get("extra", {})})
-        else:
+        else: # Action generated by System
             self.add_message("system", best_node.last_action["thought"])
             
         print(f">> Executing selected action: {best_node.last_action['command']}")
         if best_node.last_action["command"] is None or (not best_node.is_terminating and not best_node.modifies_code): # For read-only action, no need to re-execute
             observation = best_node.observation
         else:
-            output = self.get_observation(best_node.last_action["command"])
+            output = self.get_observation(
+                {
+                    "action": best_node.last_action["command"]
+                }
+            )
             observation = self.render_template(self.config.action_observation_template, output=output)
 
         self.add_message("user", observation)
         best_node.observation = observation
         
         if best_node.modifies_code:
-            if best_node.parent.branch == self.tree_root.branch or self.is_detached_head():
+            if self.is_detached_head():
                 best_node.branch = self.create_unique_branch(base_name="ts-agent")
                 print(f">> Switching to branch: {best_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
             else:
@@ -240,13 +302,15 @@ class TreeSearchAgent(DefaultAgent):
         
         messages = []
         curr = self.tree_node
-        while curr.last_action is not None:
+        while True:
             messages.append(
                 {
                     "role": "user", 
                     "content": curr.observation, 
                 }
             )
+            if curr.last_action is None:
+                break
             messages.append(
                 {
                     "role": "assistant",
@@ -256,14 +320,8 @@ class TreeSearchAgent(DefaultAgent):
             curr = curr.parent
         
         messages.append({
-            "role": "user",
-            "content": self.render_template(self.config.instance_template),
-            "timestamp": time.time(),
-        })
-        messages.append({
             "role": "system",
             "content": self.render_template(self.config.system_template),
-            "timestamp": time.time(),
         })
         messages.reverse()
         response = self.model.query(messages)
