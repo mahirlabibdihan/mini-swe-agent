@@ -29,7 +29,7 @@ class InteractiveAgentConfig(TreeSearchAgentConfig):
     """Whether to confirm actions."""
     whitelist_actions: list[str] = []
     """Never confirm actions that match these regular expressions."""
-    confirm_exit: bool = False
+    confirm_exit: bool = True
     """If the agent wants to finish, do we ask for confirmation from user?"""
 
 

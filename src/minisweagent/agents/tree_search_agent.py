@@ -32,7 +32,32 @@ class TreeSearchAgent(DefaultAgent):
         self.n_backtracks = 0
         self.action_selector = action_selector
         self.backtrack_manager = backtrack_manager
+    
+    def create_pseudo_root(self):
+        if self.repo_has_changes():
+            self.env.execute(f"git checkout -b ts-agent-root")
+            self.env.execute(f"git add .")
+            self.env.execute(f"git commit -m 'Committing changes before starting tree search'")
+            action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git add . >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' >/dev/null 2>&1 && git rev-parse HEAD"
+            self.add_message("system", f"THOUGHT: Need to commit changes before starting tree search.\n\n```bash\n{action}\n```")
+        else:
+            self.env.execute(f"git checkout -b ts-agent-root")
+            action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git rev-parse HEAD"
+            self.add_message("system", f"THOUGHT: Switching to new branch before starting tree search.\n\n```bash\n{action}\n```")
+            
+        output = self.env.execute("git rev-parse HEAD")
+        observation = self.render_template(self.config.action_observation_template, output=output)
+        self.add_message("user", observation)
         
+        new_node = TreeSearchNode(
+            last_action=None
+        )
+        self.tree_node.add_child(
+            new_node
+        )
+        new_node.branch = f"ts-agent-root"
+        new_node.commit = self.get_commit_hash() 
+        self.tree_node = new_node
     
     def run(self, task: str, **kwargs) -> tuple[str, str]:
         """Run step() until agent is finished. Return exit status & message"""
@@ -49,29 +74,7 @@ class TreeSearchAgent(DefaultAgent):
         self.tree_root.branch = self.env.execute("git branch --show-current")["output"].strip()
         self.tree_root.commit = self.get_commit_hash()
         
-        if self.repo_has_changes():
-            self.env.execute(f"git checkout -b ts-agent-root")
-            self.env.execute(f"git add .")
-            self.env.execute(f"git commit -m 'Committing changes before starting tree search'")
-            action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git add . >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' >/dev/null 2>&1 && git rev-parse HEAD"
-            self.add_message("system", f"THOUGHT: Need to commit changes before starting tree search.\n\n```bash\n{action}\n```")
-        else:
-            self.env.execute(f"git checkout -b ts-agent-root")
-            action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git rev-parse HEAD"
-            self.add_message("system", f"THOUGHT: Switching to new branch before starting tree search.\n\n```bash\n{action}\n```")
-            
-        output = self.env.execute("git rev-parse HEAD")
-        observation = self.render_template(self.config.action_observation_template, output=output)
-        self.add_message("user", observation)
-        
-        self.tree_node = TreeSearchNode(
-            last_action=None
-        )
-        self.tree_root.add_child(
-            self.tree_node
-        )
-        self.tree_node.branch = f"ts-agent-root"
-        self.tree_node.commit = self.get_commit_hash()
+        self.create_pseudo_root()
         self.tree_node.observation = self.render_template(self.config.instance_template)
               
         self.add_message("system", self.render_template(self.config.system_template))
@@ -218,6 +221,9 @@ class TreeSearchAgent(DefaultAgent):
     
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
+        if self.tree_node.is_terminating:
+            self.create_pseudo_root()
+            
         tree_nodes = self.generate_new_nodes()
 
         flag = True
@@ -268,7 +274,8 @@ class TreeSearchAgent(DefaultAgent):
                 }
             )
             observation = self.render_template(self.config.action_observation_template, output=output)
-
+        self.n_expanded += 1
+        
         self.add_message("user", observation)
         best_node.observation = observation
         
@@ -291,7 +298,6 @@ class TreeSearchAgent(DefaultAgent):
     
     def get_observation(self, action: dict) -> dict:
         """Execute the action and return the observation."""
-        self.n_expanded += 1
         output = self.execute_action(action)
         return output
     
@@ -302,21 +308,21 @@ class TreeSearchAgent(DefaultAgent):
         
         messages = []
         curr = self.tree_node
-        while True:
-            messages.append(
-                {
-                    "role": "user", 
-                    "content": curr.observation, 
-                }
-            )
-            if curr.last_action is None:
-                break
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": curr.last_action["thought"],
-                }
-            )   
+        while curr is not None:
+            if curr.observation is not None:
+                messages.append(
+                    {
+                        "role": "user", 
+                        "content": curr.observation, 
+                    }
+                )
+            if curr.last_action is not None:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": curr.last_action["thought"],
+                    }
+                )   
             curr = curr.parent
         
         messages.append({
@@ -324,6 +330,11 @@ class TreeSearchAgent(DefaultAgent):
             "content": self.render_template(self.config.system_template),
         })
         messages.reverse()
+        
+        # save to file for debugging
+        with open("debug_messages.json", "w") as f:
+            json.dump(messages, f, indent=4)
+            
         response = self.model.query(messages)
         return response
     
