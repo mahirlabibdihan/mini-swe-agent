@@ -27,8 +27,6 @@ from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.utils.save import save_traj
 from minisweagent.utils.log import add_file_handler, logger
 from minisweagent.agents.tree_search_agent import TreeSearchAgent
-from minisweagent.agents.action_selector import ActionSelector
-from minisweagent.agents.backtrack_manager import BacktrackManager
 
 _HELP_TEXT = """Run mini-SWE-agent on SWEBench instances.
 
@@ -49,9 +47,7 @@ DATASET_MAPPING = {
     "_test": "klieret/swe-bench-dummy-test-dataset",
 }
 
-
 _OUTPUT_FILE_LOCK = threading.Lock()
-
 
 class ProgressTrackingAgent(TreeSearchAgent):
     """Simple wrapper around DefaultAgent that provides progress updates."""
@@ -151,8 +147,6 @@ def process_instance(
             progress_manager=progress_manager,
             instance_id=instance_id,
             **config.get("agent", {}),
-            action_selector=ActionSelector(),
-            backtrack_manager=BacktrackManager()
         )
         exit_status, result = agent.run(task)
     except Exception as e:

@@ -17,8 +17,7 @@ from rich.rule import Rule
 from minisweagent import global_config_dir
 from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, Submitted
 from minisweagent.agents.tree_search_agent import TreeSearchAgentConfig, TreeSearchAgent
-from minisweagent.agents.action_selector import ActionSelector
-from minisweagent.agents.backtrack_manager import BacktrackManager
+from minisweagent.agents.reward_guided_agent import RewardGuidedAgentConfig, RewardGuidedAgent
 
 console = Console(highlight=False)
 prompt_session = PromptSession(history=FileHistory(global_config_dir / "interactive_history.txt"))
@@ -36,8 +35,8 @@ class InteractiveAgentConfig(TreeSearchAgentConfig):
 class InteractiveAgent(TreeSearchAgent):
     _MODE_COMMANDS_MAPPING = {"/u": "human", "/c": "confirm", "/y": "yolo"}
 
-    def __init__(self, *args, config_class=InteractiveAgentConfig, action_selector: ActionSelector = None, backtrack_manager: BacktrackManager = None, **kwargs):
-        super().__init__(*args, config_class=config_class, action_selector=action_selector, backtrack_manager=backtrack_manager, **kwargs)
+    def __init__(self, *args, config_class=InteractiveAgentConfig, **kwargs):
+        super().__init__(*args, config_class=config_class, **kwargs)
         self.cost_last_confirmed = 0.0
 
     def add_message(self, role: str, content: str, **kwargs):

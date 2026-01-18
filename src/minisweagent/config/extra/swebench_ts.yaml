@@ -229,7 +229,10 @@ agent:
     Please try another command and make sure to avoid those requiring interactive input.
   step_limit: 250
   cost_limit: 3.
-
+  depth_limit: 20
+  branching_factor: 3
+  frontier_budget: 4
+  
 environment:
   cwd: "/testbed"
   timeout: 60

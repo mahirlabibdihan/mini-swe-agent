@@ -1,23 +1,23 @@
 import heapq
 
-class ActionQueueManager:
-    def __init__(self, frontier_budget):
-        self.initial_frontier_budget = frontier_budget
-        self.frontier_budget = frontier_budget
+class Frontier:
+    def __init__(self, budget):
+        self.initial_budget = budget
+        self.budget = budget
         self.queue = []
 
     def reset(self):
-        self.frontier_budget = self.initial_frontier_budget
+        self.budget = self.initial_budget
         self.queue = []
             
     def clear(self):
         self.queue = []
         
     def reduce_budget(self):
-        self.frontier_budget = max(1, self.frontier_budget - 1)
+        self.budget = max(1, self.budget - 1)
         
     def is_out_of_budget(self):
-        return len(self.queue) > self.frontier_budget
+        return len(self.queue) > self.budget
 
     def push(self, priority, node):
         heapq.heappush(self.queue, (priority, node))

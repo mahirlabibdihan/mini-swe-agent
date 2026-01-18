@@ -9,9 +9,6 @@ from datasets import load_dataset
 
 from minisweagent import global_config_dir
 from minisweagent.agents.interactive_ts import InteractiveAgent
-from minisweagent.agents.tree_search_agent import TreeSearchAgent
-from minisweagent.agents.action_selector import ActionSelector
-from minisweagent.agents.backtrack_manager import BacktrackManager
 from minisweagent.config import builtin_config_dir, get_config_path
 from minisweagent.models import get_model
 from minisweagent.run.extra.swebench import (
@@ -65,8 +62,6 @@ def main(
         get_model(model_name, config.get("model", {})),
         env,
         **({"mode": "yolo"} | config.get("agent", {})),
-        action_selector=ActionSelector(),
-        backtrack_manager=BacktrackManager()
     )
 
     exit_status, result, extra_info = None, None, None
