@@ -230,7 +230,7 @@ agent:
   step_limit: 250
   cost_limit: 3.
   depth_limit: 20
-  branching_factor: 3
+  branching_factor: 2
   frontier_budget: 4
   
 environment:
