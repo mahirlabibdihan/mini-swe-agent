@@ -26,7 +26,6 @@ class RewardGuidedAgent(DefaultAgent):
         self.n_actions = 0
         self.n_explored = 0
         self.n_expanded = 0
-        self.n_prune = 0
         self.n_submissions = 0
         self.frontier = Frontier(budget=self.config.branching_factor)
     
@@ -48,14 +47,7 @@ class RewardGuidedAgent(DefaultAgent):
         curr_node.add_child(node)
         return node
     
-    def add_actions_to_frontier(self, actions, check_budget=True):
-        if check_budget and self.frontier.is_out_of_budget():
-            self.frontier.minimize()
-            self.n_prune += 1
-            print(f"Queue size {self.frontier.length()}. Tree pruned.")
-        else:
-            print(f"Queue size {self.frontier.length()}. Adding new actions...")
-            
+    def add_actions_to_frontier(self, actions):
         for score, new_node in actions:
             if is_terminating(new_node.last_action):
                 self.n_submissions += 1
@@ -366,7 +358,7 @@ class RewardGuidedAgent(DefaultAgent):
             
         return score_node_list
     
-    def update_frontier(self, tree_nodes):
+    def update_frontier(self, tree_nodes):            
         best_score, best_node = max(tree_nodes, key=lambda x: x[0])            
         self.add_actions_to_frontier([(best_score, best_node)])
     

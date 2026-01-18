@@ -22,6 +22,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                  **kwargs):
         super().__init__(*args, config_class=config_class, **kwargs)
         self.n_backtracks = 0
+        self.n_prune = 0
 
     def backtrack(self, target_node):
         if target_node.commit != self.tree_node.commit:
@@ -112,6 +113,13 @@ class TreeSearchAgent(RewardGuidedAgent):
         return "HEAD detached at" in status["output"]
     
     def update_frontier(self, tree_nodes):
+        if self.frontier.is_out_of_budget():
+            self.frontier.minimize()
+            self.n_prune += 1
+            print(f"Queue size {self.frontier.length()}. Tree pruned.")
+        else:
+            print(f"Queue size {self.frontier.length()}. Adding new actions...")
+              
         best_score, best_node = max(tree_nodes, key=lambda x: x[0])
         
         if not best_node.modifies_code:
