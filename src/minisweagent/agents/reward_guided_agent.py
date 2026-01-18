@@ -29,6 +29,24 @@ class RewardGuidedAgent(DefaultAgent):
         self.n_submissions = 0
         self.frontier = Frontier(budget=self.config.branching_factor)
     
+    def run(self, task: str, **kwargs) -> tuple[str, str]:
+        """Run step() until agent is finished. Return exit status & message"""
+        self.extra_template_vars |= {"task": task, **kwargs}
+        self.messages = []
+        
+        self._reset()
+        
+        while True:
+            try:
+                self.step()
+            except NonTerminatingException as e:
+                self.add_message("user", str(e))
+                self.tree_node.observation = str(e)
+            except TerminatingException as e:
+                self.add_message("user", str(e))
+                self.tree_node.observation = str(e)
+                return type(e).__name__, str(e)
+            
     def _handle_max_steps(self):
         if self.n_expanded < self.config.step_limit:
             return None
@@ -47,7 +65,7 @@ class RewardGuidedAgent(DefaultAgent):
         curr_node.add_child(node)
         return node
     
-    def add_actions_to_frontier(self, actions):
+    def _add_actions_to_frontier(self, actions):
         for score, new_node in actions:
             if is_terminating(new_node.last_action):
                 self.n_submissions += 1
@@ -57,7 +75,7 @@ class RewardGuidedAgent(DefaultAgent):
                 continue
             self.frontier.push(-score, new_node)
             
-    def select_action(self):
+    def _select_action(self):
         # 1. Handle max-step pruning
         node = self._handle_max_steps()
         if node: return node
@@ -70,12 +88,12 @@ class RewardGuidedAgent(DefaultAgent):
         
         return best_node
 
-    def get_commit_hash(self):
+    def _get_commit_hash(self):
         """Get the current commit hash"""
         return self.env.execute("git rev-parse HEAD")["output"].strip()
     
-    def create_pseudo_root(self):
-        if self.repo_has_changes():
+    def _create_pseudo_root(self):
+        if self._repo_has_changes():
             self.env.execute(f"git checkout -b ts-agent-root")
             self.env.execute(f"git add .")
             self.env.execute(f"git commit -m 'Committing changes before starting tree search'")
@@ -97,10 +115,24 @@ class RewardGuidedAgent(DefaultAgent):
             new_node
         )
         new_node.branch = f"ts-agent-root"
-        new_node.commit = self.get_commit_hash() 
+        new_node.commit = self._get_commit_hash() 
         self.tree_node = new_node
         
-    def reset(self):
+    def _commit_changes(self, message="Automated commit"):
+        """Stage all changes and commit"""
+        print(">> Committing changes to the repository...")
+        output = self.env.execute("git add .")
+        output = self.env.execute(f'git commit -m "{message}"')
+        
+        output = self.env.execute("git rev-parse HEAD")
+        self.add_message("system", f'THOUGHT: Commit changes of the last command.\n\n```bash\ngit add . >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
+        observation = self.render_template(self.config.action_observation_template, output=output)
+        self.add_message("user", observation)
+        if self._repo_has_changes():
+            raise Exception(">> Warning: Changes still detected after commit.")
+        return output["output"].strip()
+    
+    def _reset(self):
         self.frontier.reset()
         self.tree_root = self.tree_node = TreeSearchNode(
             last_action=None,
@@ -112,42 +144,10 @@ class RewardGuidedAgent(DefaultAgent):
         self.tree_node.observation = self.render_template(self.config.instance_template)
         
         self.tree_root.branch = self.env.execute("git branch --show-current")["output"].strip()
-        self.tree_root.commit = self.get_commit_hash()
-        self.create_pseudo_root()
-    
-    def run(self, task: str, **kwargs) -> tuple[str, str]:
-        """Run step() until agent is finished. Return exit status & message"""
-        self.extra_template_vars |= {"task": task, **kwargs}
-        self.messages = []
-        
-        self.reset()
-        
-        while True:
-            try:
-                self.step()
-            except NonTerminatingException as e:
-                self.add_message("user", str(e))
-                self.tree_node.observation = str(e)
-            except TerminatingException as e:
-                self.add_message("user", str(e))
-                self.tree_node.observation = str(e)
-                return type(e).__name__, str(e)
-    
-    def commit_changes(self, message="Automated commit"):
-        """Stage all changes and commit"""
-        print(">> Committing changes to the repository...")
-        output = self.env.execute("git add .")
-        output = self.env.execute(f'git commit -m "{message}"')
-        
-        output = self.env.execute("git rev-parse HEAD")
-        self.add_message("system", f'THOUGHT: Commit changes of the last command.\n\n```bash\ngit add . >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
-        observation = self.render_template(self.config.action_observation_template, output=output)
-        self.add_message("user", observation)
-        if self.repo_has_changes():
-            raise Exception(">> Warning: Changes still detected after commit.")
-        return output["output"].strip()
-    
-    def repo_has_changes(self):
+        self.tree_root.commit = self._get_commit_hash()
+        self._create_pseudo_root()
+       
+    def _repo_has_changes(self):
         """Check if there are any unstaged or uncommitted changes"""
         observation = self.env.execute("git status --porcelain")
         if bool(observation["output"]):
@@ -155,7 +155,7 @@ class RewardGuidedAgent(DefaultAgent):
             print(observation["output"])
         return bool(observation["output"])
        
-    def generate_new_nodes(self) -> List[TreeSearchNode]:
+    def _generate_new_nodes(self) -> List[TreeSearchNode]:
         nodes = []
         # flag = True
         for i in range(self.config.branching_factor):
@@ -211,7 +211,7 @@ class RewardGuidedAgent(DefaultAgent):
                 print(">> Terminating action detected.")
                 new_node.is_terminating = True   
             # Check for code modifications
-            elif self.repo_has_changes():
+            elif self._repo_has_changes():
                 new_node.modifies_code = True
                 # Rollback changes
                 print(">> Write-task detected.")
@@ -230,55 +230,58 @@ class RewardGuidedAgent(DefaultAgent):
             #     break
         return nodes
     
+    def _stage_to_main_branch(self):
+        self.env.execute(f"git checkout {self.tree_root.branch}")
+        self.env.execute(f"git diff {self.tree_root.branch}..{self.tree_node.parent.branch} | git apply")
+        self.env.execute(f"git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D") # Clean up temp branches
+        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{self.tree_node.parent.branch} | git apply && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D\n```")
+            
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
         if self.tree_node.is_terminating:
-            self.create_pseudo_root()
+            self._create_pseudo_root()
             
-        tree_nodes = self.generate_new_nodes()
-        tree_nodes = self.update_tree(tree_nodes)
-        self.update_frontier(tree_nodes)
-        best_node = self.select_action()
+        tree_nodes = self._generate_new_nodes()
+        tree_nodes = self._update_tree(tree_nodes)
+        self._update_frontier(tree_nodes)
+        best_node = self._select_action()
         self.tree_node = best_node
         
         self.frontier.reset()
         
-        if best_node.is_terminating:
-            self.env.execute(f"git checkout {self.tree_root.branch}")
-            self.env.execute(f"git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply")
-            self.env.execute(f"git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D") # Clean up temp branches
-            self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{best_node.parent.branch} | git apply && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D\n```")
+        if self.tree_node.is_terminating:
+            self._stage_to_main_branch()
             self.frontier.reset()
  
-        if best_node.last_action["extra"]:
-            self.add_message("assistant", **{"content": best_node.last_action["thought"], "extra": best_node.last_action.get("extra", {})})
+        if self.tree_node.last_action["extra"]:
+            self.add_message("assistant", **{"content": self.tree_node.last_action["thought"], "extra": self.tree_node.last_action.get("extra", {})})
         else: # Action generated by System
-            self.add_message("system", best_node.last_action["thought"])
+            self.add_message("system", self.tree_node.last_action["thought"])
             
-        print(f">> Executing selected action: {best_node.last_action['command']}")
-        if best_node.last_action["command"] is None or (not best_node.is_terminating and not best_node.modifies_code): # For read-only action, no need to re-execute
-            observation = best_node.observation
+        print(f">> Executing selected action: {self.tree_node.last_action['command']}")
+        if self.tree_node.last_action["command"] is None or (not self.tree_node.is_terminating and not self.tree_node.modifies_code): # For read-only action, no need to re-execute
+            observation = self.tree_node.observation
         else:
             output = self.get_observation(
                 {
-                    "action": best_node.last_action["command"]
+                    "action": self.tree_node.last_action["command"]
                 }
             )
             observation = self.render_template(self.config.action_observation_template, output=output)
         self.n_expanded += 1
         
         self.add_message("user", observation)
-        best_node.observation = observation
+        self.tree_node.observation = observation
         
-        best_node.branch = best_node.parent.branch
-        if best_node.modifies_code:
-            best_node.commit = self.commit_changes()
-            print(f">> New commit created: {best_node.commit}")
+        self.tree_node.branch = self.tree_node.parent.branch
+        if self.tree_node.modifies_code:
+            self.tree_node.commit = self._commit_changes()
+            print(f">> New commit created: {self.tree_node.commit}")
         else:
-            best_node.commit = self.get_commit_hash()
-            print(f">> No changes detected, staying on commit: {best_node.commit}")
+            self.tree_node.commit = self._get_commit_hash()
+            print(f">> No changes detected, staying on commit: {self.tree_node.commit}")
 
-        return best_node.observation
+        return self.tree_node.observation
     
     def get_observation(self, action: dict) -> dict:
         """Execute the action and return the observation."""
@@ -322,7 +325,7 @@ class RewardGuidedAgent(DefaultAgent):
         response = self.model.query(messages)
         return response
     
-    def process_nodes(self, tree_nodes: List[str]) -> List[dict]:
+    def _process_nodes(self, tree_nodes: List[str]) -> List[dict]:
         self.n_actions += len(self.tree_node.children)
         print(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
         for node in tree_nodes:
@@ -358,13 +361,13 @@ class RewardGuidedAgent(DefaultAgent):
             
         return score_node_list
     
-    def update_frontier(self, tree_nodes):            
+    def _update_frontier(self, tree_nodes):            
         best_score, best_node = max(tree_nodes, key=lambda x: x[0])            
-        self.add_actions_to_frontier([(best_score, best_node)])
+        self._add_actions_to_frontier([(best_score, best_node)])
     
-    def update_tree(self, tree_nodes):
+    def _update_tree(self, tree_nodes):
         if len(tree_nodes) > 0:
-            tree_nodes = self.process_nodes(tree_nodes)
+            tree_nodes = self._process_nodes(tree_nodes)
             # Add the node with the highest score as a child
             for score, node in tree_nodes:
                 self.tree_node.add_child(node)
