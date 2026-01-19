@@ -212,15 +212,8 @@ class SingleActionAgent(DefaultAgent):
     def _process_nodes(self, tree_nodes: List[str]) -> List[dict]:
         self.n_actions += len(self.tree_node.children)
         print(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
-        for node in tree_nodes:
-            print(f"- {node.last_action['command']}")
-            node.value = 0.0  # Reset value before evaluation
-
-        score_node_list = action_processor.merge_nodes(tree_nodes)
-
-        for score, new_node in score_node_list:
-            self.n_explored += 1
-            
+        score_node_list = [(0.0, tree_nodes[0])]
+        self.n_explored += 1
         return score_node_list
     
     def _update_frontier(self, tree_nodes: List[tuple[float, TreeSearchNode]]):            
