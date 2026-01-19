@@ -27,6 +27,7 @@ from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.utils.save import save_traj
 from minisweagent.utils.log import add_file_handler, logger
 from minisweagent.agents.tree_search_agent import TreeSearchAgent
+from minisweagent.agents.reward_model import RewardModel
 
 _HELP_TEXT = """Run mini-SWE-agent on SWEBench instances.
 
@@ -131,6 +132,7 @@ def process_instance(
     remove_from_preds_file(output_dir / "preds.json", instance_id)
     (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
     model = get_model(config=config.get("model", {}))
+    reward_model = RewardModel(get_model(config=config.get("reward_model", {})))
     task = instance["problem_statement"]
 
     progress_manager.on_instance_start(instance_id)
@@ -144,6 +146,7 @@ def process_instance(
         agent = ProgressTrackingAgent(
             model,
             env,
+            reward_model,
             progress_manager=progress_manager,
             instance_id=instance_id,
             **config.get("agent", {}),

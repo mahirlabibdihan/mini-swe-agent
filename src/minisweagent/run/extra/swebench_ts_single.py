@@ -17,6 +17,7 @@ from minisweagent.run.extra.swebench import (
 )
 from minisweagent.run.utils.save import save_traj
 from minisweagent.utils.log import logger
+from minisweagent.agents.reward_model import RewardModel
 
 app = typer.Typer(add_completion=False)
 
@@ -61,6 +62,7 @@ def main(
     agent = InteractiveAgent(
         get_model(model_name, config.get("model", {})),
         env,
+        RewardModel(get_model(model_name, config.get("reward_model", {}))),
         **({"mode": "yolo"} | config.get("agent", {})),
     )
 

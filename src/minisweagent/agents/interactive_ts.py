@@ -18,6 +18,7 @@ from minisweagent import global_config_dir
 from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, Submitted
 from minisweagent.agents.tree_search_agent import TreeSearchAgentConfig, TreeSearchAgent
 from minisweagent.agents.reward_guided_agent import RewardGuidedAgentConfig, RewardGuidedAgent
+from minisweagent.agents.single_action_agent import SingleActionAgentConfig, SingleActionAgent
 
 console = Console(highlight=False)
 prompt_session = PromptSession(history=FileHistory(global_config_dir / "interactive_history.txt"))

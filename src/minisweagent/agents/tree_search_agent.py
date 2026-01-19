@@ -4,6 +4,7 @@ from minisweagent.agents.reward_guided_agent import RewardGuidedAgentConfig, Rew
 import minisweagent.agents.action_processor as action_processor
 from minisweagent.agents.frontier import Frontier
 from minisweagent.agents.action_analyzer import is_terminating
+from minisweagent.agents.reward_model import RewardModel
 from typing import List, Any, Optional
 from tabulate import tabulate
 import time
@@ -21,6 +22,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                  config_class=TreeSearchAgentConfig, 
                  **kwargs):
         super().__init__(*args, config_class=config_class, **kwargs)
+        self.frontier = Frontier(budget=self.config.frontier_budget)
         self.n_backtracks = 0
         self.n_prune = 0
 
@@ -109,7 +111,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         status = self.env.execute("git status")
         return "HEAD detached at" in status["output"]
     
-    def _update_frontier(self, tree_nodes):
+    def _update_frontier(self, tree_nodes: List[tuple[float, TreeSearchNode]]):
         if self.frontier.is_out_of_budget():
             self.frontier.minimize()
             self.n_prune += 1
