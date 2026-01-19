@@ -224,7 +224,7 @@ class SingleActionAgent(DefaultAgent):
         return score_node_list
     
     def _update_frontier(self, tree_nodes: List[tuple[float, TreeSearchNode]]):            
-        best_score, best_node = tree_nodes[0]          
+        best_score, best_node = tree_nodes[0]  # Single Action      
         self._add_actions_to_frontier([(best_score, best_node)])
     
     def _update_tree(self, tree_nodes):

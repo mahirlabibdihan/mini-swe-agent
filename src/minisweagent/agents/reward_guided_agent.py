@@ -255,7 +255,6 @@ class RewardGuidedAgent(SingleActionAgent):
             
         return score_node_list
     
-    def _update_frontier(self, tree_nodes: List[tuple[float, TreeSearchNode]]):            
-        best_score, best_node = max(tree_nodes, key=lambda x: x[0])            
-        self._add_actions_to_frontier([(best_score, best_node)])
+    def _update_frontier(self, tree_nodes: List[tuple[float, TreeSearchNode]]):                      
+        self._add_actions_to_frontier(tree_nodes)
     
