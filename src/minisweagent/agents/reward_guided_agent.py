@@ -214,7 +214,7 @@ class RewardGuidedAgent(SingleActionAgent):
 
         return self.tree_node.observation
     
-    def evaluate_nodes(self, node_list, task):
+    def _evaluate_nodes(self, node_list, task):
         for new_node in tqdm(node_list, desc="Evaluating nodes"):
             if new_node.value is None:
                 new_node.value = self.reward_model.compute_reward(new_node, task)
@@ -225,7 +225,7 @@ class RewardGuidedAgent(SingleActionAgent):
         for node in tree_nodes:
             print(f"- {node.last_action['command']}")
             
-        self.evaluate_nodes(tree_nodes, self.extra_template_vars["task"])
+        self._evaluate_nodes(tree_nodes, self.extra_template_vars["task"])
         score_node_list = action_processor.merge_nodes(tree_nodes)
 
         reward_data = []
@@ -257,4 +257,3 @@ class RewardGuidedAgent(SingleActionAgent):
     
     def _update_frontier(self, tree_nodes: List[tuple[float, TreeSearchNode]]):                      
         self._add_actions_to_frontier(tree_nodes)
-    

@@ -1,18 +1,11 @@
 from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, TerminatingException, Submitted, ExecutionTimeoutError
 from minisweagent.agents.tree_search_node import TreeSearchNode   
-import minisweagent.agents.action_processor as action_processor
 from minisweagent.agents.frontier import Frontier
 from minisweagent.agents.action_analyzer import is_terminating
 from typing import List, Any, Optional
 from tabulate import tabulate
 import time
-import subprocess
-import datetime
 import json
-from minisweagent import Model, Environment
-from minisweagent.agents.reward_model import RewardModel
-from tqdm import tqdm
-
 class SingleActionAgentConfig(AgentConfig):
     depth_limit: int = 20
     """The maximum depth allowed for any node."""
@@ -152,7 +145,7 @@ class SingleActionAgent(DefaultAgent):
             self.add_message("system", self.tree_node.last_action["thought"])
             
         print(f">> Executing selected action: {self.tree_node.last_action['command']}")
-        if self.tree_node.last_action["command"] is None and self.tree_node.observation is not None: # For read-only action, no need to re-execute
+        if self.tree_node.last_action["command"] is None and self.tree_node.observation is not None: # For invalid action, no need to re-execute
             observation = self.tree_node.observation
         else:
             output = self.get_observation(
@@ -211,7 +204,6 @@ class SingleActionAgent(DefaultAgent):
     
     def _process_nodes(self, tree_nodes: List[str]) -> List[dict]:
         self.n_actions += len(self.tree_node.children)
-        print(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
         score_node_list = [(0.0, tree_nodes[0])]
         self.n_explored += 1
         return score_node_list
