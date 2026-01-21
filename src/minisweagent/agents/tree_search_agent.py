@@ -1,6 +1,7 @@
 from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, TerminatingException, Submitted, ExecutionTimeoutError
 from minisweagent.agents.tree_search_node import TreeSearchNode   
 from minisweagent.agents.reward_guided_agent import RewardGuidedAgentConfig, RewardGuidedAgent
+from minisweagent.agents.single_action_agent import NoActionFound
 import minisweagent.agents.action_processor as action_processor
 from minisweagent.agents.frontier import Frontier
 from minisweagent.agents.action_analyzer import is_terminating
@@ -15,6 +16,11 @@ import json
 class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     frontier_budget: int = 4
     """The maximum number of nodes allowed in the action queue."""
+    epsilon: float = 0.3
+    selection_scope: str = "local"
+    """Scope for action selection: 'local' or 'global'."""
+    max_expansion: int = 5
+    """Maximum number of nodes to expand per step."""
 
 class TreeSearchAgent(RewardGuidedAgent):
     def __init__(self, 
@@ -34,25 +40,86 @@ class TreeSearchAgent(RewardGuidedAgent):
                 self.env.execute(f"git checkout {target_node.commit}")
             else:
                 self.env.execute(f"git checkout {target_node.branch}")
-                
-            self.add_message("system", f"THOUGHT: Backtrack needed to execute the highest-rewarded action.\n\n```bash\ngit checkout {target_node.commit}\n```")
-        print(">> Backtrack needed to execute the highest-rewarded action.")
-                
+            self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.commit}\n```")
+        
+        self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.")
+    
+    def is_promising(self, node: TreeSearchNode) -> bool:
+        """Check if a node is promising based on epsilon threshold."""
+        if self.config.epsilon is None or node.parent.value is None:
+            return True
+        return node.value >= node.parent.value - self.config.epsilon
+    
+    def _handle_max_steps(self):
+        if self.n_expanded < self.config.step_limit:
+            return None
+        return self._make_terminating_action(self.tree_node) # TODO: First go to the path with highest-rewarded edit
+    
+    def go_to_best_expandable_node(self):
+        best_node = best_node = max(
+            (n for n in self.node_map.values()
+            if n.merged_value is not None
+            and not n.is_terminating
+            and n.visible
+            and self.is_promising(n)
+            and len(n.children) < self.config.max_expansion),
+            key=lambda x: x.merged_value,
+            default=None
+        )
+        self._backtrack(best_node)
+        if best_node is not None:
+            self.tree_node = best_node
+        else:
+            self.tree_node = self.tree_root.children[0] # Fallback to first child of root
+            print(">> No expandable nodes found, reverting to root.")
+        
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
         if self.tree_node.is_terminating:
             self._create_pseudo_root()
             
-        tree_nodes = self._generate_new_nodes()
-        tree_nodes = self._update_tree(tree_nodes)
-        self._update_frontier(tree_nodes)
-        best_node = self._select_action()
-        if best_node.parent != self.tree_node:
-            self._backtrack(best_node.parent)          
-            self.n_backtracks += 1
+        tree_nodes = self._generate_new_nodes(min(self.config.branching_factor, self.config.max_expansion - len(self.tree_node.children)))
+        self._update_tree(tree_nodes)
+
+        self.tree_node.visits += 1
         
+        best_node = None       
+        while best_node is None:
+            if self.config.selection_scope == "local":
+                self.frontier.clear() # Local frontier only
+                
+            if self.config.selection_scope == "local" or self.tree_node.visits == 1: # Local or First visit
+                unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c)] # Unexecuted + Promising
+                self._update_frontier(unexecuted)
+            
+            if not self.frontier.empty():
+                best_node = self._select_action()
+                if best_node.parent != self.tree_node:
+                    self._backtrack(best_node.parent)          
+                    self.n_backtracks += 1   
+                    best_node.parent.visits += 1
+                    print(">> Backtrack needed to execute the highest-rewarded action.")
+                    
+            elif self.config.selection_scope == "local":
+                # Backtrack to parent
+                if self.tree_node.last_action is not None:
+                    self._backtrack(self.tree_node.parent)
+                    self.tree_node = self.tree_node.parent
+                    self.n_backtracks += 1
+                    self.tree_node.parent.visits += 1
+                    print(">> No promising actions locally, backtracking to parent node.")
+                else:
+                    # Go to the highest-rewarded node globally
+                    self.go_to_best_expandable_node()
+                    raise NoActionFound("No promising actions found locally, backtracking to best state.")
+                
+            else:
+                # Go to the highest-rewarded node globally
+                self.go_to_best_expandable_node()
+                raise NoActionFound("No promising actions found globally, backtracking to best state.")
+                
         self.tree_node = best_node
-  
+       
         if self.tree_node.is_terminating:
             self._stage_to_main_branch()
             self.frontier.reset()
@@ -76,6 +143,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         
         self.add_message("user", observation)
         self.tree_node.observation = observation
+        self.tree_node.executed = True
         
         if self.tree_node.modifies_code:
             if self._is_detached_head():
@@ -91,6 +159,9 @@ class TreeSearchAgent(RewardGuidedAgent):
             self.tree_node.commit = self._get_commit_hash()
             self.tree_node.branch = self.tree_node.parent.branch
             print(f">> No changes detected, staying on commit: {self.tree_node.commit}")
+            
+        with open("debug_tree.json", "w") as f:
+            json.dump(self.tree_root.to_json(), f, indent=4)
             
         return self.tree_node.observation
     
@@ -111,18 +182,20 @@ class TreeSearchAgent(RewardGuidedAgent):
         status = self.env.execute("git status")
         return "HEAD detached at" in status["output"]
     
-    def _update_frontier(self, tree_nodes: List[tuple[float, TreeSearchNode]]):
+    def _update_frontier(self, tree_nodes: List[TreeSearchNode]):
+        if len(tree_nodes) == 0:
+            return
         if self.frontier.is_out_of_budget():
             self.frontier.minimize()
             self.n_prune += 1
             print(f"Queue size {self.frontier.length()}. Tree pruned.")
         else:
             print(f"Queue size {self.frontier.length()}. Adding new actions...")
-              
-        best_score, best_node = max(tree_nodes, key=lambda x: x[0])
-        
-        if not best_node.modifies_code:
-            tree_nodes = [(best_score, best_node)]  
+            
+        # PRUNE READ Action
+        # best_node = max(tree_nodes, key=lambda x: x.merged_value)
+        # if not best_node.modifies_code:
+        #     tree_nodes = [best_node]  
             
         self._add_actions_to_frontier(tree_nodes)
     

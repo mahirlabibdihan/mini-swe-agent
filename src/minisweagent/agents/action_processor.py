@@ -3,7 +3,7 @@ from typing import List, Any, Optional
 from tqdm import tqdm
 import random
             
-def merge_nodes(node_list: List[tuple[float, TreeSearchNode]], merge_strategy = "sum") -> List[tuple[float, TreeSearchNode]]:
+def merge_nodes(node_list: List[tuple[float, TreeSearchNode]], merge_strategy = "sum") -> List[TreeSearchNode]:
     if merge_strategy == "none":
         return node_list
     
@@ -27,7 +27,13 @@ def merge_nodes(node_list: List[tuple[float, TreeSearchNode]], merge_strategy = 
             elif merge_strategy == "max":
                 new_score = max(existing_score, score)
             node_dict[command] = (new_score, best_node)
-            
+
     merged_node_list = list(node_dict.values())
-    return merged_node_list
+    
+    tree_nodes = []
+    for score, node in merged_node_list:
+        node.merged_value = score
+        tree_nodes.append(node)
+        
+    return tree_nodes
         

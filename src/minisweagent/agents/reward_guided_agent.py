@@ -49,9 +49,7 @@ class RewardGuidedAgent(SingleActionAgent):
         observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
         
-        new_node = TreeSearchNode(
-            last_action=None
-        )
+        new_node = self._create_node()
         self.tree_node.add_child(
             new_node
         )
@@ -87,10 +85,10 @@ class RewardGuidedAgent(SingleActionAgent):
             print(observation["output"])
         return bool(observation["output"])
        
-    def _generate_new_nodes(self) -> List[TreeSearchNode]:
+    def _generate_new_nodes(self, n_actions) -> List[TreeSearchNode]:
         nodes = []
         # flag = True
-        for i in range(self.config.branching_factor):
+        for i in range(n_actions):
             # Execute action to get observation
             potential_termination = False
             try:
@@ -110,7 +108,7 @@ class RewardGuidedAgent(SingleActionAgent):
                 
                 observation = self.render_template(self.config.action_observation_template, output=output)
                 # Convert action to node
-                new_node = TreeSearchNode(
+                new_node = self._create_node(
                     last_action={
                         "command": action["action"],
                         "thought": action["content"],
@@ -123,7 +121,7 @@ class RewardGuidedAgent(SingleActionAgent):
                     "output": observation
                 }
                 # Convert action to node
-                new_node = TreeSearchNode(
+                new_node = self._create_node(
                     last_action={
                         "command": None,
                         "thought": response["content"],
@@ -173,7 +171,7 @@ class RewardGuidedAgent(SingleActionAgent):
         if self.tree_node.is_terminating:
             self._create_pseudo_root()
             
-        tree_nodes = self._generate_new_nodes()
+        tree_nodes = self._generate_new_nodes(self.config.branching_factor)
         tree_nodes = self._update_tree(tree_nodes)
         self._update_frontier(tree_nodes)
         best_node = self._select_action()
@@ -203,7 +201,7 @@ class RewardGuidedAgent(SingleActionAgent):
         
         self.add_message("user", observation)
         self.tree_node.observation = observation
-        
+        self.tree_node.executed = True
         self.tree_node.branch = self.tree_node.parent.branch
         if self.tree_node.modifies_code:
             self.tree_node.commit = self._commit_changes()
@@ -219,17 +217,17 @@ class RewardGuidedAgent(SingleActionAgent):
             if new_node.value is None:
                 new_node.value = self.reward_model.compute_reward(new_node, task)
             
-    def _process_nodes(self, tree_nodes: List[str]) -> List[dict]:
+    def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)
         print(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
         for node in tree_nodes:
             print(f"- {node.last_action['command']}")
             
         self._evaluate_nodes(tree_nodes, self.extra_template_vars["task"])
-        score_node_list = action_processor.merge_nodes(tree_nodes)
+        tree_nodes = action_processor.merge_nodes(tree_nodes)
 
         reward_data = []
-        for score, new_node in score_node_list:
+        for new_node in tree_nodes:
             self.n_explored += 1
             reward_data.append(
                 [
@@ -239,7 +237,7 @@ class RewardGuidedAgent(SingleActionAgent):
                         else new_node.last_action["command"]
                     ),
                     f"{new_node.value:.6f}",
-                    f"{score:.6f}",
+                    f"{new_node.merged_value:.6f}",
                 ]
             )
         
@@ -253,7 +251,9 @@ class RewardGuidedAgent(SingleActionAgent):
                 )
             )
             
-        return score_node_list
+        return tree_nodes
     
-    def _update_frontier(self, tree_nodes: List[tuple[float, TreeSearchNode]]):                      
+    def _update_frontier(self, tree_nodes: List[TreeSearchNode]):  
+        if len(tree_nodes) == 0:
+            return                    
         self._add_actions_to_frontier(tree_nodes)

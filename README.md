@@ -217,7 +217,8 @@ Read more in our [documentation](https://mini-swe-agent.com/latest/):
 ```bash
 mini-extra swebench-ts-single \
 --model-class minisweagent.models.openrouter_model.OpenRouterModel --model openai/gpt-5-mini
-``
+```
+
 ```bash
 mini-extra swebench-ts --subset verified --split test \
   --model-class minisweagent.models.openrouter_model.OpenRouterModel --model openai/gpt-5-mini \

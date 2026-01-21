@@ -6,6 +6,10 @@ from typing import List, Any, Optional
 from tabulate import tabulate
 import time
 import json
+
+class NoActionFound(Exception):
+    """Raised when the agent has reached its cost or step limit."""
+    
 class SingleActionAgentConfig(AgentConfig):
     depth_limit: int = 20
     """The maximum depth allowed for any node."""
@@ -22,6 +26,7 @@ class SingleActionAgent(DefaultAgent):
         self.n_expanded = 0
         self.n_submissions = 0
         self.frontier = Frontier(budget=1)
+        self.node_map = {}
     
     def run(self, task: str, **kwargs) -> tuple[str, str]:
         """Run step() until agent is finished. Return exit status & message"""
@@ -33,6 +38,8 @@ class SingleActionAgent(DefaultAgent):
         while True:
             try:
                 self.step()
+            except NoActionFound as e:
+                self.add_message("system", str(e))
             except NonTerminatingException as e:
                 self.add_message("user", str(e))
                 self.tree_node.observation = str(e)
@@ -47,7 +54,7 @@ class SingleActionAgent(DefaultAgent):
         return self._make_terminating_action(self.tree_node)
     
     def _make_terminating_action(self, curr_node):
-        node = TreeSearchNode(
+        node = self._create_node(
             last_action={
                 "command": f"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached",
                 "thought": "THOUGHT: MAX STEPS REACHED\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
@@ -59,15 +66,15 @@ class SingleActionAgent(DefaultAgent):
         curr_node.add_child(node)
         return node
     
-    def _add_actions_to_frontier(self, actions):
-        for score, new_node in actions:
+    def _add_actions_to_frontier(self, actions: List[TreeSearchNode]):
+        for new_node in actions:
             if is_terminating(new_node.last_action):
                 self.n_submissions += 1
             if new_node.level >= self.config.depth_limit:
                 print(f"Non-terminating Node {new_node.last_action['command']} exceeded max depth {self.config.depth_limit}, skipping...")
                 new_node.prune()
                 continue
-            self.frontier.push(-score, new_node)
+            self.frontier.push(-new_node.merged_value, new_node)
             
     def _select_action(self):
         # 1. Handle max-step pruning
@@ -82,28 +89,30 @@ class SingleActionAgent(DefaultAgent):
         
         return best_node
     
+    def _create_node(self, last_action: dict = None) -> TreeSearchNode:
+        node = TreeSearchNode(
+            last_action=last_action,
+        )
+        self.node_map[node.id] = node
+        return node
     def _reset(self):
         self.frontier.reset()
-        self.tree_root = self.tree_node = TreeSearchNode(
-            last_action=None,
-        )
-        
+        self.tree_root = self.tree_node = self._create_node()        
         self.add_message("system", self.render_template(self.config.system_template))
         self.add_message("user", self.render_template(self.config.instance_template))
-        
         self.tree_node.observation = self.render_template(self.config.instance_template)
        
-    def _generate_new_nodes(self) -> List[TreeSearchNode]:
+    def _generate_new_nodes(self, n_actions) -> List[TreeSearchNode]:
         nodes = []
         # flag = True
-        for i in range(1):
+        for i in range(n_actions):
             # Execute action to get observation
             try:
                 response = self.query()
                 action = self.parse_action(response)
                 print(f"Generated action #{i+1}: {action['action']}")
                 # Convert action to node
-                new_node = TreeSearchNode(
+                new_node = self._create_node(
                     last_action={
                         "command": action["action"],
                         "thought": action["content"],
@@ -113,7 +122,7 @@ class SingleActionAgent(DefaultAgent):
             except NonTerminatingException as e:
                 observation = str(e)
                 # Convert action to node
-                new_node = TreeSearchNode(
+                new_node = self._create_node(
                     last_action={
                         "command": None,
                         "thought": response["content"],
@@ -131,7 +140,7 @@ class SingleActionAgent(DefaultAgent):
               
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
-        tree_nodes = self._generate_new_nodes()
+        tree_nodes = self._generate_new_nodes(1)
         tree_nodes = self._update_tree(tree_nodes)
         self._update_frontier(tree_nodes)
         best_node = self._select_action()
@@ -158,6 +167,7 @@ class SingleActionAgent(DefaultAgent):
         
         self.add_message("user", observation)
         self.tree_node.observation = observation
+        self.tree_node.executed = True
         return self.tree_node.observation
     
     def get_observation(self, action: dict) -> dict:
@@ -202,22 +212,20 @@ class SingleActionAgent(DefaultAgent):
         response = self.model.query(messages)
         return response
     
-    def _process_nodes(self, tree_nodes: List[str]) -> List[dict]:
+    def _process_nodes(self, tree_nodes: List[TreeSearchNode]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)
-        score_node_list = [(0.0, tree_nodes[0])]
-        self.n_explored += 1
-        return score_node_list
+        return tree_nodes
     
-    def _update_frontier(self, tree_nodes: List[tuple[float, TreeSearchNode]]):            
-        best_score, best_node = tree_nodes[0]  # Single Action      
-        self._add_actions_to_frontier([(best_score, best_node)])
+    def _update_frontier(self, tree_nodes: List[TreeSearchNode]):  
+        if len(tree_nodes) == 0:
+            return               
+        self._add_actions_to_frontier([tree_nodes[0]])
     
     def _update_tree(self, tree_nodes):
         if len(tree_nodes) > 0:
-            tree_nodes = self._process_nodes(tree_nodes)
-            # Add the node with the highest score as a child
-            for score, node in tree_nodes:
+            for node in tree_nodes:
                 self.tree_node.add_child(node)
-        
+            tree_nodes = self._process_nodes(tree_nodes)
+
         return tree_nodes
     

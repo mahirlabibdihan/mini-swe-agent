@@ -6,15 +6,17 @@ class TreeSearchNode:
         self.parent = None
         self.children = []
         self.value = None
+        self.merged_value = None
         self.commit = None
         self.branch = None
+        self.executed = False
         self.observation = None
         self.last_action = last_action
         self.visible = True
         self.level = 0
-        self.has_write_child = False
         self.modifies_code = False
         self.is_terminating = False
+        self.visits = 0
         
     def add_child(self, child_node):
         self.children.append(child_node)
@@ -29,3 +31,22 @@ class TreeSearchNode:
             if child.branch:
                 return True
         return False
+    
+    def to_json(self):
+        return [{
+            "id": self.id,
+            "value": self.value,
+            "merged_value": self.merged_value,
+            "level": self.level,
+            "commit": self.commit,
+            "branch": self.branch,
+            "executed": self.executed,
+            "visible": self.visible,
+            "visits": self.visits,
+            "last_action": {
+                "command": self.last_action["command"],
+                "thought": self.last_action["thought"],
+            } if self.last_action else None,
+            "observation": self.observation,
+            "children": [child.id for child in self.children],
+        }, *[node for child in self.children for node in child.to_json()]]

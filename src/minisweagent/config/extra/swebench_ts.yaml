@@ -231,7 +231,10 @@ agent:
   cost_limit: 3.
   depth_limit: 20
   branching_factor: 2
+  max_expansion: 5
   frontier_budget: 4
+  selection_scope: "local"
+  epsilon: 0.3
   
 environment:
   cwd: "/testbed"
@@ -249,7 +252,7 @@ model:
   model_class: openrouter
   model_kwargs:
     drop_params: true
-    temperature: 0.0
+    temperature: 0.7
 
 reward_model:
   model_name: "openai/gpt-5-mini"
