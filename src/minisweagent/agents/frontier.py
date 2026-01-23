@@ -32,4 +32,18 @@ class Frontier:
         return len(self.queue)
     
     def minimize(self):
-        pass
+        # path_score = []
+                
+        # for neg_score, node in self.queue:
+        #     path_score.append((node.get_path_value(), neg_score, node))
+        
+        # top_paths = heapq.nlargest(self.budget, path_score, key=lambda x: x[0])
+        
+        # # Rebuild queue
+        # self.queue = []
+        # for path_score, neg_score, node in top_paths:
+        #     self.push(neg_score, node)
+        
+        # Keep only the top 'budget' nodes
+        self.queue = heapq.nsmallest(self.budget, self.queue)
+        heapq.heapify(self.queue)

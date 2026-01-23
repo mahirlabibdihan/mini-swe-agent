@@ -16,43 +16,21 @@ from tenacity import (
 from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.utils.cache_control import set_cache_control
 
+from minisweagent.models.openrouter_model import OpenRouterModelConfig, OpenRouterAPIError, OpenRouterAuthenticationError, OpenRouterRateLimitError, OpenRouterModel
 logger = logging.getLogger("openrouter_model")
 
 
-class OpenRouterModelConfig(BaseModel):
-    model_name: str
-    model_kwargs: dict[str, Any] = {}
-    set_cache_control: Literal["default_end"] | None = None
-    """Set explicit cache control markers, for example for Anthropic models"""
-    cost_tracking: Literal["default", "ignore_errors"] = os.getenv("MSWEA_COST_TRACKING", "default")
-    """Cost tracking mode for this model. Can be "default" or "ignore_errors" (ignore errors/missing cost info)"""
-
-
-class OpenRouterAPIError(Exception):
-    """Custom exception for OpenRouter API errors."""
-
-    pass
-
-
-class OpenRouterAuthenticationError(Exception):
+class OpenHFContextLengthExceededError(Exception):
     """Custom exception for OpenRouter authentication errors."""
-
     pass
 
-
-class OpenRouterRateLimitError(Exception):
-    """Custom exception for OpenRouter rate limit errors."""
-
-    pass
-
-
-class OpenRouterModel:
+class OpenHFModel(OpenRouterModel):
     def __init__(self, **kwargs):
         self.config = OpenRouterModelConfig(**kwargs)
         self.cost = 0.0
         self.n_calls = 0
-        self._api_url = "https://openrouter.ai/api/v1/chat/completions"
-        self._api_key = os.getenv("OPENROUTER_API_KEY", "")
+        self._api_url = f"{os.getenv("HUGGING_FACE_API_SERVER", "")}/api/v1/chat/completions"
+        self._api_key = "your-api-key-here"
 
     @retry(
         reraise=True,
@@ -63,9 +41,11 @@ class OpenRouterModel:
             (
                 OpenRouterAuthenticationError,
                 KeyboardInterrupt,
+                OpenHFContextLengthExceededError,
             )
         ),
     )
+    
     def _query(self, messages: list[dict[str, str]], **kwargs):
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -89,26 +69,17 @@ class OpenRouterModel:
                 raise OpenRouterAuthenticationError(error_msg) from e
             elif response.status_code == 429:
                 raise OpenRouterRateLimitError("Rate limit exceeded") from e
+            elif response.status_code == 413:
+                raise OpenHFContextLengthExceededError("Context length exceeded") from e
             else:
                 raise OpenRouterAPIError(f"HTTP {response.status_code}: {response.text}") from e
         except requests.exceptions.RequestException as e:
             raise OpenRouterAPIError(f"Request failed: {e}") from e
 
     def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
-        if self.config.set_cache_control:
-            messages = set_cache_control(messages, mode=self.config.set_cache_control)
         response = self._query([{"role": msg["role"], "content": msg["content"]} for msg in messages], **kwargs)
 
-        usage = response.get("usage", {})
-        cost = usage.get("cost", 0.0)
-        if cost <= 0.0 and self.config.cost_tracking != "ignore_errors":
-            raise RuntimeError(
-                f"No valid cost information available from OpenRouter API for model {self.config.model_name}: "
-                f"Usage {usage}, cost {cost}. Cost must be > 0.0. Set cost_tracking: 'ignore_errors' in your config file or "
-                "export MSWEA_COST_TRACKING='ignore_errors' to ignore cost tracking errors "
-                "(for example for free/local models), more information at https://klieret.short.gy/mini-local-models "
-                "for more details. Still stuck? Please open a github issue at https://github.com/SWE-agent/mini-swe-agent/issues/new/choose!"
-            )
+        cost = 0.0
 
         self.n_calls += 1
         self.cost += cost
@@ -120,6 +91,3 @@ class OpenRouterModel:
                 "response": response,  # already is json
             },
         }
-
-    def get_template_vars(self) -> dict[str, Any]:
-        return self.config.model_dump() | {"n_model_calls": self.n_calls, "model_cost": self.cost}

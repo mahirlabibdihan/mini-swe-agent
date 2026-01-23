@@ -12,6 +12,9 @@ import time
 import subprocess
 import datetime
 import json
+import heapq
+import math
+
 
 class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     frontier_budget: int = 4
@@ -31,10 +34,17 @@ class TreeSearchAgent(RewardGuidedAgent):
         self.frontier = Frontier(budget=self.config.frontier_budget)
         self.n_backtracks = 0
         self.n_prune = 0
+        self.curr_epsilon = self.config.epsilon
 
+    def _reset(self):
+        super()._reset()
+        self.curr_epsilon = self.config.epsilon
+        
     def _backtrack(self, target_node):
+        print(f">> Backtracking from [{self.tree_node.id}] to [{target_node.id}]")
+        
         if target_node.commit != self.tree_node.commit:
-            print(f">> Backtracking to [{target_node.branch} {target_node.commit[:7]}]")
+            print(f">> Backtracking from [{self.tree_node.branch} {self.tree_node.commit[:7]}] to [{target_node.branch} {target_node.commit[:7]}]")
             # env.execute(f"git checkout {target_node.parent.branch}")
             if self._get_branch_head(target_node.branch) != target_node.commit:
                 self.env.execute(f"git checkout {target_node.commit}")
@@ -46,32 +56,87 @@ class TreeSearchAgent(RewardGuidedAgent):
     
     def is_promising(self, node: TreeSearchNode) -> bool:
         """Check if a node is promising based on epsilon threshold."""
-        if self.config.epsilon is None or node.parent.value is None:
+        if self.curr_epsilon is None or node.parent.value is None:
             return True
-        return node.value >= node.parent.value - self.config.epsilon
+        return node.value >= node.parent.value - self.curr_epsilon
     
     def _handle_max_steps(self):
         if self.n_expanded < self.config.step_limit:
             return None
         return self._make_terminating_action(self.tree_node) # TODO: First go to the path with highest-rewarded edit
     
-    def go_to_best_expandable_node(self):
-        best_node = best_node = max(
-            (n for n in self.node_map.values()
+    # def go_to_best_expandable_node(self):
+    #     best_node = best_node = max(
+    #         (n for n in self.node_map.values()
+    #         if n.merged_value is not None
+    #         and not n.is_terminating
+    #         and n.visible
+    #         and self.is_promising(n)
+    #         and len(n.children) < self.config.max_expansion),
+    #         key=lambda x: x.merged_value,
+    #         default=None
+    #     )
+    #     self._backtrack(best_node)
+    #     if best_node is not None:
+    #         self.tree_node = best_node
+    #     else:
+    #         self.tree_node = self.tree_root.children[0] # Fallback to first child of root
+    #         print(">> No expandable nodes found, reverting to root.")
+            
+            
+    def compute_alpha(self, progress: float, alpha_min: float = 0.4, alpha_max: float = 0.8) -> float:
+        """
+        Compute alpha based on fraction of executed nodes.
+
+        Args:
+            progress: float in [0,1], fraction of executed nodes
+            alpha_min: minimum alpha (late in search)
+            alpha_max: maximum alpha (early in search)
+        Returns:
+            alpha: float in [alpha_min, alpha_max]
+        """
+        progress = min(max(progress, 0.0), 1.0)  # clamp
+        return alpha_max - (alpha_max - alpha_min) * progress
+
+    def go_to_best_executable_node(self, k: int = 1) -> List[TreeSearchNode]:
+        def node_priority(n, gamma=0.9, max_depth=50):
+            path_value = n.get_path_value(gamma)
+            depth_score = math.log1p(n.level) / math.log1p(max_depth)
+            alpha = self.compute_alpha(progress=self.n_expanded / self.config.step_limit)
+            return alpha * path_value + (1 - alpha) * depth_score
+
+        # Materialize candidates (important)
+        candidates = [
+            n for n in self.node_map.values()
             if n.merged_value is not None
-            and not n.is_terminating
             and n.visible
-            and self.is_promising(n)
-            and len(n.children) < self.config.max_expansion),
-            key=lambda x: x.merged_value,
-            default=None
+            and not n.executed
+            and n.id != self.tree_root.id
+        ]
+        
+        # Find max depth among all nodes
+        max_depth = max(n.level for n in candidates)
+        
+        # Step 1: top-k by priority
+        top_k = heapq.nlargest(
+            min(k, len(candidates)),
+            candidates,
+            key=lambda x: node_priority(x, max_depth=max_depth)
         )
-        self._backtrack(best_node)
-        if best_node is not None:
-            self.tree_node = best_node
-        else:
-            self.tree_node = self.tree_root.children[0] # Fallback to first child of root
-            print(">> No expandable nodes found, reverting to root.")
+        
+        # Step 2: lowest-valued node among top-k
+        last_node = min(top_k, key=lambda x: x.value)
+            
+        self.curr_epsilon = last_node.parent.value - last_node.value # Increase epsilon to be less strict
+        
+        self._update_frontier(top_k)
+        best_node = self._select_action()
+        
+        if best_node.parent != self.tree_node:
+            self._backtrack(best_node.parent)          
+            self.n_backtracks += 1   
+        
+        return best_node
         
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
@@ -83,6 +148,8 @@ class TreeSearchAgent(RewardGuidedAgent):
 
         self.tree_node.visits += 1
         
+        self.tree_node.epsilon = self.curr_epsilon
+        
         best_node = None       
         while best_node is None:
             if self.config.selection_scope == "local":
@@ -91,13 +158,18 @@ class TreeSearchAgent(RewardGuidedAgent):
             if self.config.selection_scope == "local" or self.tree_node.visits == 1: # Local or First visit
                 unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c)] # Unexecuted + Promising
                 self._update_frontier(unexecuted)
+                
+                if self.tree_node.value is not None:
+                    if len(unexecuted) > 0:
+                        self.curr_epsilon = self.curr_epsilon - .05*self.config.epsilon  # Decrease epsilon to be more strict
+                    else:
+                        self.curr_epsilon = self.curr_epsilon + .05*self.config.epsilon  # Increase epsilon to be less strict
             
             if not self.frontier.empty():
                 best_node = self._select_action()
                 if best_node.parent != self.tree_node:
                     self._backtrack(best_node.parent)          
                     self.n_backtracks += 1   
-                    best_node.parent.visits += 1
                     print(">> Backtrack needed to execute the highest-rewarded action.")
                     
             elif self.config.selection_scope == "local":
@@ -106,19 +178,21 @@ class TreeSearchAgent(RewardGuidedAgent):
                     self._backtrack(self.tree_node.parent)
                     self.tree_node = self.tree_node.parent
                     self.n_backtracks += 1
-                    self.tree_node.parent.visits += 1
+                    self.tree_node.visits += 1
                     print(">> No promising actions locally, backtracking to parent node.")
                 else:
                     # Go to the highest-rewarded node globally
-                    self.go_to_best_expandable_node()
-                    raise NoActionFound("No promising actions found locally, backtracking to best state.")
+                    best_node = self.go_to_best_executable_node()
+                    self.add_message("system", "No promising actions found locally, backtracking to best action.")
                 
             else:
                 # Go to the highest-rewarded node globally
-                self.go_to_best_expandable_node()
-                raise NoActionFound("No promising actions found globally, backtracking to best state.")
+                print(">> Frontier is empty, searching globally for best executable node.")
+                best_node = self.go_to_best_executable_node()
+                self.add_message("system", "No promising actions found globally, backtracking to best action.")
                 
         self.tree_node = best_node
+        self.tree_node.parent.visits += 1
        
         if self.tree_node.is_terminating:
             self._stage_to_main_branch()
@@ -161,6 +235,9 @@ class TreeSearchAgent(RewardGuidedAgent):
             print(f">> No changes detected, staying on commit: {self.tree_node.commit}")
             
         with open("debug_tree.json", "w") as f:
+            json.dump(self.tree_root.to_tree(), f, indent=4)
+        
+        with open("debug_nodes.json", "w") as f:
             json.dump(self.tree_root.to_json(), f, indent=4)
             
         return self.tree_node.observation

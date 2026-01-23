@@ -95,6 +95,7 @@ class SingleActionAgent(DefaultAgent):
         )
         self.node_map[node.id] = node
         return node
+    
     def _reset(self):
         self.frontier.reset()
         self.tree_root = self.tree_node = self._create_node()        
@@ -175,40 +176,46 @@ class SingleActionAgent(DefaultAgent):
         output = self.execute_action(action)
         return output
     
+    def get_messages(self, node) -> List[dict]:
+        messages = []
+        curr = node
+        while curr.last_action is not None:
+            messages.append(
+                {
+                    "role": "user", 
+                    "content": curr.observation, 
+                }
+            )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": curr.last_action["thought"],
+                }
+            )   
+            curr = curr.parent
+        
+        messages.append({
+            "role": "user",
+            "content": self.render_template(self.config.instance_template),
+            "timestamp": time.time(),
+        })
+        messages.append({
+            "role": "system",
+            "content": self.render_template(self.config.system_template),
+            "timestamp": time.time(),
+        })
+        messages.reverse()
+        return messages
+    
     def query(self) -> dict:
         """Query the model and return the response."""
         if 0 < self.config.step_limit <= self.n_expanded or 0 < self.config.cost_limit <= self.model.cost:
             raise LimitsExceeded()
         
-        messages = []
-        curr = self.tree_node
-        while curr is not None:
-            if curr.observation is not None:
-                messages.append(
-                    {
-                        "role": "user", 
-                        "content": curr.observation, 
-                    }
-                )
-            if curr.last_action is not None:
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": curr.last_action["thought"],
-                    }
-                )   
-            curr = curr.parent
-        
-        messages.append({
-            "role": "system",
-            "content": self.render_template(self.config.system_template),
-        })
-        messages.reverse()
-        
+        messages = self.get_messages(self.tree_node)
         # save to file for debugging
         with open("debug_messages.json", "w") as f:
             json.dump(messages, f, indent=4)
-            
         response = self.model.query(messages)
         return response
     

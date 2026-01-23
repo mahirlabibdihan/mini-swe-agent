@@ -1,4 +1,4 @@
-from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, TerminatingException, Submitted, ExecutionTimeoutError
+from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, FormatError, TerminatingException, Submitted, ExecutionTimeoutError
 from minisweagent.agents.tree_search_node import TreeSearchNode   
 import minisweagent.agents.action_processor as action_processor
 from minisweagent.agents.frontier import Frontier
@@ -55,7 +55,9 @@ class RewardGuidedAgent(SingleActionAgent):
         )
         new_node.branch = f"ts-agent-root"
         new_node.commit = self._get_commit_hash() 
+        self.tree_node.executed = True
         self.tree_node = new_node
+        self.tree_node.executed = True
         
     def _commit_changes(self, message="Automated commit"):
         """Stage all changes and commit"""
@@ -85,29 +87,32 @@ class RewardGuidedAgent(SingleActionAgent):
             print(observation["output"])
         return bool(observation["output"])
        
+    def _generate_action(self):
+        """
+        Generate an action from the model and parse it
+        
+        Returns:
+            response (dict): The raw response from the model
+            action (dict): The parsed action
+            error (str | None): The error message if parsing failed
+        """
+        
+        response = self.query()
+        try:
+            action = self.parse_action(response)
+            return response, action, None
+        except FormatError as e:
+            return response, None, str(e)
+        
     def _generate_new_nodes(self, n_actions) -> List[TreeSearchNode]:
         nodes = []
         # flag = True
         for i in range(n_actions):
             # Execute action to get observation
             potential_termination = False
-            try:
-                response = self.query()
-                action = self.parse_action(response)
+            response, action, error = self._generate_action()
+            if error is None:
                 print(f"Generated action #{i+1}: {action['action']}")
-                
-                # Be-aware of potential terminating actions
-                potential_termination = is_terminating(action['action'])
-                if potential_termination:
-                    self.env.execute(f"git checkout {self.tree_root.branch}")
-                    self.env.execute(f"git diff {self.tree_root.branch}..{self.tree_node.branch} | git apply")
-                output = self.env.execute(action["action"])
-                if potential_termination:
-                    self.env.execute("git restore .")
-                    self.env.execute("git checkout -")
-                
-                observation = self.render_template(self.config.action_observation_template, output=output)
-                # Convert action to node
                 new_node = self._create_node(
                     last_action={
                         "command": action["action"],
@@ -115,12 +120,7 @@ class RewardGuidedAgent(SingleActionAgent):
                         "extra": action["extra"]
                     },
                 )
-            except NonTerminatingException as e:
-                observation = str(e)
-                output = {
-                    "output": observation
-                }
-                # Convert action to node
+            else:
                 new_node = self._create_node(
                     last_action={
                         "command": None,
@@ -128,36 +128,47 @@ class RewardGuidedAgent(SingleActionAgent):
                         "extra": response["extra"]
                     },
                 )
-                print(f">> Invalid Response: {response["content"]}")
-            except (TimeoutError, subprocess.TimeoutExpired) as e:
-                output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
-                observation = self.render_template(self.config.timeout_template, action=action["action"], output=output)
+            
+            if error is None:
+                try:
+                    # Be-aware of potential terminating actions
+                    potential_termination = is_terminating(action['action'])
+                    if potential_termination:
+                        self.env.execute(f"git checkout {self.tree_root.branch}")
+                        self.env.execute(f"git diff {self.tree_root.branch}..{self.tree_node.branch} | git apply")
+                    output = self.env.execute(action["action"])
+                    if potential_termination:
+                        self.env.execute("git restore .")
+                        self.env.execute("git checkout -")
+                    observation = self.render_template(self.config.action_observation_template, output=output) 
+                except (TimeoutError, subprocess.TimeoutExpired) as e:
+                    output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
+                    observation = self.render_template(self.config.timeout_template, action=action["action"], output=output)
+
+                # Check for terminating action
+                lines = output.get("output", "").lstrip().splitlines(keepends=True)
+                if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
+                    print(">> Terminating action detected.")
+                    new_node.is_terminating = True   
+                # Check for code modifications
+                elif self._repo_has_changes():
+                    new_node.modifies_code = True
+                    # Rollback changes
+                    print(">> Write-task detected.")
+                    self.env.execute("git restore .")
+
+                if new_node.is_terminating != potential_termination:
+                    print(">> Warning: Invalid terminating action detected. Skipping this action...")
+                    time.sleep(2)  # To avoid rate limiting
+                    continue    
+            else:
+                print(f"Generated action #{i+1}: <<Invalid Action>>")
+                observation = error
             
             new_node.observation = observation
-            
-            # Check for terminating action
-            lines = output.get("output", "").lstrip().splitlines(keepends=True)
-            if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
-                print(">> Terminating action detected.")
-                new_node.is_terminating = True   
-            # Check for code modifications
-            elif self._repo_has_changes():
-                new_node.modifies_code = True
-                # Rollback changes
-                print(">> Write-task detected.")
-                # flag = False
-                self.env.execute("git restore .")
-                self.tree_node.has_write_child = True
-            
-            if new_node.is_terminating != potential_termination:
-                print(">> Warning: Invalid terminating action detected. Skipping this action...")
-            else:
-                nodes.append(new_node)
-            
+            nodes.append(new_node)
+
             time.sleep(2)  # To avoid rate limiting
-            # if flag:
-            #     print("No write-task detected, stopping further action generation.")
-            #     break
         return nodes
     
     def _stage_to_main_branch(self):
@@ -212,10 +223,13 @@ class RewardGuidedAgent(SingleActionAgent):
 
         return self.tree_node.observation
     
-    def _evaluate_nodes(self, node_list, task):
+    def _evaluate_nodes(self, node_list):
         for new_node in tqdm(node_list, desc="Evaluating nodes"):
             if new_node.value is None:
-                new_node.value = self.reward_model.compute_reward(new_node, task)
+                new_node.value = self.reward_model.compute_reward(new_node, self.extra_template_vars["task"])
+                if new_node.last_action["command"] is None:
+                    # Penalize invalid actions
+                    new_node.value = 0.5 * new_node.value
             
     def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)
@@ -223,7 +237,7 @@ class RewardGuidedAgent(SingleActionAgent):
         for node in tree_nodes:
             print(f"- {node.last_action['command']}")
             
-        self._evaluate_nodes(tree_nodes, self.extra_template_vars["task"])
+        self._evaluate_nodes(tree_nodes)
         tree_nodes = action_processor.merge_nodes(tree_nodes)
 
         reward_data = []

@@ -166,6 +166,10 @@ def process_instance(
             instance_id=instance_id,
             print_fct=logger.info,
         )
+        # save tree 
+        with (instance_dir / f"{instance_id}.tree.json").open("w") as f:
+            json.dump(agent.tree_root.to_tree(), f, indent=2)
+            
         update_preds_file(output_dir / "preds.json", instance_id, model.config.model_name, result)
         progress_manager.on_instance_end(instance_id, exit_status)
 
