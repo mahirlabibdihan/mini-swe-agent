@@ -230,8 +230,21 @@ EOF
                     new_node.modifies_code = True
                     new_node.modified_files = self._get_modified_files()
                     # Rollback changes
-                    print(">> Write-task detected.")
+                    print(">> Write-action detected.")
                     self.env.execute("git restore .")
+                else:
+                    import shlex
+                    cmd = action['action']
+                    tokens = shlex.split(cmd)
+                    filename = None
+                    if tokens[0] == "nl":
+                        for token in tokens[1:]:
+                            if not token.startswith('-'):
+                                filename = token
+                                break
+                    print(f">> Read-action detected. File: {filename}")
+                    if filename is not None:
+                        new_node.read_files = [filename]
 
                 if new_node.is_terminating != potential_termination:
                     print(">> Warning: Invalid terminating action detected. Skipping this action...")
@@ -306,7 +319,7 @@ EOF
                 if new_node.last_action["command"] is None:
                     # Penalize invalid actions
                     new_node.value = 0.7 * new_node.value
-                if new_node.modifies_code:
+                if len(new_node.modified_files) > 0:
                     # Boost nodes that modify code based on relevance
                     max_relevance = 0.0
                     for file in new_node.modified_files:
@@ -315,7 +328,17 @@ EOF
                     
                     # scale node value by ±20% based on relevance
                     scale_factor = 0.8 + 0.4 * max_relevance
-                    new_node.value = min(new_node.value * scale_factor, 1.0)    
+                    new_node.value = min(new_node.value * scale_factor, 1.0)  
+                elif len(new_node.read_files) > 0: 
+                    # Slightly boost nodes that read files based on relevance
+                    max_relevance = 0.0
+                    for file in new_node.read_files:
+                        if file in self.relevance_dict:
+                            max_relevance = max(max_relevance, self.relevance_dict[file])
+                    
+                    # scale node value by ±10% based on relevance
+                    scale_factor = 0.9 + 0.2 * max_relevance
+                    new_node.value = min(new_node.value * scale_factor, 1.0) 
                             
     def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)

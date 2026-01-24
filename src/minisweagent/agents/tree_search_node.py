@@ -17,6 +17,7 @@ class TreeSearchNode:
         self.level = 0
         self.modifies_code = False
         self.modified_files = []
+        self.read_files = []
         self.is_terminating = False
         self.visits = 0
         
@@ -69,6 +70,7 @@ class TreeSearchNode:
             "visits": self.visits,
             "epsilon": self.epsilon,
             "modified_files": self.modified_files,
+            "read_files": self.read_files,
             "last_action": {
                 "command": self.last_action["command"],
                 "thought": self.last_action["thought"],
@@ -90,6 +92,7 @@ class TreeSearchNode:
             "visits": self.visits,
             "epsilon": self.epsilon,
             "modified_files": self.modified_files,
+            "read_files": self.read_files,
             "last_action": {
                 "command": self.last_action["command"],
                 "thought": self.last_action["thought"],
