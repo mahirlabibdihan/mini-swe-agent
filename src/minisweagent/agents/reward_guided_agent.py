@@ -305,7 +305,7 @@ EOF
                 new_node.value = self.reward_model.compute_reward(new_node, self.extra_template_vars["task"])
                 if new_node.last_action["command"] is None:
                     # Penalize invalid actions
-                    new_node.value = 0.5 * new_node.value
+                    new_node.value = 0.7 * new_node.value
                 if new_node.modifies_code:
                     # Boost nodes that modify code based on relevance
                     max_relevance = 0.0
