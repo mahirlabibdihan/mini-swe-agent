@@ -13,6 +13,11 @@ from minisweagent import Model, Environment
 from minisweagent.agents.reward_model import RewardModel
 from tqdm import tqdm
 from minisweagent.agents.single_action_agent import SingleActionAgentConfig, SingleActionAgent
+from rank_bm25 import BM25Okapi
+import pickle
+import os
+import numpy as np
+from pathlib import Path
 
 class RewardGuidedAgentConfig(SingleActionAgentConfig):
     branching_factor: int = 3
@@ -28,6 +33,66 @@ class RewardGuidedAgent(SingleActionAgent):
         super().__init__(model, env, config_class=config_class, **kwargs)
         self.frontier = Frontier(budget=self.config.branching_factor)
         self.reward_model = reward_model
+        result = self.env.execute("""
+python3 - << 'EOF'
+import json
+import re
+from pathlib import Path
+
+ROOT = Path(".")  # change this to the folder you want to scan
+
+def is_test(name, test_phrases=None):
+    if test_phrases is None:
+        test_phrases = ["test", "tests", "testing"]
+    words = set(re.split(r" |_|\\/|\\.", name.lower()))
+    return any(word in words for word in test_phrases)
+    
+# Your file reading function
+def file_name_and_contents(filename, relative_path):
+    text = relative_path + "\\n"
+    with open(filename) as f:
+        text += f.read()
+    return text
+
+for filename in ROOT.rglob("*.py"):
+    try:
+        if is_test(filename.as_posix()):
+            continue
+        relative = filename.relative_to(ROOT).as_posix()
+        content = file_name_and_contents(filename, relative)
+        print(json.dumps({"id": relative, "content": content}))
+    except Exception:
+        pass
+EOF
+""")
+        print("Extracting Python files from the codebase..." + self.env.config.image)
+        image_ref = self.env.config.image
+        image_name = image_ref.split("/")[-1].split(":")[0]
+        # Check if documents/{image_name}.jsonl exists
+        if not Path(f"retrieval/{image_name}/documents.jsonl").exists():
+            Path(f"retrieval/{image_name}").mkdir(parents=True, exist_ok=True)
+            with open(f"retrieval/{image_name}/documents.jsonl", "w") as f:
+                f.write(result["output"])
+        
+        documents = []
+        self.file_ids = []
+
+        with open(f"retrieval/{image_name}/documents.jsonl") as f:
+            for line in f:
+                obj = json.loads(line)
+                documents.append(obj["content"].split())  # tokenize by whitespace
+                self.file_ids.append(obj["id"])
+        
+        index_path = f"retrieval/{image_name}/bm25_index.pkl"
+        if os.path.exists(index_path):
+            with open(index_path, "rb") as f:
+                self.bm25 = pickle.load(f)
+        else:
+            self.bm25 = BM25Okapi(documents)
+            with open(index_path, "wb") as f:
+                pickle.dump(self.bm25, f)
+                
+        self.relevance_dict = {}
             
     def _get_commit_hash(self):
         """Get the current commit hash"""
@@ -78,6 +143,11 @@ class RewardGuidedAgent(SingleActionAgent):
         self.tree_root.branch = self.env.execute("git branch --show-current")["output"].strip()
         self.tree_root.commit = self._get_commit_hash()
         self._create_pseudo_root()
+        
+        issue_tokens = self.task.split()
+        scores = self.bm25.get_scores(issue_tokens)
+        scores = (scores - scores.min()) / (scores.max() - scores.min())
+        self.relevance_dict = dict(zip(self.file_ids, scores))
        
     def _repo_has_changes(self):
         """Check if there are any unstaged or uncommitted changes"""
@@ -236,6 +306,13 @@ class RewardGuidedAgent(SingleActionAgent):
                 if new_node.last_action["command"] is None:
                     # Penalize invalid actions
                     new_node.value = 0.5 * new_node.value
+                if new_node.modifies_code:
+                    # Boost nodes that modify code based on relevance
+                    relevance_score = 0.0
+                    for file in new_node.modified_files:
+                        if file in self.relevance_dict:
+                            relevance_score = max(relevance_score, self.relevance_dict[file])
+                    new_node.value += 0.4 * (relevance_score - 0.5) # Shift to [-0.2, 0.2]
             
     def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)

@@ -27,10 +27,12 @@ class SingleActionAgent(DefaultAgent):
         self.n_submissions = 0
         self.frontier = Frontier(budget=1)
         self.node_map = {}
+        self.task = None
     
     def run(self, task: str, **kwargs) -> tuple[str, str]:
         """Run step() until agent is finished. Return exit status & message"""
         self.extra_template_vars |= {"task": task, **kwargs}
+        self.task = task
         self.messages = []
         
         self._reset()

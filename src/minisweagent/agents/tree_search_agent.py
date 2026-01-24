@@ -15,7 +15,10 @@ import datetime
 import json
 import heapq
 import math
-
+from rank_bm25 import BM25Okapi
+import pickle
+import os
+import numpy as np
 
 class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     frontier_budget: int = 4
@@ -38,53 +41,16 @@ class TreeSearchAgent(RewardGuidedAgent):
         self.n_backtracks = 0
         self.n_prune = 0
         self.curr_epsilon = self.config.epsilon
-        result = self.env.execute("""
-python3 - << 'EOF'
-import json
-import re
-from pathlib import Path
-
-ROOT = Path(".")  # change this to the folder you want to scan
-
-def is_test(name, test_phrases=None):
-    if test_phrases is None:
-        test_phrases = ["test", "tests", "testing"]
-    words = set(re.split(r" |_|\\/|\\.", name.lower()))
-    return any(word in words for word in test_phrases)
-    
-# Your file reading function
-def file_name_and_contents(filename, relative_path):
-    text = relative_path + "\\n"
-    with open(filename) as f:
-        text += f.read()
-    return text
-
-for filename in ROOT.rglob("*.py"):
-    try:
-        if is_test(filename.as_posix()):
-            continue
-        relative = filename.relative_to(ROOT).as_posix()
-        content = file_name_and_contents(filename, relative)
-        print(json.dumps({"id": relative, "content": content}))
-    except Exception:
-        pass
-EOF
-""")
-        print("Extracting Python files from the codebase..." + self.env.config.image)
-        image_ref = self.env.config.image
-        image_name = image_ref.split("/")[-1].split(":")[0]
-        # Check if documents/{image_name}.jsonl exists
-        if not Path(f"documents/{image_name}.jsonl").exists():
-            Path("documents").mkdir(exist_ok=True)
-            with open(f"documents/{image_name}.jsonl", "w") as f:
-                f.write(result["output"])
         
-        # Make bm25 index
-        
+                
 
     def _reset(self):
         super()._reset()
         self.curr_epsilon = self.config.epsilon
+        issue_tokens = self.task.split()
+        scores = self.bm25.get_scores(issue_tokens)
+        scores = (scores - scores.min()) / (scores.max() - scores.min())
+        self.relevance_dict = dict(zip(self.file_ids, scores))
         
     def _backtrack(self, target_node):
         print(f">> Backtracking from [{self.tree_node.id}] to [{target_node.id}]")
