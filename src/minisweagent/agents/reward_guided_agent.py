@@ -308,12 +308,15 @@ EOF
                     new_node.value = 0.5 * new_node.value
                 if new_node.modifies_code:
                     # Boost nodes that modify code based on relevance
-                    relevance_score = 0.0
+                    max_relevance = 0.0
                     for file in new_node.modified_files:
                         if file in self.relevance_dict:
-                            relevance_score = max(relevance_score, self.relevance_dict[file])
-                    new_node.value += 0.4 * (relevance_score - 0.5) # Shift to [-0.2, 0.2]
-            
+                            max_relevance = max(max_relevance, self.relevance_dict[file])
+                    
+                    # scale node value by ±20% based on relevance
+                    scale_factor = 0.8 + 0.4 * max_relevance
+                    new_node.value *= scale_factor
+                            
     def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)
         print(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
