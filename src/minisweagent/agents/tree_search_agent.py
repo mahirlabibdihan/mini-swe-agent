@@ -1,3 +1,4 @@
+from pathlib import Path
 from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, TerminatingException, Submitted, ExecutionTimeoutError
 from minisweagent.agents.tree_search_node import TreeSearchNode   
 from minisweagent.agents.reward_guided_agent import RewardGuidedAgentConfig, RewardGuidedAgent
@@ -70,9 +71,16 @@ for filename in ROOT.rglob("*.py"):
 EOF
 """)
         print("Extracting Python files from the codebase..." + self.env.config.image)
-        documents = [json.loads(line) for line in result["output"].splitlines()]
-        print(f"Extracted {len(documents)} Python files")
-        print(documents[0])  # preview first document
+        image_ref = self.env.config.image
+        image_name = image_ref.split("/")[-1].split(":")[0]
+        # Check if documents/{image_name}.jsonl exists
+        if not Path(f"documents/{image_name}.jsonl").exists():
+            Path("documents").mkdir(exist_ok=True)
+            with open(f"documents/{image_name}.jsonl", "w") as f:
+                f.write(result["output"])
+        
+        # Make bm25 index
+        
 
     def _reset(self):
         super()._reset()

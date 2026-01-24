@@ -86,6 +86,11 @@ class RewardGuidedAgent(SingleActionAgent):
             print(">> Repository has unstaged or uncommitted changes.")
             print(observation["output"])
         return bool(observation["output"])
+    
+    def _get_modified_files(self):
+        """Get the list of modified files in the repo"""
+        observation = self.env.execute("git diff --name-only")
+        return observation["output"].splitlines()
        
     def _generate_action(self):
         """
@@ -153,6 +158,7 @@ class RewardGuidedAgent(SingleActionAgent):
                 # Check for code modifications
                 elif self._repo_has_changes():
                     new_node.modifies_code = True
+                    new_node.modified_files = self._get_modified_files()
                     # Rollback changes
                     print(">> Write-task detected.")
                     self.env.execute("git restore .")
