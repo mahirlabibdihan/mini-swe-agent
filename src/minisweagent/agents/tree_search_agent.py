@@ -60,7 +60,7 @@ for filename in ROOT.rglob("*.py"):
         pass
 EOF
 """)
-        print(f"result[\"output\"][:500]")  # preview first 500 characters of output
+        print(f"{result["output"][:500]}")  # preview first 500 characters of output
         documents = [json.loads(line) for line in result["output"].splitlines()]
         print(f"Extracted {len(documents)} Python files")
         print(documents[0])  # preview first document
