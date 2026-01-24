@@ -18,6 +18,7 @@ import pickle
 import os
 import numpy as np
 from pathlib import Path
+import torch
 
 class RewardGuidedAgentConfig(SingleActionAgentConfig):
     branching_factor: int = 3
@@ -313,6 +314,23 @@ EOF
 
         return self.tree_node.observation
     
+    def _calculate_relevance(self, action, observation) -> float:
+        from sentence_transformers import CrossEncoder
+        # Load cross-encoder trained for relevance
+        model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+        # model = CrossEncoder('NamanAgnih0tri/code-reranker-miniLM-staqc')
+        # Example step from agent
+        agent_step = f"Action: {action} | Observation: {observation}"
+        # The issue we want to check
+        issue_text = self.task
+        # Prepare input for cross-encoder
+        pairs = [(agent_step, issue_text)]
+        # Get relevance score
+        score = model.predict(pairs)[0]
+        prob = torch.sigmoid(torch.tensor(score))
+        print("Relevance score:", prob)
+        return prob.item()
+        
     def _evaluate_nodes(self, node_list):
         for new_node in tqdm(node_list, desc="Evaluating nodes"):
             if new_node.value is None:
@@ -335,15 +353,23 @@ EOF
                     new_value = min(new_node.value * scale_factor, 1.0)  
                     print(f">> Write-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
-                elif len(new_node.read_files) > 0: 
-                    # Slightly boost nodes that read files based on relevance
-                    max_relevance = 0.0
-                    for file in new_node.read_files:
-                        if file in self.relevance_dict:
-                            max_relevance = max(max_relevance, self.relevance_dict[file])
+                # elif len(new_node.read_files) > 0: 
+                #     # Slightly boost nodes that read files based on relevance
+                #     max_relevance = 0.0
+                #     for file in new_node.read_files:
+                #         if file in self.relevance_dict:
+                #             max_relevance = max(max_relevance, self.relevance_dict[file])
                     
+                #     # scale node value by ±10% based on relevance
+                #     scale_factor = 0.9 + 0.2 * max_relevance
+                #     new_value = min(new_node.value * scale_factor, 1.0) 
+                #     print(f">> Read-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                #     new_node.value = new_value
+                else:
+                    # For read-only actions, compute relevance score
+                    relevance_score = self._calculate_relevance(new_node.last_action["command"], new_node.observation)
                     # scale node value by ±10% based on relevance
-                    scale_factor = 0.9 + 0.2 * max_relevance
+                    scale_factor = 0.9 + 0.2 * relevance_score
                     new_value = min(new_node.value * scale_factor, 1.0) 
                     print(f">> Read-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
