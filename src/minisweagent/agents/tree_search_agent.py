@@ -47,7 +47,7 @@ ROOT = Path(".")  # change this to the folder you want to scan
 def is_test(name, test_phrases=None):
     if test_phrases is None:
         test_phrases = ["test", "tests", "testing"]
-    words = set(re.split(r" |_|\\/|\.", name.lower()))
+    words = set(re.split(r" |_|\\/|\\.", name.lower()))
     return any(word in words for word in test_phrases)
     
 # Your file reading function
