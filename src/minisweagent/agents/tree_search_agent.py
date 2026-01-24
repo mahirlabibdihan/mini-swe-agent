@@ -40,6 +40,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         result = self.env.execute("""
 python3 - << 'EOF'
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(".")  # change this to the folder you want to scan
