@@ -44,6 +44,14 @@ from pathlib import Path
 
 ROOT = Path(".")  # change this to the folder you want to scan
 
+print(f"Root directory: {ROOT}")
+
+def is_test(name, test_phrases=None):
+    if test_phrases is None:
+        test_phrases = ["test", "tests", "testing"]
+    words = set(re.split(r" |_|\\/|\.", name.lower()))
+    return any(word in words for word in test_phrases)
+    
 # Your file reading function
 def file_name_and_contents(filename, relative_path):
     text = relative_path + "\\n"
@@ -53,6 +61,8 @@ def file_name_and_contents(filename, relative_path):
 
 for filename in ROOT.rglob("*.py"):
     try:
+        if is_test(filename.as_posix()):
+            continue
         relative = filename.relative_to(ROOT).as_posix()
         content = file_name_and_contents(filename, relative)
         print(json.dumps({"id": relative, "content": content}))
