@@ -315,7 +315,7 @@ EOF
                     
                     # scale node value by ±20% based on relevance
                     scale_factor = 0.8 + 0.4 * max_relevance
-                    new_node.value *= scale_factor
+                    new_node.value = min(new_node.value * scale_factor, 1.0)    
                             
     def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)
