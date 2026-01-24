@@ -319,7 +319,10 @@ EOF
                 new_node.value = self.reward_model.compute_reward(new_node, self.extra_template_vars["task"])
                 if new_node.last_action["command"] is None:
                     # Penalize invalid actions
-                    new_node.value = 0.7 * new_node.value
+                    new_value = 0.7 * new_node.value
+                    print(f">> Invalid-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                    new_node.value = new_value
+                    
                 if len(new_node.modified_files) > 0:
                     # Boost nodes that modify code based on relevance
                     max_relevance = 0.0
@@ -329,7 +332,9 @@ EOF
                     
                     # scale node value by ±20% based on relevance
                     scale_factor = 0.8 + 0.4 * max_relevance
-                    new_node.value = min(new_node.value * scale_factor, 1.0)  
+                    new_value = min(new_node.value * scale_factor, 1.0)  
+                    print(f">> Write-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                    new_node.value = new_value
                 elif len(new_node.read_files) > 0: 
                     # Slightly boost nodes that read files based on relevance
                     max_relevance = 0.0
@@ -339,7 +344,9 @@ EOF
                     
                     # scale node value by ±10% based on relevance
                     scale_factor = 0.9 + 0.2 * max_relevance
-                    new_node.value = min(new_node.value * scale_factor, 1.0) 
+                    new_value = min(new_node.value * scale_factor, 1.0) 
+                    print(f">> Read-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                    new_node.value = new_value
                             
     def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)
