@@ -44,8 +44,6 @@ from pathlib import Path
 
 ROOT = Path(".")  # change this to the folder you want to scan
 
-print(f"Root directory: {ROOT}")
-
 def is_test(name, test_phrases=None):
     if test_phrases is None:
         test_phrases = ["test", "tests", "testing"]
