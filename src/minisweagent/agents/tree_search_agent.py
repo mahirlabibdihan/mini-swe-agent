@@ -25,6 +25,8 @@ class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     max_expansion: int = 5
     """Maximum number of nodes to expand per step."""
 
+import json
+
 class TreeSearchAgent(RewardGuidedAgent):
     def __init__(self, 
                  *args,  
@@ -35,6 +37,32 @@ class TreeSearchAgent(RewardGuidedAgent):
         self.n_backtracks = 0
         self.n_prune = 0
         self.curr_epsilon = self.config.epsilon
+        result = self.env.execute("""
+python3 - << 'EOF'
+import json
+from pathlib import Path
+
+ROOT = Path(".")  # change this to the folder you want to scan
+
+# Your file reading function
+def file_name_and_contents(filename, relative_path):
+    text = relative_path + "\n"
+    with open(filename) as f:
+        text += f.read()
+    return text
+
+for filename in ROOT.rglob("*.py"):
+    try:
+        relative = filename.relative_to(ROOT).as_posix()
+        content = file_name_and_contents(filename, relative)
+        print(json.dumps({"id": relative, "content": content}))
+    except Exception:
+        pass
+EOF
+""")
+        documents = [json.loads(line) for line in result["output"].splitlines()]
+        print(f"Extracted {len(documents)} Python files")
+        print(documents[0])  # preview first document
 
     def _reset(self):
         super()._reset()
