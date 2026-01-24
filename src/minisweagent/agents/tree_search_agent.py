@@ -46,7 +46,7 @@ ROOT = Path(".")  # change this to the folder you want to scan
 
 # Your file reading function
 def file_name_and_contents(filename, relative_path):
-    text = relative_path + "\n"
+    text = relative_path + "\\n"
     with open(filename) as f:
         text += f.read()
     return text
