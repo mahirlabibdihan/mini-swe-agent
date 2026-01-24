@@ -242,9 +242,10 @@ EOF
                             if not token.startswith('-'):
                                 filename = token
                                 break
-                    print(f">> Read-action detected. File: {filename}")
+                    
                     if filename is not None:
                         new_node.read_files = [filename]
+                        print(f">> Read-action detected. File: {filename}")
 
                 if new_node.is_terminating != potential_termination:
                     print(">> Warning: Invalid terminating action detected. Skipping this action...")
