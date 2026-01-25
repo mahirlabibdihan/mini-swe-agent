@@ -243,20 +243,20 @@ EOF
                     # Rollback changes
                     print(">> Write-action detected.")
                     self.env.execute("git restore .")
-                else:
-                    import shlex
-                    cmd = action['action']
-                    tokens = shlex.split(cmd)
-                    filename = None
-                    if tokens[0] == "nl":
-                        for token in tokens[1:]:
-                            if not token.startswith('-'):
-                                filename = token
-                                break
+                # else:
+                #     import shlex
+                #     cmd = action['action']
+                #     tokens = shlex.split(cmd)
+                #     filename = None
+                #     if tokens[0] == "nl":
+                #         for token in tokens[1:]:
+                #             if not token.startswith('-'):
+                #                 filename = token
+                #                 break
                     
-                    if filename is not None:
-                        new_node.read_files = [filename]
-                        print(f">> Read-action detected. File: {filename}")
+                #     if filename is not None:
+                #         new_node.read_files = [filename]
+                #         print(f">> Read-action detected. File: {filename}")
 
                 if new_node.is_terminating != potential_termination:
                     print(">> Warning: Invalid terminating action detected. Skipping this action...")
@@ -335,7 +335,35 @@ EOF
         score = response.json().get("score", 0.0)
         print(f">> Relevance score for action '{action[:50] if action else '<<Invalid Action>>'}': {score:.4f}")
         return score
+    
+    def _get_trajectory(self, node: TreeSearchNode) -> List[dict]:
+        trajectory = []
+        curr = node
+        while curr.last_action is not None:
+            trajectory.append(
+                {
+                    "thought": curr.last_action["thought"],
+                    "observation": curr.observation,
+                }
+            )
+            curr = curr.parent
+        trajectory.reverse()
+        return trajectory
+    
+    def _format_trajectory(self, trajectory: List[dict], n_steps: int = 5) -> str:
+        if len(trajectory) == 0:
+            return "<No previous actions or observations>\n\n"
+        formatted_trajectory = ""
+        if len(trajectory) > n_steps:
+            formatted_trajectory += "... (omitted earlier steps for brevity) ...\n\n"
+        for i, step in enumerate(trajectory):
+            if i < len(trajectory) - n_steps:
+                continue  # Only keep last {n_steps} steps for brevity
+            formatted_trajectory += f"Action #{i+1}: {step['thought']}\n"
+            formatted_trajectory += f"Observation #{i+1}: {step['observation']}\n\n"
         
+        return formatted_trajectory.strip()
+    
     def _evaluate_nodes(self, node_list):
         for new_node in tqdm(node_list, desc="Evaluating nodes"):
             if new_node.value is None:
