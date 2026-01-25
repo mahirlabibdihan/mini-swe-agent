@@ -17,8 +17,6 @@ from openai.types.chat.chat_completion_token_logprob import ChatCompletionTokenL
 from huggingface import HuggingFaceModel, ContextLengthExceededError
 
 app = FastAPI()
-loaded_models = {}
-
 
 class ChatCompletionRequest(BaseModel):
     model: str
@@ -28,24 +26,31 @@ class ChatCompletionRequest(BaseModel):
     top_p: Optional[float] = 1.0
     top_k: Optional[int] = 50
     
+class RelevanceRequest(BaseModel):
+    model: str
+    text1: str
+    text2: str
     
 import threading
 processing_lock = threading.Lock()
 
 
+loaded_llms = {}
+loaded_encoders = {}
+
 # -------- Model Loader --------
 def get_or_load_model(model_name: str) -> HuggingFaceModel:
     with processing_lock:
-        if model_name not in loaded_models:
-            loaded_models[model_name] = HuggingFaceModel(model_name=model_name)
-            loaded_models[model_name].initialize()
-        return loaded_models[model_name]
+        if model_name not in loaded_llms:
+            loaded_llms[model_name] = HuggingFaceModel(model_name=model_name)
+            loaded_llms[model_name].initialize()
+        return loaded_llms[model_name]
 
 def get_or_load_encoder_model(model_name: str) -> CrossEncoder:
     with processing_lock:
-        if model_name not in loaded_models:
-            loaded_models[model_name] = CrossEncoder(model_name)
-        return loaded_models[model_name]
+        if model_name not in loaded_encoders:
+            loaded_encoders[model_name] = CrossEncoder(model_name)
+        return loaded_encoders[model_name]
 
 @app.exception_handler(ContextLengthExceededError)
 async def context_length_exceeded_handler(
@@ -98,9 +103,9 @@ async def chat_completions(request: ChatCompletionRequest):
     
 # An api endpoint to calculate relevance score of two text using cross-encoder model
 @app.post("/api/v1/relevance")
-async def relevance_score(model: str, text1: str, text2: str) -> Dict[str, Any]:
-    encoder: CrossEncoder = get_or_load_encoder_model(model)
-    score = encoder.predict([(text1, text2)])[0]
+async def relevance_score(request: RelevanceRequest) -> Dict[str, Any]:
+    encoder: CrossEncoder = get_or_load_encoder_model(request.model)
+    score = encoder.predict([(request.text1, request.text2)])[0]
     prob = torch.sigmoid(torch.tensor(score))
     return {"score": prob.item()}
 
