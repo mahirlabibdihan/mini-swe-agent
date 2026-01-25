@@ -363,13 +363,13 @@ EOF
                 #     new_value = min(new_node.value * scale_factor, 1.0) 
                 #     print(f">> Read-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                 #     new_node.value = new_value
-                if not new_node.is_terminating:
-                    # For read-only actions, compute relevance score
-                    relevance_score = self._calculate_relevance(new_node.last_action["command"], new_node.observation)
-                    # Take weighted average of relevance score and current value
-                    new_value = (0.7 * new_node.value + 0.3 * relevance_score)
-                    print(f">> Similarity reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
-                    new_node.value = new_value
+                
+                # For read-only actions, compute relevance score
+                relevance_score = self._calculate_relevance(new_node.last_action["command"], new_node.observation)
+                # Take weighted average of relevance score and current value
+                new_value = (0.7 * new_node.value + 0.3 * relevance_score)
+                print(f">> Similarity reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                new_node.value = new_value
                             
     def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)
