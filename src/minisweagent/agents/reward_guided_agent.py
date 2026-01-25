@@ -344,7 +344,7 @@ EOF
                     
                     # scale node value by ±20% based on relevance
                     scale_factor = 0.8 + 0.4 * max_relevance
-                    new_value = min(new_node.value * scale_factor, 1.0)  
+                    new_value = new_node.value * scale_factor
                     print(f">> Write-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
                 # elif len(new_node.read_files) > 0: 
@@ -364,7 +364,7 @@ EOF
                     relevance_score = self._calculate_relevance(new_node.last_action["command"], new_node.observation)
                     # scale node value by ±10% based on relevance
                     scale_factor = 0.9 + 0.2 * relevance_score
-                    new_value = min(new_node.value * scale_factor, 1.0) 
+                    new_value = new_node.value * scale_factor
                     print(f">> Read-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
                             
