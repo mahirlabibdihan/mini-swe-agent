@@ -327,7 +327,7 @@ EOF
         # Get relevance score
         response = requests.post(os.environ["HUGGING_FACE_API_SERVER"] + "/api/v1/relevance", json={"model": "all-MiniLM-L6-v2", "text1": agent_step, "text2": issue_text})
         score = response.json().get("score", 0.0)
-        print(f">> Relevance score for action '{action}[:50]': {score:.4f}")
+        print(f">> Relevance score for action '{action[:50]}': {score:.4f}")
         return score
         
     def _evaluate_nodes(self, node_list):
