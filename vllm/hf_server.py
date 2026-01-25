@@ -8,7 +8,7 @@ import uuid
 import torch
 import time
 import asyncio
-from sentence_transformers import CrossEncoder
+from sentence_transformers import CrossEncoder, SentenceTransformer
 
 # import ChatCompletion, Choice, ChoiceLogprobs
 from openai.types.chat.chat_completion import ChatCompletion, Choice, ChoiceLogprobs
@@ -46,10 +46,10 @@ def get_or_load_model(model_name: str) -> HuggingFaceModel:
             loaded_llms[model_name].initialize()
         return loaded_llms[model_name]
 
-def get_or_load_encoder_model(model_name: str) -> CrossEncoder:
+def get_or_load_encoder_model(model_name: str) -> SentenceTransformer:
     with processing_lock:
         if model_name not in loaded_encoders:
-            loaded_encoders[model_name] = CrossEncoder(model_name)
+            loaded_encoders[model_name] = SentenceTransformer(model_name)
         return loaded_encoders[model_name]
 
 @app.exception_handler(ContextLengthExceededError)
@@ -104,10 +104,24 @@ async def chat_completions(request: ChatCompletionRequest):
 # An api endpoint to calculate relevance score of two text using cross-encoder model
 @app.post("/api/v1/relevance")
 async def relevance_score(request: RelevanceRequest) -> Dict[str, Any]:
-    encoder: CrossEncoder = get_or_load_encoder_model(request.model)
-    score = encoder.predict([(request.text1, request.text2)])[0]
-    prob = torch.sigmoid(torch.tensor(score))
-    return {"score": prob.item()}
+    encoder: SentenceTransformer = get_or_load_encoder_model(request.model)
+    emb1 = encoder.encode(
+        request.text1,
+        convert_to_tensor=True,
+        normalize_embeddings=True
+    )
+    emb2 = encoder.encode(
+        request.text2,
+        convert_to_tensor=True,
+        normalize_embeddings=True
+    )
+
+    cosine_sim = torch.sum(emb1 * emb2).item()  # ∈ [-1, 1]
+
+    return {"score": cosine_sim + 1.0 / 2.0}  # scale to [0, 1]
+    # score = encoder.predict([(request.text1, request.text2)])[0]
+    # prob = torch.sigmoid(torch.tensor(score))
+    # return {"score": prob.item()}
 
 @app.get("/api/v1/health")
 def health_check():
