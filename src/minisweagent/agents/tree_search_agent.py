@@ -64,7 +64,8 @@ class TreeSearchAgent(RewardGuidedAgent):
                 self.env.execute(f"git checkout {target_node.branch}")
             self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.commit}\n```")
         
-        self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.")
+        else:
+            self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.")
     
     def is_promising(self, node: TreeSearchNode) -> bool:
         """Check if a node is promising based on epsilon threshold."""
