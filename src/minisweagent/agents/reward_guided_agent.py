@@ -235,6 +235,7 @@ EOF
                 if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
                     print(">> Terminating action detected.")
                     new_node.is_terminating = True   
+                    new_node.observation = "".join(lines[1:])
                 # Check for code modifications
                 elif self._repo_has_changes():
                     new_node.modifies_code = True
@@ -265,7 +266,8 @@ EOF
                 print(f"Generated action #{i+1}: <<Invalid Action>>")
                 observation = error
             
-            new_node.observation = observation
+            if new_node.observation is None:
+                new_node.observation = observation
             nodes.append(new_node)
 
             time.sleep(2)  # To avoid rate limiting
