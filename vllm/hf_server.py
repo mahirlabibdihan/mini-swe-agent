@@ -8,6 +8,7 @@ import uuid
 import torch
 import time
 import asyncio
+from sentence_transformers import CrossEncoder
 
 # import ChatCompletion, Choice, ChoiceLogprobs
 from openai.types.chat.chat_completion import ChatCompletion, Choice, ChoiceLogprobs
@@ -40,6 +41,11 @@ def get_or_load_model(model_name: str) -> HuggingFaceModel:
             loaded_models[model_name].initialize()
         return loaded_models[model_name]
 
+def get_or_load_encoder_model(model_name: str) -> CrossEncoder:
+    with processing_lock:
+        if model_name not in loaded_models:
+            loaded_models[model_name] = CrossEncoder(model_name)
+        return loaded_models[model_name]
 
 @app.exception_handler(ContextLengthExceededError)
 async def context_length_exceeded_handler(
@@ -89,6 +95,14 @@ async def chat_completions(request: ChatCompletionRequest):
             )
         ],
     )
+    
+# An api endpoint to calculate relevance score of two text using cross-encoder model
+@app.post("/api/v1/relevance")
+async def relevance_score(model: str, text1: str, text2: str) -> Dict[str, Any]:
+    encoder: CrossEncoder = get_or_load_encoder_model(model)
+    score = encoder.predict([(text1, text2)])[0]
+    prob = torch.sigmoid(torch.tensor(score))
+    return {"score": prob.item()}
 
 @app.get("/api/v1/health")
 def health_check():

@@ -18,7 +18,7 @@ import pickle
 import os
 import numpy as np
 from pathlib import Path
-import torch
+import requests
 
 class RewardGuidedAgentConfig(SingleActionAgentConfig):
     branching_factor: int = 3
@@ -315,21 +315,15 @@ EOF
         return self.tree_node.observation
     
     def _calculate_relevance(self, action, observation) -> float:
-        from sentence_transformers import CrossEncoder
-        # Load cross-encoder trained for relevance
-        model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-        # model = CrossEncoder('NamanAgnih0tri/code-reranker-miniLM-staqc')
         # Example step from agent
         agent_step = f"Action: {action} | Observation: {observation}"
         # The issue we want to check
         issue_text = self.task
-        # Prepare input for cross-encoder
-        pairs = [(agent_step, issue_text)]
         # Get relevance score
-        score = model.predict(pairs)[0]
-        prob = torch.sigmoid(torch.tensor(score))
-        print("Relevance score:", prob)
-        return prob.item()
+        response = requests.post(os.environ["HUGGING_FACE_API_SERVER"] + "/api/v1/relevance", json={"model": "cross-encoder/ms-marco-MiniLM-L-6-v2", "text1": agent_step, "text2": issue_text})
+        score = response.json().get("score", 0.0)
+        print(f">> Relevance score for action '{action}[:50]': {score:.4f}")
+        return score
         
     def _evaluate_nodes(self, node_list):
         for new_node in tqdm(node_list, desc="Evaluating nodes"):
