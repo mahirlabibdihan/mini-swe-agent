@@ -211,7 +211,7 @@ class SingleActionAgent(DefaultAgent):
     
     def query(self) -> dict:
         """Query the model and return the response."""
-        if 0 < self.config.step_limit <= self.n_expanded or 0 < self.config.cost_limit <= self.model.cost:
+        if 0 < self.config.cost_limit <= self.model.cost:
             raise LimitsExceeded()
         
         messages = self.get_messages(self.tree_node)

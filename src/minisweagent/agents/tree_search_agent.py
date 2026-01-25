@@ -72,11 +72,65 @@ class TreeSearchAgent(RewardGuidedAgent):
             return True
         return node.value >= node.parent.value - self.curr_epsilon
     
+    def _calculate_path_write_reward(self, node: TreeSearchNode) -> float:
+        """Calculate average reward of write actions along the path to the node."""
+        total_reward = 0.0
+        write_actions = 0
+        current = node
+        while current.parent is not None:
+            if current.modifies_code and current.merged_value is not None:
+                total_reward += current.merged_value
+                write_actions += 1
+            current = current.parent
+        if write_actions == 0:
+            return 0.0
+        return total_reward / write_actions
+    
     def _handle_max_steps(self):
         if self.n_expanded < self.config.step_limit:
             return None
-        return self._make_terminating_action(self.tree_node) # TODO: First go to the path with highest-rewarded edit
-    
+        
+        # Find the best terminating action in the tree
+        terminating_nodes = [
+            n for n in self.node_map.values()
+            if n.is_terminating and n.merged_value is not None
+        ]
+        best_node = max(
+            terminating_nodes,
+            key=lambda x: x.merged_value,
+            default=None
+        )
+        if best_node is None:
+            # Find the best path (Whose average reward on write actions is highest)
+            candidates = [
+                n for n in self.node_map.values()
+                if n.merged_value is not None
+                and n.visible
+                and not n.executed
+                and not n.is_terminating
+            ]
+            
+            # For each candidate, compute average write reward along path
+            best_node = None
+            best_value = float("-inf")
+
+            for node in candidates:
+                value = self._calculate_path_write_reward(node)
+                if value > best_value:
+                    best_value = value
+                    best_node = node
+            
+            if best_value == 0:
+                best_node = max(candidates, key=lambda x: x.merged_value, default=None) # Fallback to max reward node
+                
+            # Next action is the best_node and terminate after that -> Has some issue with "local" scope. TODO: Fix that
+            best_node.visits += 1
+            self.frontier.clear()
+            term_node = self._make_terminating_action(best_node)
+            self.frontier.push(float("-inf"), term_node)
+        
+        return best_node
+
     # def go_to_best_expandable_node(self):
     #     best_node = best_node = max(
     #         (n for n in self.node_map.values()
@@ -173,9 +227,9 @@ class TreeSearchAgent(RewardGuidedAgent):
                 
                 if self.tree_node.value is not None:
                     if len(unexecuted) > 0:
-                        self.curr_epsilon = self.curr_epsilon - .05*self.config.epsilon  # Decrease epsilon to be more strict
+                        self.curr_epsilon = max(self.curr_epsilon - .03*self.config.epsilon, .7*self.config.epsilon)  # Decrease epsilon to be more strict
                     else:
-                        self.curr_epsilon = self.curr_epsilon + .05*self.config.epsilon  # Increase epsilon to be less strict
+                        self.curr_epsilon = min(self.curr_epsilon + .03*self.config.epsilon, 1.3*self.config.epsilon)  # Increase epsilon to be less strict
             
             if not self.frontier.empty():
                 best_node = self._select_action()
