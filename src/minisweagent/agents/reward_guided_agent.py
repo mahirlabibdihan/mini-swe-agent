@@ -262,7 +262,7 @@ EOF
                     print(">> Warning: Invalid terminating action detected. Skipping this action...")
                     time.sleep(2)  # To avoid rate limiting
                     continue   
-                if new_node["command"].startswith("git"):
+                if new_node.last_action["command"].startswith("git"):
                     print(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
                     time.sleep(2)  # To avoid rate limiting
                     continue
