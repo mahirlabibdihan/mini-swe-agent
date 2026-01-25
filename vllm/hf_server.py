@@ -118,7 +118,7 @@ async def relevance_score(request: RelevanceRequest) -> Dict[str, Any]:
 
     cosine_sim = torch.sum(emb1 * emb2).item()  # ∈ [-1, 1]
 
-    return {"score": cosine_sim + 1.0 / 2.0}  # scale to [0, 1]
+    return {"score": (cosine_sim + 1.0) / 2.0}  # scale to [0, 1]
     # score = encoder.predict([(request.text1, request.text2)])[0]
     # prob = torch.sigmoid(torch.tensor(score))
     # return {"score": prob.item()}
