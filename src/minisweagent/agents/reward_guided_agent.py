@@ -354,7 +354,7 @@ EOF
                             max_relevance = max(max_relevance, self.relevance_dict[file])
                     
                     # Weighted average
-                    new_value = (0.6 * new_node.value + 0.4 * max_relevance)
+                    new_value = (0.7 * new_node.value + 0.3 * max_relevance)
                     print(f">> Write-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
                 # elif len(new_node.read_files) > 0: 
