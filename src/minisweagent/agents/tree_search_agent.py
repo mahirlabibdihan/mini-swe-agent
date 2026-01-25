@@ -227,9 +227,9 @@ class TreeSearchAgent(RewardGuidedAgent):
                 
                 if self.tree_node.value is not None:
                     if len(unexecuted) > 0:
-                        self.curr_epsilon = max(self.curr_epsilon - .03*self.config.epsilon, .7*self.config.epsilon)  # Decrease epsilon to be more strict
+                        self.curr_epsilon = max(self.curr_epsilon - .03*self.config.epsilon, .7*self.config.epsilon)  # Decrease epsilon to be more strict, but not too much
                     else:
-                        self.curr_epsilon = min(self.curr_epsilon + .03*self.config.epsilon, 1.3*self.config.epsilon)  # Increase epsilon to be less strict
+                        self.curr_epsilon = self.curr_epsilon + .03*self.config.epsilon # Increase epsilon to be less strict
             
             if not self.frontier.empty():
                 best_node = self._select_action()
