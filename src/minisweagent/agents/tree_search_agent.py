@@ -90,7 +90,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         return total_reward / write_actions
     
     def _handle_max_steps(self):
-        print(f">> Checking for max steps... {self.n_expanded} / {self.config.step_limit}")
+        # print(f">> Checking for max steps... {self.n_expanded} / {self.config.step_limit}")
         if self.n_expanded < self.config.step_limit:
             return None
         
@@ -134,6 +134,7 @@ class TreeSearchAgent(RewardGuidedAgent):
             self.frontier.clear()
             term_node = self._make_terminating_action(best_node)
             self.frontier.push(float("-inf"), term_node)
+            best_node.add_child(term_node)
         
         return best_node
 
@@ -215,8 +216,9 @@ class TreeSearchAgent(RewardGuidedAgent):
         if self.tree_node.is_terminating:
             self._create_pseudo_root()
             
-        tree_nodes = self._generate_new_nodes(min(self.config.branching_factor, self.config.max_expansion - len(self.tree_node.children)))
-        self._update_tree(tree_nodes)
+        if self.tree_node.visits == 1:
+            tree_nodes = self._generate_new_nodes(min(self.config.branching_factor, self.config.max_expansion - len(self.tree_node.children)))
+            self._update_tree(tree_nodes)
 
         self.tree_node.visits += 1
         
