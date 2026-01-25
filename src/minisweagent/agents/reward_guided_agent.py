@@ -261,7 +261,11 @@ EOF
                 if new_node.is_terminating != potential_termination:
                     print(">> Warning: Invalid terminating action detected. Skipping this action...")
                     time.sleep(2)  # To avoid rate limiting
-                    continue    
+                    continue   
+                if new_node["command"].startswith("git"):
+                    print(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
+                    time.sleep(2)  # To avoid rate limiting
+                    continue
             else:
                 print(f"Generated action #{i+1}: <<Invalid Action>>")
                 observation = error
