@@ -63,7 +63,7 @@ class SingleActionAgent(DefaultAgent):
                 "extra": None
             },
         )
-        node.value = 0.0
+        node.value = node.merged_value = 0.0
         node.is_terminating = True
         curr_node.add_child(node)
         return node
