@@ -93,6 +93,8 @@ class TreeSearchAgent(RewardGuidedAgent):
         if self.n_expanded < self.config.step_limit:
             return None
         
+        print(">> Max steps reached, selecting best terminating action...")
+        
         # Find the best terminating action in the tree
         terminating_nodes = [
             n for n in self.node_map.values()
