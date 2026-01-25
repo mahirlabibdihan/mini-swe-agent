@@ -216,7 +216,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         if self.tree_node.is_terminating:
             self._create_pseudo_root()
             
-        if self.tree_node.visits == 1:
+        if self.tree_node.visits == 0:
             tree_nodes = self._generate_new_nodes(min(self.config.branching_factor, self.config.max_expansion - len(self.tree_node.children)))
             self._update_tree(tree_nodes)
 
