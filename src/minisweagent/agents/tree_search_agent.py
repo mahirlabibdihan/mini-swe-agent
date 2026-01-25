@@ -90,6 +90,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         return total_reward / write_actions
     
     def _handle_max_steps(self):
+        print(f">> Checking for max steps... {self.n_expanded} / {self.config.step_limit}")
         if self.n_expanded < self.config.step_limit:
             return None
         
