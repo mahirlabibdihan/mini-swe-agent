@@ -364,7 +364,7 @@ EOF
                 #     new_value = min(new_node.value * scale_factor, 1.0) 
                 #     print(f">> Read-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                 #     new_node.value = new_value
-                else:
+                elif not new_node.is_terminating:
                     # For read-only actions, compute relevance score
                     relevance_score = self._calculate_relevance(new_node.last_action["command"], new_node.observation)
                     # scale node value by ±10% based on relevance
