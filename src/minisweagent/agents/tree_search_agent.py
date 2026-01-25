@@ -70,7 +70,9 @@ class TreeSearchAgent(RewardGuidedAgent):
         """Check if a node is promising based on epsilon threshold."""
         if self.curr_epsilon is None or node.parent.value is None:
             return True
-        return node.value >= node.parent.value - self.curr_epsilon
+        
+        # A node is promising if it increases value within epsilon threshold or has high absolute value
+        return node.value >= node.parent.value - self.curr_epsilon or node.value > 0.8
     
     def _calculate_path_write_reward(self, node: TreeSearchNode) -> float:
         """Calculate average reward of write actions along the path to the node."""
