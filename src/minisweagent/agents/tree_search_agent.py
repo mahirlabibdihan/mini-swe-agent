@@ -131,9 +131,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                 
             # Next action is the best_node and terminate after that -> Has some issue with "local" scope. TODO: Fix that
             best_node.visits += 1
-            self.frontier.clear()
             term_node = self._make_terminating_action(best_node)
-            self.frontier.push(float("-inf"), term_node)
             best_node.add_child(term_node)
         
         return best_node
