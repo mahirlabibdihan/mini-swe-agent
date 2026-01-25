@@ -149,6 +149,11 @@ EOF
         scores = self.bm25.get_scores(issue_tokens)
         scores = (scores - scores.min()) / (scores.max() - scores.min())
         self.relevance_dict = dict(zip(self.file_ids, scores))
+        # Print top 5 relevant files
+        top_indices = np.argsort(scores)[-5:][::-1]
+        print(">> Top 5 relevant files for the issue:")
+        for idx in top_indices:
+            print(f"- {self.file_ids[idx]} (score: {scores[idx]:.4f})")
        
     def _repo_has_changes(self):
         """Check if there are any unstaged or uncommitted changes"""
