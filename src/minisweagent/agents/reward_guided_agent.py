@@ -437,7 +437,7 @@ EOF
         # The issue we want to check
         issue_text = self.task
         # Get relevance score
-        response = requests.post(os.environ["HUGGING_FACE_API_SERVER"] + "/v1/relevance", json={"model": "all-MiniLM-L6-v2", "text1": agent_step, "text2": issue_text})
+        response = requests.post(os.environ["SENTENCE_TRANSFORMER_SERVER"] + "/v1/relevance", json={"model": "all-MiniLM-L6-v2", "text1": agent_step, "text2": issue_text})
         score = response.json().get("score", 0.0)
         print(f">> Relevance score for action '{action[:50] if action else '<<Invalid Action>>'}': {score:.4f}")
         return score
