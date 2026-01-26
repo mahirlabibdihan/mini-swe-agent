@@ -73,7 +73,7 @@ async def context_length_exceeded_handler(
     )
     
 # -------- Endpoint --------
-@app.post("/api/v1/chat/completions", response_model=ChatCompletion)
+@app.post("/v1/chat/completions", response_model=ChatCompletion)
 async def chat_completions(request: ChatCompletionRequest):
     model: HuggingFaceModel = get_or_load_model(request.model)
 
@@ -102,7 +102,7 @@ async def chat_completions(request: ChatCompletionRequest):
     )
     
 # An api endpoint to calculate relevance score of two text using cross-encoder model
-@app.post("/api/v1/relevance")
+@app.post("/v1/relevance")
 async def relevance_score(request: RelevanceRequest) -> Dict[str, Any]:
     encoder: SentenceTransformer = get_or_load_encoder_model(request.model)
     emb1 = encoder.encode(
@@ -123,7 +123,7 @@ async def relevance_score(request: RelevanceRequest) -> Dict[str, Any]:
     # prob = torch.sigmoid(torch.tensor(score))
     # return {"score": prob.item()}
 
-@app.get("/api/v1/health")
+@app.get("/v1/health")
 def health_check():
     return {"status": "ok"}
 

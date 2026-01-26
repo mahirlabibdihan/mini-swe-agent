@@ -154,8 +154,6 @@ def file_name_and_contents(filename, relative_path):
 
 for filename in ROOT.rglob("*.py"):
     try:
-        if filename.suffix != ".py":
-            continue
         if is_test(filename.as_posix()):
             continue
         relative = filename.relative_to(ROOT).as_posix()

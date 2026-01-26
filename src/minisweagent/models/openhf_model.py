@@ -29,7 +29,7 @@ class OpenHFModel(OpenRouterModel):
         self.config = OpenRouterModelConfig(**kwargs)
         self.cost = 0.0
         self.n_calls = 0
-        self._api_url = f"{os.getenv("HUGGING_FACE_API_SERVER", "")}/api/v1/chat/completions"
+        self._api_url = f"{os.getenv("HUGGING_FACE_API_SERVER", "")}/v1/chat/completions"
         self._api_key = "your-api-key-here"
 
     @retry(
