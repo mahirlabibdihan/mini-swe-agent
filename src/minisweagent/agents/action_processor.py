@@ -36,19 +36,16 @@ def merge_nodes(node_list: List[tuple[float, TreeSearchNode]], merge_strategy = 
             nodes.sort(key=lambda x: x.value, reverse=True)
             
             if merge_strategy == "sum":
-                best_node = nodes[0]
-                # sort by value descending
                 merged_score = nodes[0].value + (0.7 / len(nodes)) * sum([n.value for n in nodes[1:]])
-                for n in nodes[1:]:
-                    n.prune()
-                best_node.merged_value = merged_score
+                nodes[0].merged_value = merged_score
             elif merge_strategy == "avg":
                 merged_score = sum([n.value for n in nodes]) / len(nodes)
-                for n in nodes[1:]:
-                   n.prune()
                 nodes[0].merged_value = merged_score 
             else:
                 nodes[0].merged_value = nodes[0].value 
+            
+            for n in nodes[1:]:
+                n.prune()
         
         tree_nodes.append(nodes[0])
     
