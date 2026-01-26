@@ -437,7 +437,7 @@ EOF
         # The issue we want to check
         issue_text = self.task
         # Get relevance score
-        response = requests.post(os.environ["HUGGING_FACE_API_SERVER"] + "/api/v1/relevance", json={"model": "all-MiniLM-L6-v2", "text1": agent_step, "text2": issue_text})
+        response = requests.post(os.environ["HUGGING_FACE_API_SERVER"] + "/v1/relevance", json={"model": "all-MiniLM-L6-v2", "text1": agent_step, "text2": issue_text})
         score = response.json().get("score", 0.0)
         print(f">> Relevance score for action '{action[:50] if action else '<<Invalid Action>>'}': {score:.4f}")
         return score
@@ -504,11 +504,11 @@ EOF
                     new_node.value = new_value
                 
                 # For read-only actions, compute relevance score
-                # relevance_score = self._calculate_relevance(new_node.last_action["command"], new_node.observation)
-                # # Take weighted average of relevance score and current value
-                # new_value = (0.7 * new_node.value + 0.3 * relevance_score)
-                # print(f">> Similarity reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
-                # new_node.value = new_value
+                relevance_score = self._calculate_relevance(new_node.last_action["command"], new_node.observation)
+                # Take weighted average of relevance score and current value
+                new_value = (0.7 * new_node.value + 0.3 * relevance_score)
+                print(f">> Similarity reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                new_node.value = new_value
                             
     def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
         self.n_actions += len(self.tree_node.children)
