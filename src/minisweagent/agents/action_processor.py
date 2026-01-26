@@ -23,7 +23,7 @@ def merge_nodes(node_list: List[tuple[float, TreeSearchNode]], merge_strategy = 
                 existing_node.prune()
                 
             if merge_strategy == "sum":
-                new_score = 0.8 * existing_score + 0.8 * score
+                new_score = 0.7 * existing_score + 0.7 * score
             elif merge_strategy == "max":
                 new_score = max(existing_score, score)
             node_dict[command] = (new_score, best_node)
