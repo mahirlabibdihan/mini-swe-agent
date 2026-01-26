@@ -47,6 +47,8 @@ def merge_nodes(node_list: List[tuple[float, TreeSearchNode]], merge_strategy = 
                 for n in nodes[1:]:
                    n.prune()
                 nodes[0].merged_value = merged_score 
+            else:
+                nodes[0].merged_value = nodes[0].value 
         
         tree_nodes.append(nodes[0])
     
