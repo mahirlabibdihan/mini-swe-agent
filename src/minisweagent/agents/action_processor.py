@@ -38,7 +38,7 @@ def merge_nodes(node_list: List[tuple[float, TreeSearchNode]], merge_strategy = 
             if merge_strategy == "sum":
                 best_node = nodes[0]
                 # sort by value descending
-                merged_score = nodes[0].value + 0.3 * sum([n.value for n in nodes[1:]])
+                merged_score = nodes[0].value + (0.6 / len(nodes)) * sum([n.value for n in nodes[1:]])
                 for n in nodes[1:]:
                     n.prune()
                 best_node.merged_value = merged_score
