@@ -12,35 +12,43 @@ def merge_nodes(node_list: List[tuple[float, TreeSearchNode]], merge_strategy = 
         score = node.value
         command = node.last_action["command"]
         if command not in node_dict:
-            node_dict[command] = (score, 1, node)
+            node_dict[command] = [node]
         else:
-            existing_score, c,  existing_node = node_dict[command]
-            if existing_score >= score:
-                best_node = existing_node
-                node.prune()
-            else:
-                best_node = node
-                existing_node.prune()
-                
-            if merge_strategy == "sum":
-                new_score = existing_score + score
-                c += 1
-            elif merge_strategy == "max":
-                new_score = max(existing_score, score)
-            node_dict[command] = (new_score, c, best_node)
+            node_dict[command].append(node)
+            # best_score, merged_score, best_node = node_dict[command]
+            # if best_score >= score:
+            #     node.prune()
+            # else:
+            #     best_node.prune()
+            #     best_node = node
+            #     best_score = score
+            
+            # if merge_strategy == "sum":
+            #     new_score = merged_score + score
+
+            # node_dict[command] = (best_score, new_score, best_node)
 
     merged_node_list = list(node_dict.values())
-    
     tree_nodes = []
-    for score, c, node in merged_node_list:
-        node.merged_value = score
-        # Adjust value based on number of merges
-        if merge_strategy == "sum":
-            new_value = score * (2 / (1 + c))
-            print(f">> Merged {c} nodes for action '{node.last_action['command']}'. Value adjusted: {score:.4f} -> {new_value:.4f}")
-            node.merged_value = new_value
+    for nodes in merged_node_list:
+        if len(nodes) > 1:
+            # print(f">> Merging {len(nodes)} nodes for action '{nodes[0].last_action['command']}'")
+            nodes.sort(key=lambda x: x.value, reverse=True)
             
-        tree_nodes.append(node)
+            if merge_strategy == "sum":
+                best_node = nodes[0]
+                # sort by value descending
+                merged_score = nodes[0].value + 0.3 * sum([n.value for n in nodes[1:]])
+                for n in nodes[1:]:
+                    n.prune()
+                best_node.merged_value = merged_score
+            elif merge_strategy == "avg":
+                merged_score = sum([n.value for n in nodes]) / len(nodes)
+                for n in nodes[1:]:
+                   n.prune()
+                nodes[0].merged_value = merged_score 
         
+        tree_nodes.append(nodes[0])
+    
     return tree_nodes
         
