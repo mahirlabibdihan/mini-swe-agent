@@ -55,7 +55,6 @@ class OpenHFModel(OpenRouterModel):
         payload = {
             "model": self.config.model_name,
             "messages": messages,
-            "usage": {"include": True},
             **(self.config.model_kwargs | kwargs),
         }
 

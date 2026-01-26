@@ -259,5 +259,4 @@ reward_model:
   # model_name: "meta-llama/Llama-3.2-3B-Instruct"
   model_class: openhf
   model_kwargs:
-    drop_params: true
     temperature: 0.0
