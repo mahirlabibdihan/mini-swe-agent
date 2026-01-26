@@ -24,6 +24,103 @@ class RewardGuidedAgentConfig(SingleActionAgentConfig):
     branching_factor: int = 3
     """The maximum number of branches to explore at each node."""
 
+import json
+import ast
+from pathlib import PurePosixPath
+
+
+def parse_python_content(file_content: str):
+    """
+    Equivalent to parse_python_file(...), but works from in-memory content.
+    """
+    try:
+        parsed_data = ast.parse(file_content)
+    except Exception:
+        return [], [], file_content.splitlines()
+
+    class_info = []
+    function_names = []
+    class_methods = set()
+    lines = file_content.splitlines()
+
+    for node in ast.walk(parsed_data):
+        if isinstance(node, ast.ClassDef):
+            methods = []
+            for n in node.body:
+                if isinstance(n, ast.FunctionDef):
+                    methods.append(
+                        {
+                            "name": n.name,
+                            "start_line": n.lineno,
+                            "end_line": n.end_lineno,
+                            "text": lines[n.lineno - 1 : n.end_lineno],
+                        }
+                    )
+                    class_methods.add(n.name)
+
+            class_info.append(
+                {
+                    "name": node.name,
+                    "start_line": node.lineno,
+                    "end_line": node.end_lineno,
+                    "text": lines[node.lineno - 1 : node.end_lineno],
+                    "methods": methods,
+                }
+            )
+
+        elif isinstance(node, ast.FunctionDef):
+            if node.name not in class_methods:
+                function_names.append(
+                    {
+                        "name": node.name,
+                        "start_line": node.lineno,
+                        "end_line": node.end_lineno,
+                        "text": lines[node.lineno - 1 : node.end_lineno],
+                    }
+                )
+
+    return class_info, function_names, lines
+
+
+def result_to_structure(result: str):
+    """
+    Convert env.execute JSONL output into the same structure as create_structure(),
+    except WITHOUT an artificial repo root.
+    """
+    structure = {}
+
+    for line in result.splitlines():
+        if not line.strip():
+            continue
+
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        path = PurePosixPath(obj["id"])
+
+        # Remove the leading "path\\n"
+        _, _, file_text = obj["content"].partition("\n")
+
+        classes, functions, lines = parse_python_content(file_text)
+
+        curr = structure
+
+        # Build directory tree
+        for part in path.parts[:-1]:
+            curr = curr.setdefault(part, {})
+
+        # Insert Python file payload
+        curr[path.name] = {
+            "classes": classes,
+            "functions": functions,
+            "text": lines,
+        }
+
+    return structure
+
+
 class RewardGuidedAgent(SingleActionAgent):
     def __init__(self, 
                  model: Model, env: Environment,
@@ -74,6 +171,11 @@ EOF
             Path(f"retrieval/{image_name}").mkdir(parents=True, exist_ok=True)
             with open(f"retrieval/{image_name}/documents.jsonl", "w") as f:
                 f.write(result["output"])
+        
+        if not Path(f"retrieval/{image_name}/structure.json").exists():
+            structure = result_to_structure(result["output"])
+            with open(f"retrieval/{image_name}/structure.json", "w") as f:
+                json.dump(structure, f, indent=2)
         
         documents = []
         self.file_ids = []
@@ -243,20 +345,20 @@ EOF
                     # Rollback changes
                     print(">> Write-action detected.")
                     self.env.execute("git restore .")
-                # else:
-                #     import shlex
-                #     cmd = action['action']
-                #     tokens = shlex.split(cmd)
-                #     filename = None
-                #     if tokens[0] == "nl":
-                #         for token in tokens[1:]:
-                #             if not token.startswith('-'):
-                #                 filename = token
-                #                 break
+                elif action['action'].startswith("nl"):
+                    import shlex
+                    cmd = action['action']
+                    tokens = shlex.split(cmd)
+                    filename = None
+                    if tokens[0] == "nl":
+                        for token in tokens[1:]:
+                            if not token.startswith('-'):
+                                filename = token
+                                break
                     
-                #     if filename is not None:
-                #         new_node.read_files = [filename]
-                #         print(f">> Read-action detected. File: {filename}")
+                    if filename is not None:
+                        new_node.read_files = [filename]
+                        print(f">> Read-action detected. File: {filename}")
 
                 if new_node.is_terminating != potential_termination:
                     print(">> Warning: Invalid terminating action detected. Skipping this action...")
@@ -389,18 +491,17 @@ EOF
                     new_value = (0.7 * new_node.value + 0.3 * max_relevance)
                     print(f">> Write-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
-                # elif len(new_node.read_files) > 0: 
-                #     # Slightly boost nodes that read files based on relevance
-                #     max_relevance = 0.0
-                #     for file in new_node.read_files:
-                #         if file in self.relevance_dict:
-                #             max_relevance = max(max_relevance, self.relevance_dict[file])
+                elif len(new_node.read_files) > 0: 
+                    # Slightly boost nodes that read files based on relevance
+                    max_relevance = 0.0
+                    for file in new_node.read_files:
+                        if file in self.relevance_dict:
+                            max_relevance = max(max_relevance, self.relevance_dict[file])
                     
-                #     # scale node value by ±10% based on relevance
-                #     scale_factor = 0.9 + 0.2 * max_relevance
-                #     new_value = min(new_node.value * scale_factor, 1.0) 
-                #     print(f">> Read-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
-                #     new_node.value = new_value
+                    # Weighted average
+                    new_value = (0.9 * new_node.value + 0.1 * max_relevance)
+                    print(f">> Read-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                    new_node.value = new_value
                 
                 # For read-only actions, compute relevance score
                 relevance_score = self._calculate_relevance(new_node.last_action["command"], new_node.observation)
