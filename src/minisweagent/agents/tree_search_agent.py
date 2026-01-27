@@ -252,7 +252,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                         self.curr_epsilon = self.curr_epsilon + .03*self.config.epsilon # Increase epsilon to be less strict
             
             if self.config.selection_scope == "global" and self.n_modifications >= 2 and (
-                self.n_expanded >= 0.3 * self.config.step_limit or self.frontier.empty()
+                self.n_expanded >= self.config.step_limit/3 or self.frontier.empty()
             ):
                     best_leaf = self._find_best_write_leaf()
                     if best_leaf is not None:
