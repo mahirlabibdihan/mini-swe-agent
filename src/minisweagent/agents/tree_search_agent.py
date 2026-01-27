@@ -238,7 +238,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         ]
         if not write_leaves:
             return None
-        best_leaf = max(write_leaves, key=lambda x: x.get_path_value(0.9))
+        best_leaf = max(write_leaves, key=lambda x: x.get_path_value(0.85))
         return best_leaf
         
     def _switch_to_phase_2(self):
