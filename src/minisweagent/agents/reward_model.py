@@ -349,7 +349,7 @@ Your task is specifically to make changes to non-test files in the current direc
             f"Reward scores - Consistency: {C:.2f}, Knowledge Gain: {K:.2f}, Trajectory Alignment: {T:.2f}"
         )
         # Weighted sum
-        w_c, w_k, w_t = 0.30, 0.35, 0.35
+        w_c, w_k, w_t = 0.25, 0.40, 0.35
         R = w_c * C + w_k * K + w_t * T
         
         return R
