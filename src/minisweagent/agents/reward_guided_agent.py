@@ -484,7 +484,16 @@ EOF
                 new_node.value = self.reward_model.compute_reward(new_node, self.extra_template_vars["task"])
                 if new_node.last_action["command"] is None:
                     # Penalize invalid actions
-                    new_value = 0.7 * new_node.value
+                    penalty = 1
+                    curr = new_node
+                    while curr is not None:
+                        if curr.last_action["command"] is None:
+                            penalty *= 0.7
+                        else:
+                            break
+                        curr = curr.parent
+                        
+                    new_value = penalty * new_node.value
                     print(f">> Invalid-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
                 

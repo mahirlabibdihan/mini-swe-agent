@@ -169,6 +169,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         return alpha_max - (alpha_max - alpha_min) * progress
 
     def go_to_best_executable_node(self, k: int = 1) -> List[TreeSearchNode]:
+        # TODO: Find best on a subtree basis. Root should be provided.
         def node_priority(n, gamma=0.9, max_depth=50):
             path_value = n.get_path_value(gamma)
             depth_score = math.log1p(n.level) / math.log1p(max_depth)
