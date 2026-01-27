@@ -348,7 +348,7 @@ EOF
                     new_node.modified_files = self._get_modified_files()
                     # Rollback changes
                     print(">> Write-action detected.")
-                    self.env.execute("git reset --hard HEAD~1")
+                    self.env.execute("git reset --hard HEAD && git clean -fd")
                 elif action['action'].startswith("nl"):
                     import shlex
                     cmd = action['action']
