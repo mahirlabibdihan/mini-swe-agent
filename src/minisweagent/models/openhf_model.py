@@ -68,6 +68,11 @@ class OpenHFModel(OpenRouterModel):
                 raise OpenRouterAuthenticationError(error_msg) from e
             elif response.status_code == 429:
                 raise OpenRouterRateLimitError("Rate limit exceeded") from e
+            elif response.status_code == 400:
+                if "please reduce the length of the input messages" in response.text.lower():
+                    raise OpenHFContextLengthExceededError("Context length exceeded") from e
+                else:
+                    raise OpenRouterAPIError(f"Request failed: {e}") from e
             elif response.status_code == 413:
                 raise OpenHFContextLengthExceededError("Context length exceeded") from e
             else:
