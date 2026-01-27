@@ -240,23 +240,24 @@ class TreeSearchAgent(RewardGuidedAgent):
         while best_node is None:
             if self.config.selection_scope == "local":
                 self.frontier.clear() # Local frontier only
-                
+                        
             if self.config.selection_scope == "local" or self.tree_node.visits == 1: # Local or First visit
-                if self.n_expanded >= 0.3 * self.config.step_limit:
-                    self.phase = 2  # Switch to phase 2 after 30% of steps
-                    self.frontier.clear()  # Clear frontier when switching phases
-                    best_leaf = self._find_best_write_leaf()
-                    self._update_frontier([best_leaf])
-                    
-                else:
-                    unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c) and (self.phase > 1 or not c.modifies_code)] # Unexecuted + Promising
-                    self._update_frontier(unexecuted)
+                unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c) and (self.phase > 1 or not c.modifies_code or self.config.selection_scope == "local")] # Unexecuted + Promising
+                self._update_frontier(unexecuted)
                 
                 if self.tree_node.value is not None and self.config.epsilon is not None:
                     if len(unexecuted) > 0:
                         self.curr_epsilon = max(self.curr_epsilon - .03*self.config.epsilon, .7*self.config.epsilon)  # Decrease epsilon to be more strict, but not too much
                     else:
                         self.curr_epsilon = self.curr_epsilon + .03*self.config.epsilon # Increase epsilon to be less strict
+            
+            if self.config.selection_scope == "global":
+                if self.n_expanded >= 0.3 * self.config.step_limit or self.frontier.empty():
+                    best_leaf = self._find_best_write_leaf()
+                    if best_leaf is not None:
+                        self.phase = 2  # Switch to phase 2 after 30% of steps
+                        self.frontier.clear()  # Clear frontier when switching phases
+                        self._update_frontier([best_leaf])
             
             if not self.frontier.empty():
                 best_node = self._select_action()
