@@ -246,6 +246,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         if best_leaf is not None:
             print(":: Switching to phase 2: Prioritizing write actions.")
             self.phase = 2  # Switch to phase 2 after 30% of steps
+            self.node_map = {best_leaf.id: best_leaf}
             self.frontier.clear()  # Clear frontier when switching phases
             self._update_frontier([best_leaf])
             return best_leaf
@@ -288,10 +289,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                 self.n_expanded >= min(self.config.step_limit/3, 10) or self.frontier.empty()
             ):
                 self._switch_to_phase_2()
-            
-            
-            
-                    
+                 
             
             if not self.frontier.empty():
                 best_node = self._select_action()
