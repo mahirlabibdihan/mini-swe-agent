@@ -47,12 +47,6 @@ Assign an integer score from 0 to 100 that reflects how logically consistent the
 
 {score_format_prompt}
 """
-# The observation mostly follows the intent expressed in the thought, but not perfectly.
-# <score>72</score>
-
-# The observation perfectly matches the intent and fully supports the debugging step.
-# <score>95</score>
-# """
 
 trajectory_alignment_prompt = """
 You are evaluating whether a debugging step aligns with the overall intent.
@@ -77,12 +71,6 @@ Assign an integer score from 0 to 100 that reflects how well this step moves the
 
 {score_format_prompt}
 """
-# The step partially helps but does not fully resolve the issue.
-# <score>63</score>
-
-# I think this action reveals useful information.
-# <score>78</score>
-# """
 
 knowledge_gain_prompt = """
 You are evaluating whether a debugging step provided new and useful information.
@@ -107,6 +95,102 @@ Assign an integer score from 0 to 100 that reflects how much NEW and USEFUL info
 
 {score_format_prompt}
 """
+
+
+code_edit_effectiveness_prompt = """
+You are evaluating a CODE EDIT debugging step.
+
+>> Instruction
+{task}
+
+>> Previous Actions and Observations
+{trajectory}
+
+>> Current action (Code Edit)
+{action}
+
+>> Resulting Observation (e.g., test output, error message, behavior change)
+{observation}
+
+Question:
+How effective was this code edit in addressing the underlying issue?
+
+Scoring guidelines:
+Assign an integer score from 0 to 100 that reflects how effective this code edit was. A score of 0 means the code edit is clearly harmful, irrelevant, or moves away from fixing the issue. A score of 100 means the code edit directly and substantially advances the fix or resolves the issue. Use any integer between 0 and 100 to best reflect the degree of effectiveness.
+
+{score_format_prompt}
+"""
+
+test_feedback_gain_prompt = """
+You are evaluating a TESTING debugging step.
+
+>> Instruction
+{task}
+
+>> Previous Actions and Observations
+{trajectory}
+
+>> Current action (Testing)
+{action}
+
+>> Observation (e.g., test failures, passes, logs, coverage info)
+{observation}
+
+Question:
+Did this testing step provide meaningful and informative feedback for fixing the issue?
+
+Scoring guidelines:
+Assign an integer score from 0 to 100 that reflects how valuable the testing feedback is.
+
+A score of 0 means the testing step provides no useful information (e.g., redundant test passes with no new coverage or insight).  
+A score of 100 means the testing step provides highly informative feedback that significantly improves understanding of the issue (e.g., revealing new failures, isolating the bug, or substantially expanding test coverage).  
+Use any integer between 0 and 100 to best reflect the degree of usefulness.
+
+When assigning the score, consider:
+- Whether the test outcome reveals new failures or confirms incorrect behavior.
+- Whether the test outcome rules out hypotheses or narrows down the cause of the issue.
+- Whether the testing scope meaningfully increases coverage (e.g., running an entire suite or directory vs. a single test).
+- Whether passing tests are informative given prior test results (e.g., previously untested code paths vs. already-known passes).
+
+{score_format_prompt}
+"""
+
+termination_readiness_prompt = """
+You are evaluating a TERMINATION / SUBMISSION debugging step.
+
+>> Instruction
+{task}
+
+>> Previous Actions and Observations
+{trajectory}
+
+>> Current action (Termination / Submission)
+{action}
+
+>> Observation
+{observation}
+
+Question:
+Is it appropriate for the agent to terminate and submit the solution at this point?
+
+Scoring guidelines:
+Assign an integer score from 0 to 100 that reflects how appropriate this termination decision is.
+
+A score of 0 means the agent clearly terminates prematurely (e.g., unresolved errors, failing or unrun tests, unvalidated edits, or missing evidence of correctness).  
+A score of 100 means the agent terminates at an appropriate time, with strong evidence that the solution is correct and sufficiently validated.  
+Use any integer between 0 and 100 to best reflect the degree of readiness for termination.
+
+When assigning the score, consider:
+- Whether the core issue described in the instruction appears to be resolved.
+- Whether recent code edits were followed by adequate testing or verification.
+- Whether test results (if any) support correctness rather than uncertainty.
+- Whether remaining plausible failure modes were reasonably ruled out.
+- Whether additional debugging, testing, or refinement would still be necessary.
+
+{score_format_prompt}
+"""
+
+
 # The observation reveals some new information that might be useful for debugging.
 # <score>65</score>
 
@@ -208,6 +292,7 @@ class RewardModel():
         self,
         node: TreeSearchNode,
         task: Optional[str] = None,
+        cmd_type: str = "search" 
     ) -> float:
         """Compute reward for an action.
         
@@ -250,7 +335,15 @@ Your task is specifically to make changes to non-test files in the current direc
         # Detailed scoring
         C = self.score(consistency_prompt, task, trajectory, action, observation)
         K = self.score(knowledge_gain_prompt, task, trajectory, action, observation)
-        T = self.score(trajectory_alignment_prompt, task, trajectory, action, observation)
+        
+        if cmd_type == "edit":
+            T = self.score(code_edit_effectiveness_prompt, task, trajectory, action, observation)
+        elif cmd_type == "test":
+            T = self.score(test_feedback_gain_prompt, task, trajectory, action, observation)
+        elif cmd_type == "submit":
+            T = self.score(termination_readiness_prompt, task, trajectory, action, observation)
+        else:
+            T = self.score(trajectory_alignment_prompt, task, trajectory, action, observation)
 
         print(
             f"Reward scores - Consistency: {C:.2f}, Knowledge Gain: {K:.2f}, Trajectory Alignment: {T:.2f}"

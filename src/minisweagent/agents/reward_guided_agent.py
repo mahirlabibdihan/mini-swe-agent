@@ -481,7 +481,15 @@ EOF
     def _evaluate_nodes(self, node_list):
         for new_node in tqdm(node_list, desc="Evaluating nodes"):
             if new_node.value is None:
-                new_node.value = self.reward_model.compute_reward(new_node, self.extra_template_vars["task"])
+                cmd_type = "search"
+                if new_node.last_action["command"] is not None:
+                    if new_node.is_terminating:
+                        cmd_type = "submit"
+                    elif new_node.modifies_code:
+                        cmd_type = "edit"
+                    elif new_node.last_action["command"].startswith("pytest"):
+                        cmd_type = "test"
+                new_node.value = self.reward_model.compute_reward(new_node, self.task, cmd_type=cmd_type)
                 if new_node.last_action["command"] is None:
                     # Penalize invalid actions
                     penalty = 1
