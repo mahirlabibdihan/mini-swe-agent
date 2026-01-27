@@ -334,16 +334,16 @@ Your task is specifically to make changes to non-test files in the current direc
         
         # Detailed scoring
         C = self.score(consistency_prompt, task, trajectory, action, observation)
-        K = self.score(knowledge_gain_prompt, task, trajectory, action, observation)
         
+        T = self.score(trajectory_alignment_prompt, task, trajectory, action, observation)
         if cmd_type == "edit":
-            T = self.score(code_edit_effectiveness_prompt, task, trajectory, action, observation)
+            K = self.score(code_edit_effectiveness_prompt, task, trajectory, action, observation)
         elif cmd_type == "test":
-            T = self.score(test_feedback_gain_prompt, task, trajectory, action, observation)
+            K = self.score(test_feedback_gain_prompt, task, trajectory, action, observation)
         elif cmd_type == "submit":
-            T = self.score(termination_readiness_prompt, task, trajectory, action, observation)
+            K = self.score(termination_readiness_prompt, task, trajectory, action, observation)
         else:
-            T = self.score(trajectory_alignment_prompt, task, trajectory, action, observation)
+            K = self.score(knowledge_gain_prompt, task, trajectory, action, observation)
 
         print(
             f"Reward scores - Consistency: {C:.2f}, Knowledge Gain: {K:.2f}, Trajectory Alignment: {T:.2f}"
