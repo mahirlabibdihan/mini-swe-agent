@@ -205,6 +205,15 @@ class SingleActionAgent(DefaultAgent):
             "timestamp": time.time(),
         })
         messages.reverse()
+        
+        if self.n_expanded > 0.85 * self.config.step_limit:
+            warning_msg = f"⚠️ Warning: Approaching step limit ({self.n_expanded}/{self.config.step_limit})"
+            print(warning_msg)
+            messages.append({
+                "role": "system",
+                "content": warning_msg,
+                "timestamp": time.time(),
+            })
         return messages
     
     def query(self) -> dict:
