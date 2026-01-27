@@ -70,6 +70,7 @@ class TreeSearchNode:
             "visits": self.visits,
             "epsilon": self.epsilon,
             "modified_files": self.modified_files,
+            "modifies_code": self.modifies_code,
             "read_files": self.read_files,
             "last_action": {
                 "command": self.last_action["command"],
@@ -92,6 +93,7 @@ class TreeSearchNode:
             "visits": self.visits,
             "epsilon": self.epsilon,
             "modified_files": self.modified_files,
+            "modifies_code": self.modifies_code,
             "read_files": self.read_files,
             "last_action": {
                 "command": self.last_action["command"],
