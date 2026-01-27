@@ -131,6 +131,7 @@ class RewardGuidedAgent(SingleActionAgent):
         super().__init__(model, env, config_class=config_class, **kwargs)
         self.frontier = Frontier(budget=self.config.branching_factor)
         self.reward_model = reward_model
+        self.n_modifications = 0
         result = self.env.execute("""
 python3 - << 'EOF'
 import json
@@ -196,6 +197,7 @@ EOF
                 pickle.dump(self.bm25, f)
                 
         self.relevance_dict = {}
+        
             
     def _get_commit_hash(self):
         """Get the current commit hash"""
@@ -341,6 +343,7 @@ EOF
                 # Check for code modifications
                 elif self._repo_has_changes():
                     new_node.modifies_code = True
+                    self.n_modifications += 1
                     new_node.modified_files = self._get_modified_files()
                     # Rollback changes
                     print(">> Write-action detected.")

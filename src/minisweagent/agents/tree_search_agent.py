@@ -251,8 +251,9 @@ class TreeSearchAgent(RewardGuidedAgent):
                     else:
                         self.curr_epsilon = self.curr_epsilon + .03*self.config.epsilon # Increase epsilon to be less strict
             
-            if self.config.selection_scope == "global":
-                if self.n_expanded >= 0.3 * self.config.step_limit or self.frontier.empty():
+            if self.config.selection_scope == "global" and self.n_modifications >= 2 and (
+                self.n_expanded >= 0.3 * self.config.step_limit or self.frontier.empty()
+            ):
                     best_leaf = self._find_best_write_leaf()
                     if best_leaf is not None:
                         print(":: Switching to phase 2: Prioritizing write actions.")
