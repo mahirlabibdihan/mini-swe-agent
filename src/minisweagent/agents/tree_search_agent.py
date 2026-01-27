@@ -176,21 +176,29 @@ class TreeSearchAgent(RewardGuidedAgent):
             return alpha * path_value + (1 - alpha) * depth_score
 
         # Materialize candidates (important)
-        candidates = [
-            n for n in self.node_map.values()
-            if n.merged_value is not None
-            and n.visible
-            and not n.executed
-            and n.id != self.tree_root.id
-            and (self.phase > 1 or not n.modifies_code)
-        ]
+        while True:
+            candidates = [
+                n for n in self.node_map.values()
+                if n.merged_value is not None
+                and n.visible
+                and not n.executed
+                and n.id != self.tree_root.id
+                and (self.phase > 1 or not n.modifies_code)
+                and (self.phase > 2 or not n.is_terminating)
+            ]
         
-        if not candidates:
-            if self.phase == 1:
-                best_node = self._switch_to_phase_2()
-                if best_node is not None:
-                    return best_node
-            raise NoActionFound("No executable nodes found in the tree.")
+            if not candidates:
+                if self.phase == 1:
+                    best_node = self._switch_to_phase_2()
+                    if best_node is not None:
+                        return best_node
+                elif self.phase == 2:
+                    print(":: Switching to phase 3: Allowing terminating actions.")
+                    self.phase = 3
+                    continue
+                     
+                raise NoActionFound("No executable nodes found in the tree.")
+            
                     
         # Find max depth among all nodes
         max_depth = max(n.level for n in candidates)
@@ -258,9 +266,13 @@ class TreeSearchAgent(RewardGuidedAgent):
         while best_node is None:
             if self.config.selection_scope == "local":
                 self.frontier.clear() # Local frontier only
-                        
+            
+            if self.config.selection_scope == "global" and self.n_expanded >= self.config.step_limit / 2 and self.phase == 2:
+                print(":: Switching to phase 3: Allowing terminating actions.")
+                self.phase = 3  # Switch to phase 3 after 50% of steps
+                
             if self.config.selection_scope == "local" or self.tree_node.visits == 1: # Local or First visit
-                unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c) and (self.phase > 1 or not c.modifies_code or self.config.selection_scope == "local")] # Unexecuted + Promising
+                unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c) and (self.phase > 1 or not c.modifies_code or self.config.selection_scope == "local") and (self.phase > 2 or not c.is_terminating or self.config.selection_scope == "local")] # Unexecuted + Promising
                 self._update_frontier(unexecuted)
                 
                 if self.tree_node.value is not None and self.config.epsilon is not None:
@@ -273,6 +285,9 @@ class TreeSearchAgent(RewardGuidedAgent):
                 self.n_expanded >= min(self.config.step_limit/3, 10) or self.frontier.empty()
             ):
                 self._switch_to_phase_2()
+            
+            
+            
                     
             
             if not self.frontier.empty():
