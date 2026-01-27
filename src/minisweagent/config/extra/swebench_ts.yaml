@@ -234,7 +234,7 @@ agent:
   max_expansion: 5
   frontier_budget: 4
   selection_scope: "global"
-  epsilon: None
+  # epsilon: 0.3
   
 environment:
   cwd: "/testbed"
