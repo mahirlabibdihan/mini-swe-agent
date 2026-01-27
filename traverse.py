@@ -1,4 +1,5 @@
 import json
+import sys
 
 def dfs_print_last_action_code(node, depth=0):
     if node["visible"] == False:
@@ -26,7 +27,7 @@ def dfs_print_last_action_code(node, depth=0):
 # with open('tree.json', 'r', encoding="utf-8") as f:
 #     root_node = json.load(f)
 
-file_path = "debug_tree.json"
+file_path = sys.argv[1] if len(sys.argv) > 1 else "debug_tree.json"
 
 try:
     with open(file_path, 'r', encoding='utf-8') as f:
