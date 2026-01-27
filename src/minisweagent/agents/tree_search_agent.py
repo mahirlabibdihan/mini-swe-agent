@@ -182,8 +182,16 @@ class TreeSearchAgent(RewardGuidedAgent):
             and n.visible
             and not n.executed
             and n.id != self.tree_root.id
+            and (self.phase > 1 or not n.modifies_code)
         ]
         
+        if not candidates:
+            if self.phase == 1:
+                best_node = self._switch_to_phase_2()
+                if best_node is not None:
+                    return best_node
+            raise NoActionFound("No executable nodes found in the tree.")
+                    
         # Find max depth among all nodes
         max_depth = max(n.level for n in candidates)
         
@@ -223,6 +231,16 @@ class TreeSearchAgent(RewardGuidedAgent):
         best_leaf = max(write_leaves, key=lambda x: x.get_path_value(0.9))
         return best_leaf
         
+    def _switch_to_phase_2(self):
+        best_leaf = self._find_best_write_leaf()
+        if best_leaf is not None:
+            print(":: Switching to phase 2: Prioritizing write actions.")
+            self.phase = 2  # Switch to phase 2 after 30% of steps
+            self.frontier.clear()  # Clear frontier when switching phases
+            self._update_frontier([best_leaf])
+            return best_leaf
+        return None
+        
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
         if self.tree_node.is_terminating:
@@ -254,12 +272,8 @@ class TreeSearchAgent(RewardGuidedAgent):
             if self.config.selection_scope == "global" and self.n_modifications >= 2 and (
                 self.n_expanded >= min(self.config.step_limit/3, 10) or self.frontier.empty()
             ):
-                    best_leaf = self._find_best_write_leaf()
-                    if best_leaf is not None:
-                        print(":: Switching to phase 2: Prioritizing write actions.")
-                        self.phase = 2  # Switch to phase 2 after 30% of steps
-                        self.frontier.clear()  # Clear frontier when switching phases
-                        self._update_frontier([best_leaf])
+                self._switch_to_phase_2()
+                    
             
             if not self.frontier.empty():
                 best_node = self._select_action()
