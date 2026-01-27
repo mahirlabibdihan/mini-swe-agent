@@ -168,7 +168,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         progress = min(max(progress, 0.0), 1.0)  # clamp
         return alpha_max - (alpha_max - alpha_min) * progress
 
-    def go_to_best_executable_node(self, k: int = 1) -> List[TreeSearchNode]:
+    def _go_to_best_executable_node(self, k: int = 1) -> List[TreeSearchNode]:
         # TODO: Find best on a subtree basis. Root should be provided.
         def node_priority(n, gamma=0.9, max_depth=50):
             path_value = n.get_path_value(gamma)
@@ -251,6 +251,12 @@ class TreeSearchAgent(RewardGuidedAgent):
             self._update_frontier([best_leaf])
             return best_leaf
         return None
+    
+    def _switch_to_phase_3(self):
+        print(":: Switching to phase 3: Allowing terminating actions.")
+        self.phase = 3  # Switch to phase 3
+        self.frontier.clear()  # Clear frontier when switching 
+        
         
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
@@ -273,6 +279,19 @@ class TreeSearchAgent(RewardGuidedAgent):
             if self.config.selection_scope == "global" and (self.n_expanded >= min(self.config.step_limit / 2, 15) or self.n_submissions >= 2) and self.phase == 2:
                 print(":: Switching to phase 3: Allowing terminating actions.")
                 self.phase = 3  # Switch to phase 3 after 50% of steps
+                candidates = [
+                    n for n in self.node_map.values()
+                    if n.merged_value is not None
+                    and n.visible
+                    and not n.executed
+                    and n.id != self.tree_root.id
+                    and n.is_terminating
+                    and self.is_promising(n)
+                    and n.parent.id != self.tree_node.id
+                ]
+                # Adding left out terminating nodes from previous phases
+                self._update_frontier(candidates)
+                self.add_message("system", "Switching to phase 3: Allowing terminating actions.")
                 # TODO: May do more sophisticated checks for choosing the best terminating node
                 
             if self.config.selection_scope == "local" or self.tree_node.visits == 1: # Local or First visit
@@ -308,13 +327,13 @@ class TreeSearchAgent(RewardGuidedAgent):
                     print(">> No promising actions locally, backtracking to parent node.")
                 else:
                     # Go to the highest-rewarded node globally
-                    best_node = self.go_to_best_executable_node()
+                    best_node = self._go_to_best_executable_node()
                     self.add_message("system", "No promising actions found locally, backtracking to best action.")
                 
             else:
                 # Go to the highest-rewarded node globally
                 print(">> Frontier is empty, searching globally for best executable node.")
-                best_node = self.go_to_best_executable_node()
+                best_node = self._go_to_best_executable_node()
                 self.add_message("system", "No promising actions found globally, backtracking to best action.")
                 
         self.tree_node = best_node
