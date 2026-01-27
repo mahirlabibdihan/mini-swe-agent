@@ -207,7 +207,7 @@ class SingleActionAgent(DefaultAgent):
         messages.reverse()
         
         if self.n_expanded > 0.85 * self.config.step_limit:
-            warning_msg = f"⚠️ Warning: Approaching step limit ({self.n_expanded}/{self.config.step_limit})"
+            warning_msg = f"⚠️ Warning: Approaching step limit ({self.config.step_limit - self.n_expanded} steps remaining). Consider submitting soon."
             print(warning_msg)
             messages.append({
                 "role": "system",
