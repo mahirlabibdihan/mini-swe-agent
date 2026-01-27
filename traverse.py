@@ -12,7 +12,7 @@ def dfs_print_last_action_code(node, depth=0):
         else:
             code = "<None>"
         if code is not None:
-            if node['modifies_code']:
+            if len(node['modified_files']) > 0:
                 print(f"{indent}{code} *-> {node['value']:.4f} ({node['merged_value']:.4f})")
             else:
                 print(f"{indent}{code} -> {node['value']:.4f} ({node['merged_value']:.4f})")
