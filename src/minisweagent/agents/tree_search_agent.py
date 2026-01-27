@@ -199,6 +199,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                     continue
                      
                 raise NoActionFound("No executable nodes found in the tree.")
+            break
             
                     
         # Find max depth among all nodes
@@ -283,7 +284,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                     else:
                         self.curr_epsilon = self.curr_epsilon + .03*self.config.epsilon # Increase epsilon to be less strict
             
-            if self.config.selection_scope == "global" and self.n_modifications >= 2 and (
+            if self.config.selection_scope == "global" and self.phase == 1 and self.n_modifications >= 2 and (
                 self.n_expanded >= min(self.config.step_limit/3, 10) or self.frontier.empty()
             ):
                 self._switch_to_phase_2()
