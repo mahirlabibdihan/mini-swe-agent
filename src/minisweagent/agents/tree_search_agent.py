@@ -209,6 +209,20 @@ class TreeSearchAgent(RewardGuidedAgent):
         
         return best_node
         
+    def _find_best_write_leaf(self) -> TreeSearchNode:
+        write_leaves = [
+            n for n in self.node_map.values()
+            if n.visible
+            and not n.executed
+            and n.modifies_code
+            and not n.is_terminating
+            and n.merged_value is not None
+        ]
+        if not write_leaves:
+            return None
+        best_leaf = max(write_leaves, key=lambda x: x.get_path_value(0.9))
+        return best_leaf
+        
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""
         if self.tree_node.is_terminating:
@@ -230,8 +244,13 @@ class TreeSearchAgent(RewardGuidedAgent):
             if self.config.selection_scope == "local" or self.tree_node.visits == 1: # Local or First visit
                 if self.n_expanded >= 0.3 * self.config.step_limit:
                     self.phase = 2  # Switch to phase 2 after 30% of steps
-                unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c) and (self.phase > 1 or not c.modifies_code)] # Unexecuted + Promising
-                self._update_frontier(unexecuted)
+                    self.frontier.clear()  # Clear frontier when switching phases
+                    best_leaf = self._find_best_write_leaf()
+                    self._update_frontier([best_leaf])
+                    
+                else:
+                    unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c) and (self.phase > 1 or not c.modifies_code)] # Unexecuted + Promising
+                    self._update_frontier(unexecuted)
                 
                 if self.tree_node.value is not None and self.config.epsilon is not None:
                     if len(unexecuted) > 0:
