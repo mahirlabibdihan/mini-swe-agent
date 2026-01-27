@@ -131,7 +131,7 @@ class RewardGuidedAgent(SingleActionAgent):
         super().__init__(model, env, config_class=config_class, **kwargs)
         self.frontier = Frontier(budget=self.config.branching_factor)
         self.reward_model = reward_model
-        self.n_modifications = 0
+        self.n_modifications = 0 # Number of nodes which have at least one write child
         result = self.env.execute("""
 python3 - << 'EOF'
 import json
@@ -296,6 +296,7 @@ EOF
     def _generate_new_nodes(self, n_actions) -> List[TreeSearchNode]:
         nodes = []
         # flag = True
+        has_write_child = False
         for i in range(n_actions):
             # Execute action to get observation
             potential_termination = False
@@ -343,7 +344,7 @@ EOF
                 # Check for code modifications
                 elif self._repo_has_changes():
                     new_node.modifies_code = True
-                    self.n_modifications += 1
+                    has_write_child = True
                     new_node.modified_files = self._get_modified_files()
                     # Rollback changes
                     print(">> Write-action detected.")
@@ -380,6 +381,10 @@ EOF
             nodes.append(new_node)
 
             time.sleep(2)  # To avoid rate limiting
+            
+        if has_write_child:
+            self.n_modifications += 1
+            
         return nodes
     
     def _stage_to_main_branch(self):
