@@ -539,6 +539,8 @@ EOF
         reward_data = []
         for new_node in tree_nodes:
             self.n_explored += 1
+            if new_node.is_terminating:
+                self.n_submissions += 1
             reward_data.append(
                 [
                     (

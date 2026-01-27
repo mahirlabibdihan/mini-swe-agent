@@ -70,8 +70,6 @@ class SingleActionAgent(DefaultAgent):
     
     def _add_actions_to_frontier(self, actions: List[TreeSearchNode]):
         for new_node in actions:
-            if is_terminating(new_node.last_action):
-                self.n_submissions += 1
             if new_node.level >= self.config.depth_limit:
                 print(f"Non-terminating Node {new_node.last_action['command']} exceeded max depth {self.config.depth_limit}, skipping...")
                 new_node.prune()
