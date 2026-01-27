@@ -255,6 +255,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                 if self.n_expanded >= 0.3 * self.config.step_limit or self.frontier.empty():
                     best_leaf = self._find_best_write_leaf()
                     if best_leaf is not None:
+                        print(":: Switching to phase 2: Prioritizing write actions.")
                         self.phase = 2  # Switch to phase 2 after 30% of steps
                         self.frontier.clear()  # Clear frontier when switching phases
                         self._update_frontier([best_leaf])
