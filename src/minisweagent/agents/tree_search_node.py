@@ -40,7 +40,7 @@ class TreeSearchNode:
             norm += f
             current = current.parent
             f *= discount_factor
-
+        
         return score / norm if norm > 0 else 0
     
     def add_child(self, child_node):
