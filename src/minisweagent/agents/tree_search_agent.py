@@ -267,9 +267,10 @@ class TreeSearchAgent(RewardGuidedAgent):
             if self.config.selection_scope == "local":
                 self.frontier.clear() # Local frontier only
             
-            if self.config.selection_scope == "global" and self.n_expanded >= self.config.step_limit / 2 and self.phase == 2 and self.n_submissions >= 2:
+            if self.config.selection_scope == "global" and self.n_expanded >= min(self.config.step_limit / 2, 15) and self.phase == 2 and self.n_submissions >= 2:
                 print(":: Switching to phase 3: Allowing terminating actions.")
                 self.phase = 3  # Switch to phase 3 after 50% of steps
+                # TODO: May do more sophisticated checks for choosing the best terminating node
                 
             if self.config.selection_scope == "local" or self.tree_node.visits == 1: # Local or First visit
                 unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c) and (self.phase > 1 or not c.modifies_code or self.config.selection_scope == "local") and (self.phase > 2 or not c.is_terminating or self.config.selection_scope == "local")] # Unexecuted + Promising
