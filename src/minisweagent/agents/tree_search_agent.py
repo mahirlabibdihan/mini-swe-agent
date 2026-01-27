@@ -220,7 +220,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         ]
         if not write_leaves:
             return None
-        best_leaf = max(write_leaves, key=lambda x: x.get_path_value(0.7))
+        best_leaf = max(write_leaves, key=lambda x: x.get_path_value(0.8))
         return best_leaf
         
     def step(self) -> dict:
