@@ -242,7 +242,7 @@ environment:
   environment_class: docker
 
 model:
-  model_name: "anthropic/claude-sonnet-4-5-20250929"
+  model_name: "Qwen/Qwen2.5-7B-Instruct"
+  model_class: openhf
   model_kwargs:
-    drop_params: true
-    temperature: 0.0
+    temperature: 0.7
