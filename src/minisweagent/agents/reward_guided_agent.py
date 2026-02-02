@@ -332,6 +332,7 @@ EOF
                         new_node.observation = "Error: git commands are not allowed in non-terminating actions."
                         new_node.is_system_response = True
                         new_node.last_action["command"] = None
+                        output = {"output": new_node.observation, "return_code": 1}
                         time.sleep(2)  # To avoid rate limiting
                     else:
                         output = self.env.execute(action["action"])
