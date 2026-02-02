@@ -19,6 +19,7 @@ class TreeSearchNode:
         self.modified_files = []
         self.read_files = []
         self.is_terminating = False
+        self.invalid_termination = False
         self.visits = 0
         self.is_system_response = False
         self.return_code = None

@@ -344,8 +344,11 @@ EOF
                                 print(">> Warning: Terminating action detected without any modifications.")
                                 new_node.observation = "Error: Submission detected without any modifications."
                                 new_node.is_system_response = True
+                                new_node.is_terminating = False
+                                new_node.invalid_termination = True
                                 
-                            new_node.observation = "".join(lines[1:]) # 
+                            else:    
+                                new_node.observation = "".join(lines[1:]) # 
                     
                     if potential_termination:
                         self.env.execute("git restore .")
@@ -494,7 +497,7 @@ EOF
             if new_node.value is None:
                 cmd_type = "search"
                 if new_node.last_action["command"] is not None:
-                    if new_node.is_terminating:
+                    if new_node.is_terminating or new_node.invalid_termination:
                         cmd_type = "submit"
                     elif new_node.modifies_code:
                         cmd_type = "edit"
