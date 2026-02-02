@@ -298,7 +298,7 @@ EOF
         # flag = True
         has_write_child = False
         for i in range(n_actions):
-            # Execute action to get observation
+            # get_observation action to get observation
             potential_termination = False
             response, action, error = self._generate_action()
             if error is None:
@@ -326,7 +326,27 @@ EOF
                     if potential_termination:
                         self.env.execute(f"git checkout {self.tree_root.branch}")
                         self.env.execute(f"git diff {self.tree_root.branch}..{self.tree_node.branch} | git apply")
-                    output = self.env.execute(action["action"])
+                    
+                    if action["action"].startswith("git"):
+                        print(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
+                        new_node.observation = "Error: git commands are not allowed in non-terminating actions."
+                        new_node.is_system_response = True
+                        time.sleep(2)  # To avoid rate limiting
+                    else:
+                        output = self.env.execute(action["action"])
+                        # Check for terminating action
+                        lines = output.get("output", "").lstrip().splitlines(keepends=True)
+                        if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
+                            print(">> Terminating action detected.")
+                            new_node.is_terminating = True   
+                            
+                            if self.tree_node.branch == self.tree_root.children[0].branch and self.tree_node.commit == self.tree_root.children[0].commit:
+                                print(">> Warning: Terminating action detected without any modifications.")
+                                new_node.observation = "Error: Submission detected without any modifications."
+                                new_node.is_system_response = True
+                                
+                            new_node.observation = "".join(lines[1:]) # 
+                    
                     if potential_termination:
                         self.env.execute("git restore .")
                         self.env.execute("git checkout -")
@@ -335,14 +355,8 @@ EOF
                     output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
                     observation = self.render_template(self.config.timeout_template, action=action["action"], output=output)
 
-                # Check for terminating action
-                lines = output.get("output", "").lstrip().splitlines(keepends=True)
-                if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
-                    print(">> Terminating action detected.")
-                    new_node.is_terminating = True   
-                    new_node.observation = "".join(lines[1:])
                 # Check for code modifications
-                elif self._repo_has_changes():
+                if self._repo_has_changes():
                     new_node.modifies_code = True
                     has_write_child = True
                     new_node.modified_files = self._get_modified_files()
@@ -368,15 +382,12 @@ EOF
                     print(">> Warning: Invalid terminating action detected. Skipping this action...")
                     time.sleep(2)  # To avoid rate limiting
                     continue   
-                if new_node.last_action["command"].startswith("git"):
-                    print(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
-                    time.sleep(2)  # To avoid rate limiting
-                    continue
+                
             else:
                 print(f"Generated action #{i+1}: <<Invalid Action>>")
                 observation = error
             
-            if new_node.observation is None:
+            if new_node.observation is None: # Q: When will it not be None here? A: When terminating action detected above
                 new_node.observation = observation
             nodes.append(new_node)
 

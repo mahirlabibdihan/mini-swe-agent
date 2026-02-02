@@ -231,7 +231,7 @@ python -m swebench.harness.run_evaluation \
     --predictions_path output/verified.test.01/openai__gpt-5-mini/preds.json \
     --max_workers 1 \
     --run_id verified.test.01 \
-    --report_dir evaluation
+    --report_dir evaluation --cache_level instance
 ```
 
 ## Attribution

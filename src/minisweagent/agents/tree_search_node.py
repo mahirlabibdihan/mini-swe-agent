@@ -20,6 +20,8 @@ class TreeSearchNode:
         self.read_files = []
         self.is_terminating = False
         self.visits = 0
+        self.is_system_response = False
+        self.return_code = None
         
     def __lt__(self, other):
         # based on frequency
