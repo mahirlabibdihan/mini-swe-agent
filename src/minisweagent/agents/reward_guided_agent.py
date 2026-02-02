@@ -331,6 +331,7 @@ EOF
                         print(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
                         new_node.observation = "Error: git commands are not allowed in non-terminating actions."
                         new_node.is_system_response = True
+                        new_node.last_action["command"] = None
                         time.sleep(2)  # To avoid rate limiting
                     else:
                         output = self.env.execute(action["action"])
@@ -346,7 +347,7 @@ EOF
                                 new_node.is_system_response = True
                                 new_node.is_terminating = False
                                 new_node.invalid_termination = True
-                                
+                                new_node.last_action["command"] = None
                             else:    
                                 new_node.observation = "".join(lines[1:]) # 
                     
@@ -518,6 +519,7 @@ EOF
                     new_value = penalty * new_node.value
                     print(f">> Invalid-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
+                
                 
                 if len(new_node.modified_files) > 0:
                     # Boost nodes that modify code based on relevance
