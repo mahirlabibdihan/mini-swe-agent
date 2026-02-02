@@ -23,6 +23,7 @@ class TreeSearchNode:
         self.visits = 0
         self.is_system_response = False
         self.return_code = None
+        self.n_history = 0
         
     def __lt__(self, other):
         # based on frequency
