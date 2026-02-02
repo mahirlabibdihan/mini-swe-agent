@@ -265,6 +265,13 @@ class TreeSearchAgent(RewardGuidedAgent):
             
         if self.tree_node.visits == 0:
             tree_nodes = self._generate_new_nodes(min(self.config.branching_factor, self.config.max_expansion - len(self.tree_node.children)))
+            if self.phase == 1:
+                for n in tree_nodes:
+                    if n.is_terminating:
+                        n.prune()
+                        # Prune terminating actions in phase 1. Because there's no modifications yet.
+                        
+                        
             self._update_tree(tree_nodes)
 
         self.tree_node.visits += 1
