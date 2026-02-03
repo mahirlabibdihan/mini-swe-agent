@@ -8,7 +8,7 @@ from minisweagent.agents.tree_search_node import TreeSearchNode
 from minisweagent import Model
 import random
 import re
-
+import time
 score_format_prompt = """
 Output format requirement:
 
@@ -255,7 +255,7 @@ class RewardModel():
                     print(f"Final exception during model query with n_steps=1: {e}.")
                     # Save the prompt in file for error analysis
                     with open("debug_error.log", 'w') as f:
-                        f.write(f"Prompt:\n{curr_prompt}")
+                        f.write(f"Prompt ({time.time()}):\n{curr_prompt}\n\n")
                     raise e
                 n_steps = max(1, n_steps - 1)
                 print(f"Exception during model query: {e}. Reducing trajectory steps to {n_steps} and retrying.")
@@ -267,7 +267,7 @@ class RewardModel():
                     score_format_prompt=score_format_prompt
                 )
                 curr_prompt = formatted_prompt
-                with open("reward_model_scores.log", "w") as f:
+                with open("reward_model_scores.log", "a") as f:
                     f.write(f"Prompt:\n{curr_prompt}")
                 sleep(1)  # Brief pause before retrying
   
