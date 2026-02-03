@@ -253,15 +253,9 @@ class RewardModel():
             except Exception as e:
                 if n_steps == 1:
                     print(f"Final exception during model query with n_steps=1: {e}.")
-                    print(
-                        prompt.format(
-                            task=task,
-                            trajectory=self.format_trajectory(trajectory, n_steps=n_steps),
-                            action=action,
-                            observation=observation,
-                            score_format_prompt=score_format_prompt
-                        )
-                    )
+                    # Save the prompt in file for error analysis
+                    with open("debug_error.log", 'w') as f:
+                        f.write(f"Prompt:\n{curr_prompt}")
                     raise e
                 n_steps = max(1, n_steps - 1)
                 print(f"Exception during model query: {e}. Reducing trajectory steps to {n_steps} and retrying.")
