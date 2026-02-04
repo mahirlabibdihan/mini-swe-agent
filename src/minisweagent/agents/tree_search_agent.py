@@ -312,8 +312,10 @@ class TreeSearchAgent(RewardGuidedAgent):
                     else:
                         self.curr_epsilon = self.curr_epsilon + .03*self.config.epsilon # Increase epsilon to be less strict
             
-            if self.config.selection_scope == "global" and self.phase == 1 and self.n_modifications >= 2 and (
-                self.n_expanded >= min(self.config.step_limit/3, 10) or self.frontier.empty()
+            if self.config.selection_scope == "global" and self.phase == 1 and (
+                (self.n_modifications >= 2 and (self.n_expanded >= min(self.config.step_limit/3, 10) or self.frontier.empty()))
+                or
+                (self.n_submissions >= 1 and self.n_expanded >= min(2*self.config.step_limit/3, 20))
             ):
                 self._switch_to_phase_2()
                  
