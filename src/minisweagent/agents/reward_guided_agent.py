@@ -206,9 +206,9 @@ EOF
     def _create_pseudo_root(self):
         if self._repo_has_changes():
             self.env.execute(f"git checkout -b ts-agent-root")
-            self.env.execute(f"git add .")
+            self.env.execute(f"git add -A")
             self.env.execute(f"git commit -m 'Committing changes before starting tree search'")
-            action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git add . >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' >/dev/null 2>&1 && git rev-parse HEAD"
+            action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git add -A >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' >/dev/null 2>&1 && git rev-parse HEAD"
             self.add_message("system", f"THOUGHT: Need to commit changes before starting tree search.\n\n```bash\n{action}\n```")
         else:
             self.env.execute(f"git checkout -b ts-agent-root")
@@ -232,7 +232,7 @@ EOF
     def _commit_changes(self, message="Automated commit"):
         """Stage all changes and commit"""
         print(">> Committing changes to the repository...")
-        output = self.env.execute("git add .")
+        output = self.env.execute("git add -A")
         if output.get("return_code", 0) != 0:
             raise Exception(">> Error staging changes:\n" + output.get("output", ""))
         output = self.env.execute(f'git commit -m "{message}"')
@@ -240,7 +240,7 @@ EOF
             raise Exception(">> Error committing changes:\n" + output.get("output", ""))
         
         output = self.env.execute("git rev-parse HEAD")
-        self.add_message("system", f'THOUGHT: Commit changes of the last command.\n\n```bash\ngit add . >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
+        self.add_message("system", f'THOUGHT: Commit changes of the last command.\n\n```bash\ngit add -A >/dev/null 2>&1 && git commit -m "{message}" >/dev/null 2>&1 && git rev-parse HEAD\n```')
         observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
         if self._repo_has_changes():
