@@ -342,7 +342,7 @@ EOF
                             print(">> Terminating action detected.")
                             new_node.is_terminating = True   
                             
-                            if self.tree_node.branch == self.tree_root.children[0].branch and self.tree_node.commit == self.tree_root.children[0].commit:
+                            if self.tree_node.commit == self.tree_root.commit:
                                 print(">> Warning: Terminating action detected without any modifications.")
                                 new_node.observation = "Error: Submission detected without any modifications."
                                 new_node.is_system_response = True
