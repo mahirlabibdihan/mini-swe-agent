@@ -358,7 +358,7 @@ EOF
                     observation = self.render_template(self.config.action_observation_template, output=output) 
                 except (TimeoutError, subprocess.TimeoutExpired) as e:
                     output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
-                    observation = self.render_template(self.config.timeout_template, action=action["action"], output=output)
+                    observation = self.render_template(self.config.timeout_template, action=action, output=output)
 
                 # Check for code modifications
                 if self._repo_has_changes():
@@ -405,9 +405,9 @@ EOF
     
     def _stage_to_main_branch(self):
         self.env.execute(f"git checkout {self.tree_root.branch}")
-        self.env.execute(f"git diff {self.tree_root.branch}..{self.tree_node.parent.branch} | git apply")
+        self.env.execute(f"git diff {self.tree_root.commit}..{self.tree_node.parent.commit} | git apply")
         self.env.execute(f"git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D") # Clean up temp branches
-        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.branch}..{self.tree_node.parent.branch} | git apply && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D\n```")
+        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.commit}..{self.tree_node.parent.commit} | git apply && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D\n```")
             
     def step(self) -> dict:
         """Query the LM, execute the action, return the observation."""

@@ -59,9 +59,10 @@ class TreeSearchAgent(RewardGuidedAgent):
             # env.execute(f"git checkout {target_node.parent.branch}")
             if self._get_branch_head(target_node.branch) != target_node.commit:
                 self.env.execute(f"git checkout {target_node.commit}")
+                self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.commit}\n```")
             else:
                 self.env.execute(f"git checkout {target_node.branch}")
-            self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.commit}\n```")
+                self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.branch}\n```")
         
         else:
             self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.")
