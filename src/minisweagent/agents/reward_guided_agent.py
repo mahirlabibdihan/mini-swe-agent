@@ -348,20 +348,34 @@ EOF
             
             if error is None:
                 try:
-                    # Be-aware of potential terminating actions
-                    potential_termination = is_terminating(action['action'])
-                    if potential_termination:
-                        self.env.execute(f"git checkout {self.tree_root.branch} && git restore --source {self.tree_node.commit} .")
-                    
-                    if action["action"].startswith("git") or (not potential_termination and "git" in action["action"]):
+                    def is_git_command(cmd: str):
+                        import re
+                        GIT_CMD = re.compile(
+                            r'(^|[;&|()]\s*)git(?=\s|$)'
+                        )
+                        if GIT_CMD.search(cmd):
+                            return True
+                        return False
+                                                
+                    if is_git_command(action["action"]):
                         print(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
-                        new_node.observation = "Error: git commands are not allowed, other than for final submission."
+                        new_node.observation = "Error: git commands are not allowed."
                         new_node.raw_observation = None
                         new_node.is_system_response = True
                         new_node.last_action["command"] = None
                         output = {"output": new_node.observation, "returncode": 1}
                         time.sleep(2)  # To avoid rate limiting
                     else:
+                        # Be-aware of potential terminating actions
+                        if action['action'] == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT":
+                            action['action'] += " && git add -A && git diff --cached"
+                            potential_termination = True
+                        else:
+                            potential_termination = False
+                            
+                        if potential_termination:
+                            self.env.execute(f"git checkout {self.tree_root.branch} && git restore --source {self.tree_node.commit} .")
+                        
                         output = self.env.execute(action["action"])
                         # Check for terminating action
                         lines = output.get("output", "").lstrip().splitlines(keepends=True)
@@ -381,8 +395,8 @@ EOF
                                 new_node.observation = "".join(lines[1:]) # 
                                 new_node.raw_observation = output
                     
-                    if potential_termination:
-                        self.env.execute("git restore . && git checkout -")
+                        if potential_termination:
+                            self.env.execute("git restore . && git checkout -")
                     observation = self.render_template(self.config.action_observation_template, output=output) 
                     raw_observation = output
                     
@@ -455,6 +469,13 @@ EOF
             # print(diff_text)
             return True
 
+    def _repo_has_new_commit(self):
+        output = self.env.execute("git rev-parse HEAD")
+        current_commit = output.get("output", "").strip()
+        if current_commit != self.tree_node.commit:
+            print(f">> New commit detected: {current_commit} (previous: {self.tree_node.commit})")
+            return True
+        return False
             
     def _stage_to_main_branch(self):
         # self._repo_has_changes_with_main()
