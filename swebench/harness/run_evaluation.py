@@ -378,7 +378,7 @@ def get_dataset_from_preds(
     predictions: dict,
     run_id: str,
     rewrite_reports: bool,
-    exclude_completed: bool = True,
+    exclude_completed: bool = False,
 ):
     """
     Return only instances that have predictions and are in the dataset.

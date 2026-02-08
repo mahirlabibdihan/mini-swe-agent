@@ -120,6 +120,7 @@ agent:
     - Always use non-interactive flags (-y, -f) for commands
     - Avoid interactive tools like vi, nano, or any that require user input
     - If a command isn't available, you can install it
+    - Don't use git commands in your actions, that is reserved for the system to manage the state of your work and submission
 
     ## Useful Command Examples
 
@@ -163,12 +164,21 @@ agent:
     issue exactly the following command:
 
     ```bash
-    echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached
+    echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
     ```
 
     This command will submit your work.
     You cannot continue working (reading, editing, testing) in any way on this task after submitting.
+
     </instructions>
+  retrieval_template: |
+    <retrieval>
+    Top 10 most relevant files from the codebase to help you with the task:
+
+    {% for doc in retrieved_docs %}
+    {{ loop.index }}. {{ doc.file_path }} (relevance score: {{ doc.score }})
+    {% endfor %}
+    </retrieval>
   action_observation_template: |
     <returncode>{{output.returncode}}</returncode>
     {% if output.output | length < 5000 -%}
@@ -227,9 +237,9 @@ agent:
     </output_tail>
     {%- endif %}
     Please try another command and make sure to avoid those requiring interactive input.
-  step_limit: 30
+  step_limit: 50
   cost_limit: 3.
-  depth_limit: 20
+  depth_limit: 30
   branching_factor: 2
   max_expansion: 5
   frontier_budget: 4
@@ -238,7 +248,7 @@ agent:
   
 environment:
   cwd: "/testbed"
-  timeout: 60
+  timeout: 120
   env:
     PAGER: cat
     MANPAGER: cat
