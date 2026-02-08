@@ -18,6 +18,8 @@ import pickle
 import os
 import numpy as np
 from pathlib import Path
+from minisweagent.agents.bash_parser import BashParser
+
 import requests
 
 class RewardGuidedAgentConfig(SingleActionAgentConfig):
@@ -121,6 +123,7 @@ def result_to_structure(result: str):
 
     return structure
 
+parser = BashParser()
 
 class RewardGuidedAgent(SingleActionAgent):
     def __init__(self, 
@@ -417,20 +420,28 @@ EOF
                         new_node.fails_tests = True
                     print(">> Write-action detected.")
                     self.env.execute("git reset --hard HEAD && git clean -fd")
-                elif action['action'].startswith("nl"):
-                    import shlex
-                    cmd = action['action']
-                    tokens = shlex.split(cmd)
-                    filename = None
-                    if tokens[0] == "nl":
-                        for token in tokens[1:]:
-                            if not token.startswith('-'):
-                                filename = token
-                                break
+                else: # Single line command (No here-doc or multi-line)
+                    commands = parser.parse(action["action"])  # Check if it's a read action and can be parsed
+                    for cmd in commands:
+                        if cmd.get("command") in ["nl", "cat"]:
+                            for arg in cmd.get("args", []):
+                                if not arg.startswith('-'):
+                                    new_node.read_files.append(arg)
+                                    print(f">> Read-action detected. File: {arg}")
+                # elif action['action'].startswith("nl"):
+                    # import shlex
+                    # cmd = action['action']
+                    # tokens = shlex.split(cmd)
+                    # filename = None
+                    # if tokens[0] == "nl":
+                    #     for token in tokens[1:]:
+                    #         if not token.startswith('-'):
+                    #             filename = token
+                    #             break
                     
-                    if filename is not None:
-                        new_node.read_files = [filename]
-                        print(f">> Read-action detected. File: {filename}")
+                    # if filename is not None:
+                    #     new_node.read_files = [filename]
+                    #     print(f">> Read-action detected. File: {filename}")
 
                 if new_node.is_terminating != potential_termination:
                     print(">> Warning: Invalid terminating action detected. Skipping this action...")
