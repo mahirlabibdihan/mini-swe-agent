@@ -22,6 +22,16 @@ def dfs_print_last_action_code(node, depth=0):
     
     for child in node.get("children", []):
         dfs_print_last_action_code(child, depth)
+        
+def print_commit_tree(node, parent=None, depth=0):
+    if node["branch"] is None:
+        return
+    indent = "  " * depth
+    if parent is None or parent['commit'] != node['commit'] or parent['branch'] != node['branch']:
+        print(f"{indent}[{node['branch']}:{node['commit'][:7]}]")
+        depth += 1
+    for child in node.get("children", []):
+        print_commit_tree(child, node, depth)
 
 # Load the single root node JSON (not a list)
 # with open('tree.json', 'r', encoding="utf-8") as f:
@@ -48,3 +58,5 @@ except Exception as e:
 
 # Start DFS from the root
 dfs_print_last_action_code(root_node)
+
+print_commit_tree(root_node)

@@ -21,9 +21,10 @@ from pathlib import Path
 import requests
 
 class RewardGuidedAgentConfig(SingleActionAgentConfig):
+    retrieval_template: str
     branching_factor: int = 3
     """The maximum number of branches to explore at each node."""
-
+    
 import json
 import ast
 from pathlib import PurePosixPath
@@ -131,12 +132,14 @@ class RewardGuidedAgent(SingleActionAgent):
         super().__init__(model, env, config_class=config_class, **kwargs)
         self.frontier = Frontier(budget=self.config.branching_factor)
         self.reward_model = reward_model
+        self.candidates = []
         self.n_modifications = 0 # Number of nodes which have at least one write child
         result = self.env.execute("""
 python3 - << 'EOF'
 import json
 import re
 from pathlib import Path
+import sys
 
 ROOT = Path(".")  # change this to the folder you want to scan
 
@@ -149,7 +152,7 @@ def is_test(name, test_phrases=None):
 # Your file reading function
 def file_name_and_contents(filename, relative_path):
     text = relative_path + "\\n"
-    with open(filename) as f:
+    with open(str(filename), encoding="utf-8", errors="replace") as f:
         text += f.read()
     return text
 
@@ -160,11 +163,13 @@ for filename in ROOT.rglob("*.py"):
         relative = filename.relative_to(ROOT).as_posix()
         content = file_name_and_contents(filename, relative)
         print(json.dumps({"id": relative, "content": content}))
-    except Exception:
+    except Exception as e:
+        print("ERROR:", filename, repr(e), file=sys.stderr)
         pass
 EOF
 """)
         print("Extracting Python files from the codebase..." + self.env.config.image)
+        # print(result)
         image_ref = self.env.config.image
         image_name = image_ref.split("/")[-1].split(":")[0]
         # Check if documents/{image_name}.jsonl exists
@@ -205,9 +210,7 @@ EOF
     
     def _create_pseudo_root(self):
         if self._repo_has_changes():
-            self.env.execute(f"git checkout -b ts-agent-root")
-            self.env.execute(f"git add -A")
-            self.env.execute(f"git commit -m 'Committing changes before starting tree search'")
+            self.env.execute(f"git checkout -b ts-agent-root && git add -A && git commit -m 'Committing changes before starting tree search'")
             action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git add -A >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' >/dev/null 2>&1 && git rev-parse HEAD"
             self.add_message("system", f"THOUGHT: Need to commit changes before starting tree search.\n\n```bash\n{action}\n```")
         else:
@@ -215,7 +218,7 @@ EOF
             action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git rev-parse HEAD"
             self.add_message("system", f"THOUGHT: Switching to new branch before starting tree search.\n\n```bash\n{action}\n```")
             
-        output = self.env.execute("git rev-parse HEAD")
+        output = self.env.execute("git rev-parse HEAD")    
         observation = self.render_template(self.config.action_observation_template, output=output)
         self.add_message("user", observation)
         
@@ -262,6 +265,26 @@ EOF
         print(">> Top 5 relevant files for the issue:")
         for idx in top_indices:
             print(f"- {self.file_ids[idx]} (score: {scores[idx]:.4f})")
+            
+        retrieved_docs = []
+        for file_path, score in self.relevance_dict.items():
+            if len(retrieved_docs) >= 10:
+                break
+            retrieved_docs.append({
+                "file_path": file_path,
+                "score": f"{score:.4f}",
+            })
+            
+        self.candidates = [
+            {
+                "SYSTEM_PROMPT": self.render_template(self.config.system_template),
+                "USER_PROMPT": self.render_template(self.config.instance_template),
+            },
+            {
+                "SYSTEM_PROMPT": self.render_template(self.config.system_template),
+                "USER_PROMPT": self.render_template(self.config.instance_template) + "\n\n" + self.render_template(self.config.retrieval_template, retrieved_docs=retrieved_docs),
+            }
+        ]
        
     def _repo_has_changes(self):
         """Check if there are any unstaged or uncommitted changes"""
@@ -300,6 +323,10 @@ EOF
         for i in range(n_actions):
             # get_observation action to get observation
             potential_termination = False
+            
+            self.SYSTEM_PROMPT = self.candidates[i % len(self.candidates)]["SYSTEM_PROMPT"]
+            self.USER_PROMPT = self.candidates[i % len(self.candidates)]["USER_PROMPT"]
+            
             response, action, error = self._generate_action()
             if error is None:
                 print(f"Generated action #{i+1}: {action['action']}")
@@ -324,12 +351,12 @@ EOF
                     # Be-aware of potential terminating actions
                     potential_termination = is_terminating(action['action'])
                     if potential_termination:
-                        self.env.execute(f"git checkout {self.tree_root.branch}")
-                        self.env.execute(f"git diff {self.tree_root.branch}..{self.tree_node.branch} | git apply")
+                        self.env.execute(f"git checkout {self.tree_root.branch} && git restore --source {self.tree_node.commit} .")
                     
                     if action["action"].startswith("git"):
                         print(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
                         new_node.observation = "Error: git commands are not allowed, other than for final submission."
+                        new_node.raw_observation = None
                         new_node.is_system_response = True
                         new_node.last_action["command"] = None
                         output = {"output": new_node.observation, "returncode": 1}
@@ -345,20 +372,24 @@ EOF
                             if self.tree_node.commit == self.tree_root.commit:
                                 print(">> Warning: Terminating action detected without any modifications.")
                                 new_node.observation = "Error: Submission detected without any modifications."
+                                new_node.raw_observation = output
                                 new_node.is_system_response = True
                                 new_node.is_terminating = False
                                 new_node.invalid_termination = True
                                 new_node.last_action["command"] = None
                             else:    
                                 new_node.observation = "".join(lines[1:]) # 
+                                new_node.raw_observation = output
                     
                     if potential_termination:
-                        self.env.execute("git restore .")
-                        self.env.execute("git checkout -")
+                        self.env.execute("git restore . && git checkout -")
                     observation = self.render_template(self.config.action_observation_template, output=output) 
+                    raw_observation = output
+                    
                 except (TimeoutError, subprocess.TimeoutExpired) as e:
                     output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
                     observation = self.render_template(self.config.timeout_template, action=action, output=output)
+                    raw_observation = None
 
                 # Check for code modifications
                 if self._repo_has_changes():
@@ -366,6 +397,10 @@ EOF
                     has_write_child = True
                     new_node.modified_files = self._get_modified_files()
                     # Rollback changes
+                    # run tests
+                    test_result = self.env.execute("pytest --maxfail=1 --disable-warnings -q")
+                    if test_result.get("return_code", 0) != 0:
+                        new_node.fails_tests = True
                     print(">> Write-action detected.")
                     self.env.execute("git reset --hard HEAD && git clean -fd")
                 elif action['action'].startswith("nl"):
@@ -391,9 +426,11 @@ EOF
             else:
                 print(f"Generated action #{i+1}: <<Invalid Action>>")
                 observation = error
+                raw_observation = None
             
             if new_node.observation is None: # Q: When will it not be None here? A: When terminating action detected above
                 new_node.observation = observation
+                new_node.raw_observation = raw_observation
             nodes.append(new_node)
 
             time.sleep(2)  # To avoid rate limiting
@@ -403,13 +440,33 @@ EOF
             
         return nodes
     
+    def _repo_has_changes_with_main(self):
+        if self.tree_node.parent.commit == self.tree_root.commit:
+            return False
+        output = self.env.execute(f"git diff {self.tree_root.commit}..{self.tree_node.parent.commit}")
+
+        diff_text = output.get("output", "").strip()
+
+        if not diff_text:
+            print(f"No change between {self.tree_root.commit} and {self.tree_node.parent.commit}.")
+            raise Exception(">> No changes detected to stage to main branch.")
+        else:
+            # print(">> Staging changes to main branch before submission...")
+            # print(diff_text)
+            return True
+
+            
     def _stage_to_main_branch(self):
-        self.env.execute(f"git checkout {self.tree_root.branch}")
-        self.env.execute(f"git diff {self.tree_root.commit}..{self.tree_node.parent.commit} | git apply")
-        self.env.execute(f"git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D") # Clean up temp branches
-        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git diff {self.tree_root.commit}..{self.tree_node.parent.commit} | git apply && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D\n```")
+        # self._repo_has_changes_with_main()
+        self.env.execute(f"git checkout {self.tree_root.branch} && git restore --source {self.tree_node.parent.commit} . && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D")
+        # self._repo_has_changes_with_main()
+        # Check if there are changes to be staged
+        # output = self.env.execute(f"git diff {self.tree_root.commit}..{self.tree_node.parent.commit} | git apply")
+        # print(f">> Staging changes to main branch:\n{output.get('output', '')}")
+        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git restore --source {self.tree_node.parent.commit} . && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D\n```")
             
     def step(self) -> dict:
+        
         """Query the LM, execute the action, return the observation."""
         if self.tree_node.is_terminating:
             self._create_pseudo_root()
@@ -520,7 +577,12 @@ EOF
                     new_value = penalty * new_node.value
                     print(f">> Invalid-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
-                
+                    
+                elif new_node.raw_observation is not None and new_node.raw_observation.get("return_code", 0) != 0:
+                    # Penalize actions with non-zero return code
+                    new_value = 0.8 * new_node.value
+                    print(f">> Non-zero return-code reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                    new_node.value = new_value
                 
                 if len(new_node.modified_files) > 0:
                     # Boost nodes that modify code based on relevance
@@ -533,7 +595,19 @@ EOF
                     new_value = (0.7 * new_node.value + 0.3 * max_relevance)
                     print(f">> Write-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
-                elif len(new_node.read_files) > 0: 
+                    
+                    if new_node.fails_tests:
+                        # Penalize if tests fail
+                        new_value = 0.6 * new_node.value
+                        print(f">> Test-failure reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                        new_node.value = new_value
+                elif new_node.raw_observation is not None and new_node.raw_observation.get("output").strip() == "":
+                    # Penalize read actions that produce no output
+                    new_value = 0.7 * new_node.value
+                    print(f">> Empty-output reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                    new_node.value = new_value
+
+                if len(new_node.read_files) > 0: 
                     # Slightly boost nodes that read files based on relevance
                     max_relevance = 0.0
                     for file in new_node.read_files:
@@ -544,7 +618,7 @@ EOF
                     new_value = (0.9 * new_node.value + 0.1 * max_relevance)
                     print(f">> Read-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
-                
+
                 # For read-only actions, compute relevance score
                 relevance_score = self._calculate_relevance(new_node.last_action["command"], new_node.observation)
                 # Take weighted average of relevance score and current value

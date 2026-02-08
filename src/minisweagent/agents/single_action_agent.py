@@ -98,6 +98,10 @@ class SingleActionAgent(DefaultAgent):
     
     def _reset(self):
         self.frontier.reset()
+    
+        self.USER_PROMPT = self.render_template(self.config.instance_template)
+        self.SYSTEM_PROMPT = self.render_template(self.config.system_template) 
+         
         self.tree_root = self.tree_node = self._create_node()        
         self.add_message("system", self.render_template(self.config.system_template))
         self.add_message("user", self.render_template(self.config.instance_template))
@@ -109,7 +113,7 @@ class SingleActionAgent(DefaultAgent):
         for i in range(n_actions):
             # Execute action to get observation
             try:
-                response = self.query()
+                response = self.query(i)
                 action = self.parse_action(response)
                 print(f"Generated action #{i+1}: {action['action']}")
                 # Convert action to node
@@ -196,12 +200,12 @@ class SingleActionAgent(DefaultAgent):
         
         messages.append({
             "role": "user",
-            "content": self.render_template(self.config.instance_template),
+            "content": self.USER_PROMPT,
             "timestamp": time.time(),
         })
         messages.append({
             "role": "system",
-            "content": self.render_template(self.config.system_template),
+            "content": self.SYSTEM_PROMPT,
             "timestamp": time.time(),
         })
         messages.reverse()
