@@ -353,7 +353,7 @@ EOF
                     if potential_termination:
                         self.env.execute(f"git checkout {self.tree_root.branch} && git restore --source {self.tree_node.commit} .")
                     
-                    if action["action"].startswith("git"):
+                    if action["action"].startswith("git") or (not potential_termination and "git" in action["action"]):
                         print(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
                         new_node.observation = "Error: git commands are not allowed, other than for final submission."
                         new_node.raw_observation = None
@@ -459,10 +459,6 @@ EOF
     def _stage_to_main_branch(self):
         # self._repo_has_changes_with_main()
         self.env.execute(f"git checkout {self.tree_root.branch} && git restore --source {self.tree_node.parent.commit} . && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D")
-        # self._repo_has_changes_with_main()
-        # Check if there are changes to be staged
-        # output = self.env.execute(f"git diff {self.tree_root.commit}..{self.tree_node.parent.commit} | git apply")
-        # print(f">> Staging changes to main branch:\n{output.get('output', '')}")
         self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git restore --source {self.tree_node.parent.commit} . && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D\n```")
             
     def step(self) -> dict:
