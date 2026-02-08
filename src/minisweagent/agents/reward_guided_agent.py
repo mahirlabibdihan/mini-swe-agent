@@ -370,12 +370,8 @@ EOF
                         time.sleep(2)  # To avoid rate limiting
                     else:
                         # Be-aware of potential terminating actions
-                        if action.get("action", "").strip() == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT":
-                            action['action'] += " && git add -A && git diff --cached"
-                            potential_termination = True
-                        else:
-                            potential_termination = False
-                            
+                        potential_termination = is_terminating(action["action"])
+   
                         if potential_termination:
                             self.env.execute(f"git checkout {self.tree_root.branch} && git restore --source {self.tree_node.commit} .")
                         
@@ -635,7 +631,8 @@ EOF
                     if new_node.fails_tests:
                         # Penalize if tests fail
                         new_value = 0.6 * new_node.value
-                        print(f">> Test-failure reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
+                        # Red color print to indicate test failure
+                        print(f">> \033[91mTest-failure reward adjustment: {new_node.value:.4f} -> {new_value:.4f}\033[0m")
                         new_node.value = new_value
                 elif new_node.raw_observation is not None and new_node.raw_observation.get("output").strip() == "":
                     # Penalize read actions that produce no output

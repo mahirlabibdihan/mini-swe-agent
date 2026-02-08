@@ -101,7 +101,10 @@ class DefaultAgent:
         """Parse the action from the message. Returns the action."""
         actions = re.findall(self.config.action_regex, response["content"], re.DOTALL)
         if len(actions) == 1:
-            return {"action": actions[0].strip(), **response}
+            action = actions[0].strip()
+            if action == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT":
+                action += " && git add -A && git diff --cached"
+            return {"action": action, **response}
         raise FormatError(self.render_template(self.config.format_error_template, actions=actions))
 
     def execute_action(self, action: dict) -> dict:
