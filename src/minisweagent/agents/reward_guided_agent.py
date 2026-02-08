@@ -239,10 +239,10 @@ EOF
         """Stage all changes and commit"""
         print(">> Committing changes to the repository...")
         output = self.env.execute("git add -A")
-        if output.get("return_code", 0) != 0:
+        if output.get("returncode", 0) != 0:
             raise Exception(">> Error staging changes:\n" + output.get("output", ""))
         output = self.env.execute(f'git commit -m "{message}"')
-        if output.get("return_code", 0) != 0:
+        if output.get("returncode", 0) != 0:
             raise Exception(">> Error committing changes:\n" + output.get("output", ""))
         
         output = self.env.execute("git rev-parse HEAD")
@@ -416,7 +416,7 @@ EOF
                     # Rollback changes
                     # run tests
                     test_result = self.env.execute("pytest --maxfail=1 --disable-warnings -q")
-                    if test_result.get("return_code", 0) != 0:
+                    if test_result.get("returncode", 0) != 0:
                         new_node.fails_tests = True
                     print(">> Write-action detected.")
                     self.env.execute("git reset --hard HEAD && git clean -fd")
@@ -606,9 +606,17 @@ EOF
                     print(f">> Invalid-action reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
                     
-                elif new_node.raw_observation is not None and new_node.raw_observation.get("return_code", 0) != 0:
+                elif new_node.raw_observation is not None and new_node.raw_observation.get("returncode", 0) != 0:
+                    penalty = 1
+                    curr = new_node
+                    while curr is not None:
+                        if curr.raw_observation is not None and curr.raw_observation.get("returncode", 0) != 0:
+                            penalty *= 0.8
+                        else:
+                            break
+                        curr = curr.parent
                     # Penalize actions with non-zero return code
-                    new_value = 0.8 * new_node.value
+                    new_value = penalty * new_node.value
                     print(f">> Non-zero return-code reward adjustment: {new_node.value:.4f} -> {new_value:.4f}")
                     new_node.value = new_value
                 
