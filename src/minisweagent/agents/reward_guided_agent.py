@@ -367,7 +367,7 @@ EOF
                         time.sleep(2)  # To avoid rate limiting
                     else:
                         # Be-aware of potential terminating actions
-                        if action['action'] == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT":
+                        if action.get("action", "").strip() == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT":
                             action['action'] += " && git add -A && git diff --cached"
                             potential_termination = True
                         else:
