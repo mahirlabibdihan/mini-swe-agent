@@ -161,6 +161,14 @@ def run_instance(
         logger.info(
             f"Intermediate patch for {instance_id} written to {patch_file}, now applying to container..."
         )
+        
+        # Before applying the patch, we clean the container to ensure that there are no untracked files that could cause the patch to fail. This is necessary because some eval scripts may generate new files in the container, which could interfere with patch application if not cleaned.
+        container.exec_run(
+            f"git clean -fd",
+            workdir=DOCKER_WORKDIR,
+            user=DOCKER_USER,
+        )
+        
         copy_to_container(container, patch_file, PurePosixPath(DOCKER_PATCH))
 
         # Attempt to apply patch to container (TODO: FIX THIS)
