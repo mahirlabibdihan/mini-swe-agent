@@ -102,8 +102,9 @@ class DefaultAgent:
         actions = re.findall(self.config.action_regex, response["content"], re.DOTALL)
         if len(actions) == 1:
             action = actions[0].strip()
-            if action == "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT":
-                action += " && git add -A && git diff --cached"
+            if "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in action:
+                action = action.replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached")  
+                response["content"] = response["content"].replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached")
             return {"action": action, **response}
         raise FormatError(self.render_template(self.config.format_error_template, actions=actions))
 

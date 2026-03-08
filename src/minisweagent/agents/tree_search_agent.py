@@ -19,6 +19,7 @@ from rank_bm25 import BM25Okapi
 import pickle
 import os
 import numpy as np
+from minisweagent.utils.log import instance_logger
 
 class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     frontier_budget: int = 4
@@ -52,10 +53,10 @@ class TreeSearchAgent(RewardGuidedAgent):
         self.relevance_dict = dict(zip(self.file_ids, scores))
         
     def _backtrack(self, target_node):
-        print(f">> Backtracking from [{self.tree_node.id}] to [{target_node.id}]")
+        instance_logger.debug(f">> Backtracking from [{self.tree_node.id}] to [{target_node.id}]")
         
         if target_node.commit != self.tree_node.commit:
-            print(f">> Backtracking from [{self.tree_node.branch} {self.tree_node.commit[:7]}] to [{target_node.branch} {target_node.commit[:7]}]")
+            instance_logger.debug(f">> Backtracking from [{self.tree_node.branch} {self.tree_node.commit[:7]}] to [{target_node.branch} {target_node.commit[:7]}]")
             # env.execute(f"git checkout {target_node.parent.branch}")
             if self._get_branch_head(target_node.branch) != target_node.commit:
                 self.env.execute(f"git checkout {target_node.commit}")
@@ -74,6 +75,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         
         # A node is promising if it increases value within epsilon threshold or has high absolute value
         return node.value >= node.parent.value - self.curr_epsilon or node.value > 0.8
+        # return True # TEMPORARY: Disable pruning to see how it affects performance. Will re-enable after testing.
     
     def _calculate_path_write_reward(self, node: TreeSearchNode) -> float:
         """Calculate average reward of write actions along the path to the node."""
@@ -90,11 +92,11 @@ class TreeSearchAgent(RewardGuidedAgent):
         return total_reward / write_actions
     
     def _handle_max_steps(self):
-        # print(f">> Checking for max steps... {self.n_expanded} / {self.config.step_limit}")
+        # instance_logger.debug(f">> Checking for max steps... {self.n_expanded} / {self.config.step_limit}")
         if self.n_expanded < self.config.step_limit:
             return None
         
-        print(">> Max steps reached, selecting best terminating action...")
+        instance_logger.debug(">> Max steps reached, selecting best terminating action...")
         
         # Find the best terminating action in the tree
         terminating_nodes = [
@@ -132,6 +134,7 @@ class TreeSearchAgent(RewardGuidedAgent):
             # Next action is the best_node and terminate after that -> Has some issue with "local" scope. TODO: Fix that
             best_node.visits += 1
             term_node = self._make_terminating_action(best_node)
+            print(f">> Adding terminating node [{term_node.id}] under best node [{best_node.id}] with path write reward {best_value}")
             best_node.add_child(term_node)
         
         return best_node
@@ -152,7 +155,7 @@ class TreeSearchAgent(RewardGuidedAgent):
     #         self.tree_node = best_node
     #     else:
     #         self.tree_node = self.tree_root.children[0] # Fallback to first child of root
-    #         print(">> No expandable nodes found, reverting to root.")
+    #         instance_logger.debug(">> No expandable nodes found, reverting to root.")
             
             
     def compute_alpha(self, progress: float, alpha_min: float = 0.4, alpha_max: float = 0.8) -> float:
@@ -195,7 +198,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                     if best_node is not None:
                         return best_node
                 elif self.phase == 2:
-                    print(":: Switching to phase 3: Allowing terminating actions.")
+                    instance_logger.debug(":: Switching to phase 3: Allowing terminating actions.")
                     self.phase = 3
                     continue
                      
@@ -217,7 +220,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         last_node = min(top_k, key=lambda x: x.value)
             
         if self.curr_epsilon is not None:
-            self.curr_epsilon = last_node.parent.value - last_node.value # Increase epsilon to be less strict
+            self.curr_epsilon = max(self.curr_epsilon, last_node.parent.value - last_node.value) # Increase epsilon to be less strict
         
         self._update_frontier(top_k)
         best_node = self._select_action()
@@ -241,20 +244,43 @@ class TreeSearchAgent(RewardGuidedAgent):
             return None
         best_leaf = max(write_leaves, key=lambda x: x.get_path_value(0.85))
         return best_leaf
+
+    def _find_best_read_leaf(self) -> TreeSearchNode:
+        read_leaves = [
+            n for n in self.node_map.values()
+            if n.visible
+            and not n.executed
+            and not n.is_terminating
+            and n.merged_value is not None
+        ]
+        if not read_leaves:
+            return None
+        best_leaf = max(read_leaves, key=lambda x: x.get_path_value(0.85))
+        return best_leaf
         
     def _switch_to_phase_2(self):
         best_leaf = self._find_best_write_leaf()
         if best_leaf is not None:
-            print(":: Switching to phase 2: Prioritizing write actions.")
+            instance_logger.debug(":: Switching to phase 2: Prioritizing write actions.")
             self.phase = 2  # Switch to phase 2 after 30% of steps
             self.node_map = {best_leaf.id: best_leaf}
             self.frontier.clear()  # Clear frontier when switching phases
             self._update_frontier([best_leaf])
             return best_leaf
+        else:
+            best_leaf = self._find_best_read_leaf()
+            if best_leaf is not None:
+                instance_logger.debug(":: Switching to phase 2: No promising write actions, converging on best read action for phase 2.")
+                self.phase = 2
+                self.node_map = {best_leaf.id: best_leaf}
+                self.frontier.clear()  # Clear frontier when switching phases
+                self._update_frontier([best_leaf])
+                self.frontier.reduce_budget() # Reduce budget to focus on this promising read action
+                return best_leaf
         return None
     
     def _switch_to_phase_3(self):
-        print(":: Switching to phase 3: Allowing terminating actions.")
+        instance_logger.debug(":: Switching to phase 3: Allowing terminating actions.")
         self.phase = 3  # Switch to phase 3
         self.frontier.clear()  # Clear frontier when switching 
         
@@ -285,7 +311,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                 self.frontier.clear() # Local frontier only
             
             if self.config.selection_scope == "global" and (self.n_submissions >= 2) and self.phase == 2:
-                print(":: Switching to phase 3: Allowing terminating actions.")
+                instance_logger.debug(":: Switching to phase 3: Allowing terminating actions.")
                 self.phase = 3  # Switch to phase 3 after 50% of steps
                 candidates = [
                     n for n in self.node_map.values()
@@ -303,7 +329,14 @@ class TreeSearchAgent(RewardGuidedAgent):
                 # TODO: May do more sophisticated checks for choosing the best terminating node
                 
             if self.config.selection_scope == "local" or self.tree_node.visits == 1: # Local or First visit
-                unexecuted = [c for c in self.tree_node.children if not c.executed and c.visible and self.is_promising(c) and (self.phase > 1 or not c.modifies_code or self.config.selection_scope == "local") and (self.phase > 2 or not c.is_terminating or self.config.selection_scope == "local")] # Unexecuted + Promising
+                unexecuted = [
+                    c for c in self.tree_node.children 
+                    if not c.executed 
+                    and c.visible 
+                    and self.is_promising(c) 
+                    and (self.phase > 1 or not c.modifies_code or self.config.selection_scope == "local") 
+                    and (self.phase > 2 or not c.is_terminating or self.config.selection_scope == "local")
+                ] # Unexecuted + Promising
                 self._update_frontier(unexecuted)
                 
                 if self.tree_node.value is not None and self.config.epsilon is not None:
@@ -315,7 +348,9 @@ class TreeSearchAgent(RewardGuidedAgent):
             if self.config.selection_scope == "global" and self.phase == 1 and (
                 (self.n_modifications >= 2 and (self.n_expanded >= min(self.config.step_limit/3, 10) or self.frontier.empty()))
                 or
-                (self.n_submissions >= 1 and self.n_expanded >= min(self.config.step_limit/2, 20))
+                (self.n_modifications >= 1 and  self.n_expanded >= min(self.config.step_limit/2, 25))
+                or
+                (self.n_expanded >= 2*self.config.step_limit/3)
             ):
                 self._switch_to_phase_2()
                  
@@ -325,7 +360,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                 if best_node.parent != self.tree_node:
                     self._backtrack(best_node.parent)          
                     self.n_backtracks += 1   
-                    print(">> Backtrack needed to execute the highest-rewarded action.")
+                    instance_logger.debug(">> Backtrack needed to execute the highest-rewarded action.")
                     
             elif self.config.selection_scope == "local":
                 # Backtrack to parent
@@ -334,7 +369,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                     self.tree_node = self.tree_node.parent
                     self.n_backtracks += 1
                     self.tree_node.visits += 1
-                    print(">> No promising actions locally, backtracking to parent node.")
+                    instance_logger.debug(">> No promising actions locally, backtracking to parent node.")
                 else:
                     # Go to the highest-rewarded node globally
                     best_node = self._go_to_best_executable_node()
@@ -342,7 +377,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                 
             else:
                 # Go to the highest-rewarded node globally
-                print(">> Frontier is empty, searching globally for best executable node.")
+                instance_logger.debug(">> Frontier is empty, searching globally for best executable node.")
                 best_node = self._go_to_best_executable_node()
                 self.add_message("system", "No promising actions found globally, backtracking to best action.")
                 
@@ -358,7 +393,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         else: # Action generated by System
             self.add_message("system", self.tree_node.last_action["thought"])
             
-        print(f">> Executing selected action: {self.tree_node.last_action['command']}")
+        instance_logger.debug(f">> Executing selected action #{self.n_expanded + 1}: {self.tree_node.last_action['command']}")
         if self.tree_node.last_action["command"] is None or (not self.tree_node.is_terminating and not self.tree_node.modifies_code): # For read-only action, no need to re-execute
             observation = self.tree_node.observation
         else:
@@ -377,17 +412,22 @@ class TreeSearchAgent(RewardGuidedAgent):
         if self.tree_node.modifies_code:
             if self._is_detached_head():
                 self.tree_node.branch = self._create_unique_branch(base_name="ts-agent")
-                print(f">> Switching to branch: {self.tree_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
+                instance_logger.debug(f">> Switching to branch: {self.tree_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
             else:
                 self.tree_node.branch = self.tree_node.parent.branch
-                print(f">> Staying on branch: {self.tree_node.branch}")
+                instance_logger.debug(f">> Staying on branch: {self.tree_node.branch}")
             
-            self.tree_node.commit = self._commit_changes()
-            print(f">> New commit created: {self.tree_node.commit}")
+            self.tree_node.commit, is_submodule_commit = self._commit_changes()
+            instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
+            
+            if is_submodule_commit:
+                instance_logger.debug(">> Detected submodule commit, marking this step as point-of-no-return.")
+                self.frontier.clear()  # Clear frontier when switching phases
+                self.node_map = {self.tree_node.id: self.tree_node} # Prune all other nodes as they are now stale   
         else:
             self.tree_node.commit = self._get_commit_hash()
             self.tree_node.branch = self.tree_node.parent.branch
-            print(f">> No changes detected, staying on commit: {self.tree_node.commit}")
+            instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
             
         with open("debug_tree.json", "w") as f:
             json.dump(self.tree_root.to_tree(), f, indent=4)
@@ -420,9 +460,9 @@ class TreeSearchAgent(RewardGuidedAgent):
         if self.frontier.is_out_of_budget():
             self.frontier.minimize()
             self.n_prune += 1
-            print(f"Queue size {self.frontier.length()}. Tree pruned.")
+            instance_logger.debug(f"Queue size {self.frontier.length()}. Tree pruned.")
         else:
-            print(f"Queue size {self.frontier.length()}. Adding new actions...")
+            instance_logger.debug(f"Queue size {self.frontier.length()}. Adding new actions...")
             
         # PRUNE READ Action
         # best_node = max(tree_nodes, key=lambda x: x.merged_value)

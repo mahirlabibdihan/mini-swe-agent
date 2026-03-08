@@ -59,10 +59,15 @@ def main(
     if exit_immediately:
         config.setdefault("agent", {})["confirm_exit"] = False
     env = get_sb_environment(config, instance)
+    reward_config = config.get("reward_model", {})
     agent = InteractiveAgent(
         get_model(model_name, config.get("model", {})),
         env,
-        RewardModel(get_model(model_name, config.get("reward_model", {}))),
+        RewardModel(
+            get_model(model_name, reward_config),
+            use_combined_scoring=reward_config.get("use_combined_scoring", True),
+            max_retries=reward_config.get("max_retries", 3)
+        ),
         **({"mode": "yolo"} | config.get("agent", {})),
     )
 

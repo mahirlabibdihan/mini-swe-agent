@@ -221,8 +221,7 @@ mini-extra swebench-ts-single \
 
 ```bash
 mini-extra swebench-ts --subset verified --split test \
-  --model-class minisweagent.models.openrouter_model.OpenRouterModel --model openai/gpt-5-mini \
-  --output output/verified.test.01/openai__gpt-5-mini --slice 0:5 --redo-existing
+  --output output/verified.test.14/openai__gpt-5-mini --slice 0:10 --redo-existing
 ```
 
 ```bash

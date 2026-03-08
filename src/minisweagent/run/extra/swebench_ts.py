@@ -25,7 +25,7 @@ from minisweagent.environments import get_environment
 from minisweagent.models import get_model
 from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.utils.save import save_traj
-from minisweagent.utils.log import add_file_handler, logger
+from minisweagent.utils.log import add_file_handler, logger, set_instance_file_handler
 from minisweagent.agents.tree_search_agent import TreeSearchAgent
 from minisweagent.agents.reward_model import RewardModel
 
@@ -132,7 +132,12 @@ def process_instance(
     remove_from_preds_file(output_dir / "preds.json", instance_id)
     (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
     model = get_model(config=config.get("model", {}))
-    reward_model = RewardModel(get_model(config=config.get("reward_model", {})))
+    reward_config = config.get("reward_model", {})
+    reward_model = RewardModel(
+        get_model(config=reward_config),
+        use_combined_scoring=reward_config.get("use_combined_scoring", True),
+        max_retries=reward_config.get("max_retries", 3)
+    )
     task = instance["problem_statement"]
 
     progress_manager.on_instance_start(instance_id)
@@ -142,6 +147,11 @@ def process_instance(
     extra_info = None
 
     try:
+        instance_dir.mkdir(parents=True, exist_ok=True)
+        # clear the log file for this instance if it already exists
+        if (instance_dir / "experiment.log").exists():
+            (instance_dir / "experiment.log").unlink()
+        set_instance_file_handler(instance_dir / "experiment.log")
         env = get_sb_environment(config, instance)
         agent = ProgressTrackingAgent(
             model,
@@ -202,7 +212,7 @@ def main(
     slice_spec: str = typer.Option("", "--slice", help="Slice specification (e.g., '0:5' for first 5 instances)", rich_help_panel="Data selection"),
     filter_spec: str = typer.Option("", "--filter", help="Filter instance IDs by regex", rich_help_panel="Data selection"),
     shuffle: bool = typer.Option(False, "--shuffle", help="Shuffle instances", rich_help_panel="Data selection"),
-    output: str = typer.Option("", "-o", "--output", help="Output directory", rich_help_panel="Basic"),
+    output: str = typer.Option("output/debug", "-o", "--output", help="Output directory", rich_help_panel="Basic"),
     workers: int = typer.Option(1, "-w", "--workers", help="Number of worker threads for parallel processing", rich_help_panel="Basic"),
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use", rich_help_panel="Basic"),
     model_class: str | None = typer.Option(None, "-c", "--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced"),

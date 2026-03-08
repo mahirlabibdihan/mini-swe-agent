@@ -19,12 +19,15 @@ class TreeSearchNode:
         self.modified_files = []
         self.read_files = []
         self.is_terminating = False
+        self.is_submission = False
         self.invalid_termination = False
         self.visits = 0
         self.is_system_response = False
         self.raw_observation = None
         self.fails_tests = False
         self.n_history = 0
+        self.changes = []
+        self.diff_size = 0
         
     def __lt__(self, other):
         # based on frequency
@@ -45,6 +48,7 @@ class TreeSearchNode:
             norm += f
             current = current.parent
             f *= discount_factor
+            # f *= 0.0 # TODO: Set in config
         
         return score / norm if norm > 0 else 0
     
@@ -76,6 +80,7 @@ class TreeSearchNode:
             "epsilon": self.epsilon,
             "modified_files": self.modified_files,
             "modifies_code": self.modifies_code,
+            "diff_size": self.diff_size,
             "read_files": self.read_files,
             "last_action": {
                 "command": self.last_action["command"],
@@ -99,6 +104,7 @@ class TreeSearchNode:
             "epsilon": self.epsilon,
             "modified_files": self.modified_files,
             "modifies_code": self.modifies_code,
+            "diff_size": self.diff_size,
             "read_files": self.read_files,
             "last_action": {
                 "command": self.last_action["command"],
