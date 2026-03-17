@@ -776,6 +776,10 @@ EOF
     def _evaluate_nodes(self, node_list):
         for new_node in tqdm(node_list, desc="Evaluating nodes"):
             if new_node.value is None:
+                if self.config.branching_factor == 1:
+                    new_node.value = 0.0 # For single-branch case, we can skip reward computation and directly evaluate the action's relevance to the task
+                    continue
+                
                 cmd_type = "search"
                 if new_node.last_action["command"] is not None:
                     if new_node.is_terminating or new_node.invalid_termination:

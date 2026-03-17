@@ -429,11 +429,19 @@ class TreeSearchAgent(RewardGuidedAgent):
             self.tree_node.branch = self.tree_node.parent.branch
             instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
             
-        with open("debug_tree.json", "w") as f:
-            json.dump(self.tree_root.to_tree(), f, indent=4)
-        
-        with open("debug_nodes.json", "w") as f:
-            json.dump(self.tree_root.to_json(), f, indent=4)
+        try:
+            with open("debug_tree.json", "w", encoding="utf-8") as f:
+                json.dump(self.tree_root.to_tree(), f, indent=4, ensure_ascii=False)
+
+            with open("debug_nodes.json", "w", encoding="utf-8") as f:
+                json.dump(self.tree_root.to_json(), f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            instance_logger.debug(f">> Failed to dump tree for debugging: {e}")
+            # traceback
+            import traceback
+            instance_logger.debug(traceback.format_exc())
+            # instance.logger()
+            
             
         return self.tree_node.observation
     

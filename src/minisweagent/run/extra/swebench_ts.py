@@ -15,6 +15,7 @@ from pathlib import Path
 import typer
 import yaml
 from datasets import load_dataset
+from rich.markup import escape as rich_escape
 from jinja2 import StrictUndefined, Template
 from rich.live import Live
 
@@ -27,6 +28,7 @@ from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.utils.save import save_traj
 from minisweagent.utils.log import add_file_handler, logger, set_instance_file_handler
 from minisweagent.agents.tree_search_agent import TreeSearchAgent
+from minisweagent.agents.single_action_agent import SingleActionAgent
 from minisweagent.agents.reward_model import RewardModel
 
 _HELP_TEXT = """Run mini-SWE-agent on SWEBench instances.
@@ -61,7 +63,7 @@ class ProgressTrackingAgent(TreeSearchAgent):
     def step(self) -> dict:
         """Override step to provide progress updates."""
         self.progress_manager.update_instance_status(
-            self.instance_id, f"Step {self.n_expanded + 1:3d} (${self.model.cost:.2f})"
+            self.instance_id, f"Step {self.n_expanded + 1:3d} (${self.model.cost+(self.reward_model.model.cost if hasattr(self, 'reward_model') else 0.0):.2f})"
         )
         return super().step()
 
@@ -145,6 +147,8 @@ def process_instance(
 
     agent = None
     extra_info = None
+    exit_status = None
+    result = ""
 
     try:
         instance_dir.mkdir(parents=True, exist_ok=True)
@@ -163,7 +167,7 @@ def process_instance(
         )
         exit_status, result = agent.run(task)
     except Exception as e:
-        logger.error(f"Error processing instance {instance_id}: {e}", exc_info=True)
+        logger.error(f"Error processing instance {rich_escape(instance_id)}: {rich_escape(str(e))}", exc_info=True)
         exit_status, result = type(e).__name__, str(e)
         extra_info = {"traceback": traceback.format_exc()}
     finally:
@@ -176,9 +180,10 @@ def process_instance(
             instance_id=instance_id,
             print_fct=logger.info,
         )
-        # save tree 
-        with (instance_dir / f"{instance_id}.tree.json").open("w") as f:
-            json.dump(agent.tree_root.to_tree(), f, indent=2)
+        # save tree
+        if agent is not None:
+            with (instance_dir / f"{instance_id}.tree.json").open("w", encoding="utf-8") as f:
+                json.dump(agent.tree_root.to_tree(), f, indent=2, ensure_ascii=False)
             
         update_preds_file(output_dir / "preds.json", instance_id, model.config.model_name, result)
         progress_manager.on_instance_end(instance_id, exit_status)
@@ -257,7 +262,7 @@ def main(
                 pass
             except Exception as e:
                 instance_id = futures[future]
-                logger.error(f"Error in future for instance {instance_id}: {e}", exc_info=True)
+                logger.error(f"Error in future for instance {rich_escape(instance_id)}: {rich_escape(str(e))}", exc_info=True)
                 progress_manager.on_uncaught_exception(instance_id, e)
 
     with Live(progress_manager.render_group, refresh_per_second=4):

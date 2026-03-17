@@ -44,6 +44,10 @@ def save_traj(
                 "instance_cost": 0.0,
                 "api_calls": 0,
             },
+            "reward_model_stats": {
+                "instance_cost": 0.0,
+                "api_calls": 0,
+            },
             "mini_version": __version__,
         },
         "messages": [],
@@ -52,13 +56,18 @@ def save_traj(
     if agent is not None:
         data["info"]["model_stats"]["instance_cost"] = agent.model.cost
         data["info"]["model_stats"]["api_calls"] = agent.model.n_calls
+        if hasattr(agent, "reward_model"):
+            data["info"]["reward_model_stats"]["instance_cost"] = agent.reward_model.model.cost
+            data["info"]["reward_model_stats"]["api_calls"] = agent.reward_model.model.n_calls
         data["messages"] = agent.messages
         data["info"]["config"] = {
             "agent": agent.config.model_dump(),
             "model": agent.model.config.model_dump(),
+            "reward_model": agent.reward_model.model.config.model_dump() if hasattr(agent, "reward_model") else None,
             "environment": agent.env.config.model_dump(),
             "agent_type": _get_class_name_with_module(agent),
             "model_type": _get_class_name_with_module(agent.model),
+            "reward_model_type": _get_class_name_with_module(agent.reward_model.model) if hasattr(agent, "reward_model") else None,
             "environment_type": _get_class_name_with_module(agent.env),
         }
     if extra_info:
