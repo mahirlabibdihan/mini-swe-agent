@@ -1,5 +1,6 @@
 """Reward model for evaluating actions in tree search."""
 
+import concurrent.futures
 from time import sleep
 from typing import Any, Optional, Dict
 from dataclasses import dataclass
@@ -28,20 +29,23 @@ For example:
 <score>INTEGER</score>
 """
 
-consistency_prompt = """
-You are evaluating a debugging step.
-
+_base_evaluation_prompt = """
 >> Instruction
 {task}
 
 >> Previous Actions and Observations
 {trajectory}
 
->> Current Action
+>> Current action
 {action}
 
 >> Observation
 {observation}
+
+"""
+
+consistency_prompt = _base_evaluation_prompt + """
+You are evaluating a debugging step.
 
 Question:
 Does the observation logically follow from the intent expressed in the thought? 
@@ -52,22 +56,10 @@ Assign an integer score from 0 to 100 that reflects how logically consistent the
 {score_format_prompt}
 """
 
-trajectory_alignment_prompt = """
+trajectory_alignment_prompt = _base_evaluation_prompt + """
 You are evaluating whether a debugging step aligns with the overall intent.
 
->> Instruction
-{task}
-
->> Previous Actions and Observations
-{trajectory}
-
->> Current action
-{action}
-
->> Observation
-{observation}
-
-Task:
+Question:
 Score how well this step moves toward the trajectory intent.
 
 Scoring guidelines:
@@ -76,20 +68,8 @@ Assign an integer score from 0 to 100 that reflects how well this step moves the
 {score_format_prompt}
 """
 
-knowledge_gain_prompt = """
+knowledge_gain_prompt = _base_evaluation_prompt + """
 You are evaluating whether a debugging step provided new and useful information.
-
->> Instruction
-{task}
-
->> Previous Actions and Observations
-{trajectory}
-
->> Current action
-{action}
-
->> Observation
-{observation}
 
 Question:
 Did this observation provide NEW and USEFUL information for fixing the issue?
@@ -101,20 +81,8 @@ Assign an integer score from 0 to 100 that reflects how much NEW and USEFUL info
 """
 
 
-code_edit_effectiveness_prompt = """
+code_edit_effectiveness_prompt = _base_evaluation_prompt + """
 You are evaluating a CODE EDIT debugging step.
-
->> Instruction
-{task}
-
->> Previous Actions and Observations
-{trajectory}
-
->> Current action (Code Edit)
-{action}
-
->> Resulting Observation (e.g., test output, error message, behavior change)
-{observation}
 
 Question:
 How effective was this code edit in addressing the underlying issue?
@@ -125,20 +93,8 @@ Assign an integer score from 0 to 100 that reflects how effective this code edit
 {score_format_prompt}
 """
 
-test_feedback_gain_prompt = """
+test_feedback_gain_prompt = _base_evaluation_prompt + """
 You are evaluating a TESTING debugging step.
-
->> Instruction
-{task}
-
->> Previous Actions and Observations
-{trajectory}
-
->> Current action (Testing)
-{action}
-
->> Observation (e.g., test failures, passes, logs, coverage info)
-{observation}
 
 Question:
 Did this testing step provide meaningful and informative feedback for fixing the issue?
@@ -159,20 +115,8 @@ When assigning the score, consider:
 {score_format_prompt}
 """
 
-termination_readiness_prompt = """
+termination_readiness_prompt = _base_evaluation_prompt + """
 You are evaluating a TERMINATION / SUBMISSION debugging step.
-
->> Instruction
-{task}
-
->> Previous Actions and Observations
-{trajectory}
-
->> Current action (Termination / Submission)
-{action}
-
->> Observation
-{observation}
 
 Question:
 Is it appropriate for the agent to terminate and submit the solution at this point?
@@ -443,22 +387,34 @@ class RewardModel():
         )
 
 
-    def format_trajectory(self, trajectory: list[Dict[str, Any]], n_steps: int = 5) -> str:
+    def format_trajectory(self, trajectory: list[Dict[str, Any]], offset: int = 0, history_summary: str = None, n_steps: int = 5) -> str:
         if len(trajectory) == 0:
             return "<No previous actions or observations>\n\n"
         formatted_trajectory = ""
+        if history_summary is not None:
+            formatted_trajectory += f"Summary of earlier steps: {history_summary}\n\n"
         if len(trajectory) > n_steps:
             formatted_trajectory += "... (omitted earlier steps for brevity) ...\n\n"
         for i, step in enumerate(trajectory):
-            if i < len(trajectory) - n_steps:
+            if i + offset < len(trajectory) - n_steps:
                 continue  # Only keep last {n_steps} steps for brevity
-            formatted_trajectory += f"Action #{i+1}: {step['thought']}\n"
-            formatted_trajectory += f"Observation #{i+1}: {step['observation']}\n\n"
+            formatted_trajectory += f"Action #{i+ offset + 1}: {step['thought']}\n"
+            formatted_trajectory += f"Observation #{i+ offset + 1}: {step['observation']}\n\n"
                 
         return formatted_trajectory.strip()
 
 
-    def score(self, prompt: str, task: str, trajectory: str, action: str, observation: str) -> float:
+    def score(
+        self,
+        prompt: str,
+        task: str,
+        offset: int,
+        history_summary,
+        trajectory: str,
+        action: str,
+        observation: str,
+        log_file: str = "reward_model_scores.log",
+    ) -> float:
         """Score a single dimension with retry logic.
 
         Returns:
@@ -467,7 +423,7 @@ class RewardModel():
         n_steps = len(trajectory)
         formatted_prompt = prompt.format(
             task=task,
-            trajectory=self.format_trajectory(trajectory, n_steps=n_steps),
+            trajectory=self.format_trajectory(trajectory, offset=offset, history_summary = history_summary, n_steps=n_steps),
             action=action,
             observation=self.format_observation(observation),
             score_format_prompt=score_format_prompt
@@ -475,7 +431,7 @@ class RewardModel():
 
         curr_prompt = formatted_prompt
 
-        with open("reward_model_scores.log", "w") as f:
+        with open(log_file, "w") as f:
             f.write(f"Prompt:\n{curr_prompt}")
 
         score, error = None, None
@@ -488,7 +444,7 @@ class RewardModel():
                         {"role": "user", "content": curr_prompt}
                     ])
                     break
-                except litellm.exceptions.ContextWindowExceededError as e:
+                except (litellm.exceptions.ContextWindowExceededError, litellm.exceptions.BadRequestError) as e:
                     if n_steps == 1:
                         instance_logger.debug(f"Final exception during model query with n_steps=1: {e}.")
                         with open("debug_error.log", 'w') as f:
@@ -506,7 +462,7 @@ class RewardModel():
                         score_format_prompt=score_format_prompt
                     )
                     curr_prompt = formatted_prompt
-                    with open("reward_model_scores.log", "a") as f:
+                    with open(log_file, "a") as f:
                         f.write(f"Prompt:\n{curr_prompt}")
                     sleep(1)
 
@@ -515,7 +471,7 @@ class RewardModel():
 
             # If parsing succeeded, we're done
             # if error is None:
-            with open("reward_model_scores.log", "w") as f:
+            with open(log_file, "w") as f:
                 f.write(f"Prompt:\n{curr_prompt}\n\nOutput:\n{out}\n\nParsed score: {score}")
             break
 
@@ -540,7 +496,7 @@ class RewardModel():
 
         return score / 100.0  # Normalize to [0.0, 1.0]
 
-    def score_combined(self, prompt: str, task: str, trajectory: str, action: str, observation: str) -> tuple:
+    def score_combined(self, prompt: str, task: str, offset: int, history_summary,  trajectory: str, action: str, observation: str) -> tuple:
         """Single LLM call to get all three scores with chain of thought.
 
         Returns:
@@ -549,7 +505,7 @@ class RewardModel():
         n_steps = len(trajectory)
         formatted_prompt = prompt.format(
             task=task,
-            trajectory=self.format_trajectory(trajectory, n_steps=n_steps),
+            trajectory=self.format_trajectory(trajectory, offset=offset, history_summary=history_summary, n_steps=n_steps),
             action=action,
             observation=observation,
             score_format_prompt=combined_score_format_prompt
@@ -570,7 +526,7 @@ class RewardModel():
                         {"role": "user", "content": curr_prompt}
                     ])
                     break
-                except litellm.exceptions.ContextWindowExceededError as e:
+                except (litellm.exceptions.ContextWindowExceededError, litellm.exceptions.BadRequestError) as e:
                     if n_steps == 1:
                         instance_logger.debug(f"Final exception during model query with n_steps=1: {e}.")
                         with open("debug_error.log", 'w') as f:
@@ -657,9 +613,15 @@ Your task is specifically to make changes to non-test files in the current direc
         """
         # Create plain trajectory text
         trajectory = []
+        history_summary = None
+        offset = 0
 
         curr = node.parent
         while curr.last_action is not None:
+            if curr.history_summary is not None:
+                history_summary = curr.history_summary
+                offset = curr.level
+                break
             trajectory.append(
                 {
                     "thought": curr.last_action["thought"],
@@ -681,7 +643,7 @@ Your task is specifically to make changes to non-test files in the current direc
             prompt = combined_evaluation_prompt_search
 
         # Single LLM call to get all three scores
-        C, T, K = self.score_combined(prompt, task, trajectory, action, observation)
+        C, T, K = self.score_combined(prompt, task, offset, history_summary, trajectory, action, observation)
 
         instance_logger.debug(
             f"[{cmd_type}] CoT Reward scores - Consistency: {C:.2f}, Specific: {K:.2f}, Trajectory: {T:.2f}"
@@ -744,9 +706,15 @@ Your task is specifically to make changes to non-test files in the current direc
         """
         # Create plain trajectory text
         trajectory = []
+        history_summary = None
         
         curr = node.parent
+        offset = 0
         while curr.last_action is not None:
+            if curr.history_summary is not None:
+                history_summary = curr.history_summary
+                offset = curr.level
+                break
             trajectory.append(
                 {
                     "thought": curr.last_action["thought"],
@@ -758,18 +726,43 @@ Your task is specifically to make changes to non-test files in the current direc
         trajectory.reverse()
 
         
-        # Detailed scoring
-        C = self.score(consistency_prompt, task, trajectory, action, observation)
-        
-        T = self.score(trajectory_alignment_prompt, task, trajectory, action, observation)
+        # Detailed scoring (independent dimensions can run in parallel)
+        K_prompt = None
         if cmd_type == "edit":
-            K = self.score(code_edit_effectiveness_prompt, task, trajectory, action, observation)
+            K_prompt = code_edit_effectiveness_prompt
         elif cmd_type == "test":
-            K = self.score(test_feedback_gain_prompt, task, trajectory, action, observation)
+            K_prompt = test_feedback_gain_prompt
         elif cmd_type == "submit":
-            K = self.score(termination_readiness_prompt, task, trajectory, action, observation)
+            K_prompt = termination_readiness_prompt
         else:
-            K = self.score(knowledge_gain_prompt, task, trajectory, action, observation)
+            K_prompt = knowledge_gain_prompt
+
+        score_args = (task, offset, history_summary, trajectory, action, observation)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                "consistency": executor.submit(
+                    self.score,
+                    consistency_prompt,
+                    *score_args,
+                    log_file="reward_model_scores_consistency.log",
+                ),
+                "trajectory": executor.submit(
+                    self.score,
+                    trajectory_alignment_prompt,
+                    *score_args,
+                    log_file="reward_model_scores_trajectory.log",
+                ),
+                "specific": executor.submit(
+                    self.score,
+                    K_prompt,
+                    *score_args,
+                    log_file="reward_model_scores_specific.log",
+                ),
+            }
+
+            C = futures["consistency"].result()
+            T = futures["trajectory"].result()
+            K = futures["specific"].result()
 
         instance_logger.debug(
             f"[{cmd_type}] Reward scores - Consistency: {C:.2f}, Knowledge Gain: {K:.2f}, Trajectory Alignment: {T:.2f}"

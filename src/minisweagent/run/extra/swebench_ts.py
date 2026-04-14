@@ -48,6 +48,8 @@ DATASET_MAPPING = {
     "multilingual": "swe-bench/SWE-Bench_Multilingual",
     "smith": "SWE-bench/SWE-smith",
     "_test": "klieret/swe-bench-dummy-test-dataset",
+    "verified_mini": "MariusHobbhahn/swe-bench-verified-mini",
+    "pro": "ScaleAI/SWE-bench_Pro",
 }
 
 _OUTPUT_FILE_LOCK = threading.Lock()
@@ -72,10 +74,16 @@ def get_swebench_docker_image_name(instance: dict) -> str:
     """Get the image name for a SWEBench instance."""
     image_name = instance.get("image_name", None)
     if image_name is None:
-        # Docker doesn't allow double underscore, so we replace them with a magic token
-        iid = instance["instance_id"]
-        id_docker_compatible = iid.replace("__", "_1776_")
-        image_name = f"docker.io/swebench/sweb.eval.x86_64.{id_docker_compatible}:latest".lower()
+        docker_tag = instance.get("dockerhub_tag", None)
+        if docker_tag is not None:
+            image_name = f"docker.io/jefzda/sweap-images:{docker_tag}"
+        else:
+            # Docker doesn't allow double underscore, so we replace them with a magic token
+            iid = instance["instance_id"]
+            id_docker_compatible = iid.replace("__", "_1776_")
+            image_name = f"docker.io/swebench/sweb.eval.x86_64.{id_docker_compatible}:latest".lower()
+            
+
     return image_name
 
 
@@ -108,6 +116,14 @@ def update_preds_file(output_path: Path, instance_id: str, model_name: str, resu
             "model_patch": result,
         }
         output_path.write_text(json.dumps(output_data, indent=2))
+
+
+def should_redo_existing_instance(instance_result: dict) -> bool:
+    """Return True when an existing result has a non-empty invalid model_patch."""
+    model_patch = instance_result.get("model_patch", "")
+    if not model_patch:
+        return False
+    return not model_patch.lstrip().startswith("diff --git")
 
 
 def remove_from_preds_file(output_path: Path, instance_id: str):
@@ -237,9 +253,18 @@ def main(
 
     instances = filter_instances(instances, filter_spec=filter_spec, slice_spec=slice_spec, shuffle=shuffle)
     if not redo_existing and (output_path / "preds.json").exists():
-        existing_instances = list(json.loads((output_path / "preds.json").read_text()).keys())
-        logger.info(f"Skipping {len(existing_instances)} existing instances")
-        instances = [instance for instance in instances if instance["instance_id"] not in existing_instances]
+        existing_results = json.loads((output_path / "preds.json").read_text())
+        existing_instance_ids = set(existing_results.keys())
+        redo_instance_ids = {
+            instance_id
+            for instance_id, instance_result in existing_results.items()
+            if should_redo_existing_instance(instance_result)
+        }
+        skip_instance_ids = existing_instance_ids - redo_instance_ids
+        logger.info(
+            f"Skipping {len(skip_instance_ids)} existing instances and redoing {len(redo_instance_ids)} instances with invalid model_patch values"
+        )
+        instances = [instance for instance in instances if instance["instance_id"] not in skip_instance_ids]
     logger.info(f"Running on {len(instances)} instances...")
 
     config_path = get_config_path(config_spec)

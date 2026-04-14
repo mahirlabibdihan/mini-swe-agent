@@ -44,6 +44,7 @@ DATASET_MAPPING = {
     "multilingual": "swe-bench/SWE-Bench_Multilingual",
     "smith": "SWE-bench/SWE-smith",
     "_test": "klieret/swe-bench-dummy-test-dataset",
+    "pro": "ScaleAI/SWE-bench_Pro",
 }
 
 
@@ -70,10 +71,14 @@ def get_swebench_docker_image_name(instance: dict) -> str:
     """Get the image name for a SWEBench instance."""
     image_name = instance.get("image_name", None)
     if image_name is None:
-        # Docker doesn't allow double underscore, so we replace them with a magic token
-        iid = instance["instance_id"]
-        id_docker_compatible = iid.replace("__", "_1776_")
-        image_name = f"docker.io/swebench/sweb.eval.x86_64.{id_docker_compatible}:latest".lower()
+        docker_tag = instance.get("dockerhub_tag", None)
+        if docker_tag is not None:
+            image_name = f"docker.io/jefzda/sweap-images:{docker_tag}"
+        else:
+            # Docker doesn't allow double underscore, so we replace them with a magic token
+            iid = instance["instance_id"]
+            id_docker_compatible = iid.replace("__", "_1776_")
+            image_name = f"docker.io/swebench/sweb.eval.x86_64.{id_docker_compatible}:latest".lower()
     return image_name
 
 

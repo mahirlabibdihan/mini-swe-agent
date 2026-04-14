@@ -9,19 +9,6 @@ from pydantic import BaseModel
 
 from minisweagent import Environment, Model
 
-
-class AgentConfig(BaseModel):
-    # Check the config files in minisweagent/config for example settings
-    system_template: str
-    instance_template: str
-    timeout_template: str
-    format_error_template: str
-    action_observation_template: str
-    action_regex: str = r"```bash\s*\n(.*?)\n```"
-    step_limit: int = 0
-    cost_limit: float = 3.0
-
-
 class NonTerminatingException(Exception):
     """Raised for conditions that can be handled by the agent."""
 
@@ -44,6 +31,17 @@ class Submitted(TerminatingException):
 
 class LimitsExceeded(TerminatingException):
     """Raised when the agent has reached its cost or step limit."""
+
+class AgentConfig(BaseModel):
+    # Check the config files in minisweagent/config for example settings
+    system_template: str
+    instance_template: str
+    timeout_template: str
+    format_error_template: str
+    action_observation_template: str
+    action_regex: str = r"```bash\s*\n(.*?)\n```"
+    step_limit: int = 0
+    cost_limit: float = 3.0
 
 
 class DefaultAgent:
@@ -102,9 +100,9 @@ class DefaultAgent:
         actions = re.findall(self.config.action_regex, response["content"], re.DOTALL)
         if len(actions) == 1:
             action = actions[0].strip()
-            if "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in action:
-                action = action.replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached")  
-                response["content"] = response["content"].replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached")
+            # if "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in action:
+            #     action = action.replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached")  
+            #     response["content"] = response["content"].replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached")
             return {"action": action, **response}
         raise FormatError(self.render_template(self.config.format_error_template, actions=actions))
 

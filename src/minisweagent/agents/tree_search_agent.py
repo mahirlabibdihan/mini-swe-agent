@@ -93,7 +93,7 @@ class TreeSearchAgent(RewardGuidedAgent):
     
     def _handle_max_steps(self):
         # instance_logger.debug(f">> Checking for max steps... {self.n_expanded} / {self.config.step_limit}")
-        if self.n_expanded < self.config.step_limit:
+        if self.n_expanded + 1 < self.config.step_limit:
             return None
         
         instance_logger.debug(">> Max steps reached, selecting best terminating action...")
@@ -130,12 +130,15 @@ class TreeSearchAgent(RewardGuidedAgent):
             
             if best_value == 0:
                 best_node = max(candidates, key=lambda x: x.merged_value, default=None) # Fallback to max reward node
+                print(f">> No write actions found, fallback to node with highest merged value [{best_node.id}] with merged value {best_node.merged_value}")
+            else:
+                print(f">> Best node based on path write reward is [{best_node.id}] with average write reward {best_value}")
                 
             # Next action is the best_node and terminate after that -> Has some issue with "local" scope. TODO: Fix that
             best_node.visits += 1
             term_node = self._make_terminating_action(best_node)
             print(f">> Adding terminating node [{term_node.id}] under best node [{best_node.id}] with path write reward {best_value}")
-            best_node.add_child(term_node)
+            # best_node.add_child(term_node)
         
         return best_node
 
@@ -263,7 +266,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         if best_leaf is not None:
             instance_logger.debug(":: Switching to phase 2: Prioritizing write actions.")
             self.phase = 2  # Switch to phase 2 after 30% of steps
-            self.node_map = {best_leaf.id: best_leaf}
+            self.node_map = {best_leaf.id: best_leaf} # Clearing all other nodes as they are now stale when we switch to phase 2 with a promising write action. This is a design choice to focus the search on the promising write action and its subtree, but it can be adjusted to keep some of the tree if desired.
             self.frontier.clear()  # Clear frontier when switching phases
             self._update_frontier([best_leaf])
             return best_leaf
@@ -386,6 +389,7 @@ class TreeSearchAgent(RewardGuidedAgent):
        
         if self.tree_node.is_terminating:
             self._stage_to_main_branch()
+            self.tree_node.is_submission = True
             self.frontier.reset()
  
         if self.tree_node.last_action["extra"]:

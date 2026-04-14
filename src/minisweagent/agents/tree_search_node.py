@@ -1,4 +1,5 @@
 import uuid
+from minisweagent.utils.log import instance_logger
 
 class TreeSearchNode:
     def __init__(self, last_action):
@@ -28,6 +29,7 @@ class TreeSearchNode:
         self.n_history = 0
         self.changes = []
         self.diff_size = 0
+        self.history_summary = None
         
     def __lt__(self, other):
         # based on frequency
@@ -91,25 +93,33 @@ class TreeSearchNode:
         }, *[node for child in self.children for node in child.to_json()]]
     
     def to_tree(self):
-        return {
-            "id": self.id,
-            "value": self.value,
-            "merged_value": self.merged_value,
-            "level": self.level,
-            "commit": self.commit,
-            "branch": self.branch,
-            "executed": self.executed,
-            "visible": self.visible,
-            "visits": self.visits,
-            "epsilon": self.epsilon,
-            "modified_files": self.modified_files,
-            "modifies_code": self.modifies_code,
-            "diff_size": self.diff_size,
-            "read_files": self.read_files,
-            "last_action": {
-                "command": self.last_action["command"],
-                "thought": self.last_action["thought"],
-            } if self.last_action else None,
-            "children": [child.to_tree() for child in self.children],
-            "observation": self.observation,
-        }
+        try:
+            response = {
+                "id": self.id,
+                "value": self.value,
+                "merged_value": self.merged_value,
+                "level": self.level,
+                "commit": self.commit,
+                "branch": self.branch,
+                "executed": self.executed,
+                "visible": self.visible,
+                "visits": self.visits,
+                "is_submission": self.is_submission,
+                "epsilon": self.epsilon,
+                "modified_files": self.modified_files,
+                "modifies_code": self.modifies_code,
+                "diff_size": self.diff_size,
+                "read_files": self.read_files,
+                "last_action": {
+                    "command": self.last_action["command"],
+                    "thought": self.last_action["thought"],
+                } if self.last_action else None,
+                "history_summary": self.history_summary,
+                "children": [child.to_tree() for child in self.children],
+                "observation": self.observation,
+            }
+        except Exception as e:
+            instance_logger.debug(f">> Failed to convert node {self.id} to tree: {e}")
+            response = None
+        
+        return response

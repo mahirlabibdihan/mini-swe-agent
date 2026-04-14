@@ -12,6 +12,8 @@ class DockerEnvironmentConfig(BaseModel):
     image: str
     cwd: str = "/"
     """Working directory in which to execute commands."""
+    clean_start: bool = False
+    """Whether to start with a clean state (git clean -fd)."""
     env: dict[str, str] = {}
     """Environment variables to set in the container."""
     forward_env: list[str] = []
@@ -29,7 +31,7 @@ class DockerEnvironmentConfig(BaseModel):
     """
     container_timeout: str = "2h"
     """Max duration to keep container running. Uses the same format as the sleep command."""
-    pull_timeout: int = 120
+    pull_timeout: int = 60
     """Timeout in seconds for pulling images."""
 
 
@@ -61,13 +63,17 @@ class DockerEnvironment:
             "-d",
             "--name",
             container_name,
+            "--entrypoint",
+            "/bin/bash",
             "-w",
             self.config.cwd,
             *self.config.run_args,
             self.config.image,
-            "sleep",
-            self.config.container_timeout,
         ]
+        if "swebench" in self.config.image.lower():
+            cmd.extend(["sleep", self.config.container_timeout])
+        else:
+            cmd.extend(["-c", f"sleep {self.config.container_timeout}"])
         self.logger.debug(f"Starting container with command: {shlex.join(cmd)}")
         result = subprocess.run(
             cmd,

@@ -308,6 +308,7 @@ def run_instances(
         run_id (str): Run ID
         timeout (int): Timeout for running tests
     """
+    
     client = docker.from_env()
     test_specs = list(
         map(
@@ -396,24 +397,25 @@ def get_dataset_from_preds(
     # load dataset
     dataset = load_swebench_dataset(dataset_name, split)
     dataset_ids = {i[KEY_INSTANCE_ID] for i in dataset}
-
     if instance_ids:
         # check that all instance IDs have predictions
         missing_preds = set(instance_ids) - set(predictions.keys())
+       
         if missing_preds:
             print(
                 f"Warning: Missing predictions for {len(missing_preds)} instance IDs."
             )
 
-    # check that all prediction IDs are in the dataset
+    # keep only prediction IDs that are present in the dataset
     prediction_ids = set(predictions.keys())
-    if prediction_ids - dataset_ids:
-        raise ValueError(
-            (
-                "Some prediction IDs not found in dataset!"
-                f"\nMissing IDs:\n{' '.join(prediction_ids - dataset_ids)}"
-            )
+  
+    extra_prediction_ids = prediction_ids - dataset_ids
+    if extra_prediction_ids:
+        print(
+            "Warning: Ignoring prediction IDs not found in dataset: "
+            # f"{' '.join(sorted(extra_prediction_ids))}"
         )
+        prediction_ids -= extra_prediction_ids
     if instance_ids:
         dataset = [i for i in dataset if i[KEY_INSTANCE_ID] in instance_ids]
 
@@ -508,6 +510,7 @@ def main(
         )
         return
 
+    
     # set open file limit
     assert len(run_id) > 0, "Run ID must be provided"
     if report_dir is not None:
@@ -521,12 +524,15 @@ def main(
     # load predictions as map of instance_id to prediction
     predictions = get_predictions_from_file(predictions_path, dataset_name, split)
     predictions = {pred[KEY_INSTANCE_ID]: pred for pred in predictions}
+    
 
     # get dataset from predictions
     dataset = get_dataset_from_preds(
         dataset_name, split, instance_ids, predictions, run_id, rewrite_reports
     )
+
     full_dataset = load_swebench_dataset(dataset_name, split, instance_ids)
+
 
     if modal:
         # run instances on Modal
