@@ -56,14 +56,14 @@ class TreeSearchAgent(RewardGuidedAgent):
         instance_logger.debug(f">> Backtracking from [{self.tree_node.id}] to [{target_node.id}]")
         
         if target_node.commit != self.tree_node.commit:
-            instance_logger.debug(f">> Backtracking from [{self.tree_node.branch} {self.tree_node.commit[:7]}] to [{target_node.branch} {target_node.commit[:7]}]")
-            # env.execute(f"git checkout {target_node.parent.branch}")
-            if self._get_branch_head(target_node.branch) != target_node.commit:
-                self.env.execute(f"git checkout {target_node.commit}")
-                self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.commit}\n```")
-            else:
-                self.env.execute(f"git checkout {target_node.branch}")
-                self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.branch}\n```")
+            instance_logger.debug(f">> Backtracking from [{self.tree_node.commit[:7]}] to [{target_node.commit[:7]}]")
+
+            # if self._get_branch_head(target_node.branch) != target_node.commit:
+            self.env.execute(f"git checkout {target_node.commit}")
+            self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.commit}\n```")
+            # else:
+            #     self.env.execute(f"git checkout {target_node.branch}")
+            #     self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.branch}\n```")
         
         else:
             self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.")
@@ -414,12 +414,12 @@ class TreeSearchAgent(RewardGuidedAgent):
         self.tree_node.executed = True
         
         if self.tree_node.modifies_code:
-            if self._is_detached_head():
-                self.tree_node.branch = self._create_unique_branch(base_name="ts-agent")
-                instance_logger.debug(f">> Switching to branch: {self.tree_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
-            else:
-                self.tree_node.branch = self.tree_node.parent.branch
-                instance_logger.debug(f">> Staying on branch: {self.tree_node.branch}")
+            # if self._is_detached_head():
+            #     self.tree_node.branch = self._create_unique_branch(base_name="ts-agent")
+            #     instance_logger.debug(f">> Switching to branch: {self.tree_node.branch}\n{self.env.execute('git branch')['output'].strip()}")
+            # else:
+            #     self.tree_node.branch = self.tree_node.parent.branch
+            #     instance_logger.debug(f">> Staying on branch: {self.tree_node.branch}")
             
             self.tree_node.commit, is_submodule_commit = self._commit_changes()
             instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
@@ -430,7 +430,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                 self.node_map = {self.tree_node.id: self.tree_node} # Prune all other nodes as they are now stale   
         else:
             self.tree_node.commit = self._get_commit_hash()
-            self.tree_node.branch = self.tree_node.parent.branch
+            # self.tree_node.branch = self.tree_node.parent.branch
             instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
             
         try:

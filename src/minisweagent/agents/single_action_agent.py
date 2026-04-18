@@ -16,7 +16,13 @@ class NoActionFound(Exception):
 class SingleActionAgentConfig(AgentConfig):
     depth_limit: int = 20
     """The maximum depth allowed for any node."""
+    
     max_history: int = None
+    """The maximum number of messages to keep in the message history. Set to None for unlimited history."""
+    
+    context_compaction: bool = False
+    """Whether to use context compaction to reduce message history length."""
+    
 
 class SingleActionAgent(DefaultAgent):
     def __init__(self, 
@@ -175,10 +181,149 @@ class SingleActionAgent(DefaultAgent):
         self.tree_node.executed = True
         return self.tree_node.observation
     
+    
     def get_observation(self, action: dict) -> dict:
         """Execute the action and return the observation."""
         output = self.execute_action(action)
         return output
+    
+    
+    def _compact_history(self, messages: list, node: TreeSearchNode) -> list:    
+        # incremental rolling compaction
+        fixed   = messages[:2]
+        history = messages[2:]
+        max_steps = self.config.max_history
+        min_steps = self.config.max_history // 2
+        
+        total_steps = len(history) // 2  # convert messages → steps
+        x = total_steps // min_steps
+        x = max(0, x-1)  # Don't summarize the first chunk until we have at least 2 full chunks to summarize
+        recent_steps = total_steps - x*min_steps # Number of most recent messages to keep without summarization. We summarize the earlier part of the history and keep the recent part intact for better context.
+
+        # Find the most recent summary in the node's ancestry and how many steps have been taken since then
+        summary_node = node
+        steps_after_last_summary = 0
+        while True:
+            if summary_node is None:
+                break
+            if summary_node.history_summary is not None:
+                break
+            steps_after_last_summary += 1
+            summary_node = summary_node.parent
+        
+        if summary_node and summary_node.history_summary:
+            # last compaction
+            last_summary = summary_node.history_summary
+        else:
+            # No compaction so far
+            last_summary = None
+        # ===================================================================== 
+                
+        if recent_steps != min_steps and total_steps != recent_steps:
+            if last_summary is not None and steps_after_last_summary >= min_steps:
+                recent_msgs = history[-2*recent_steps:]
+                return fixed + [
+                    {   
+                        "role": "user",      
+                        "content": f"[CONTEXT SUMMARY - DO NOT REPEAT VERBATIM]\n" + last_summary,
+                    }
+                ] + recent_msgs, last_summary
+            return fixed + history, last_summary
+
+        # Case: recent_steps == min_steps
+        old_msgs    = history[-2*max_steps:-2*min_steps]
+        recent_msgs = history[-2*min_steps:]
+
+        if steps_after_last_summary == min_steps and last_summary is not None:
+            instance_logger.debug(f"Reusing existing summary from {steps_after_last_summary} steps ago for context compaction.")
+            new_summary = last_summary # Case: Multiple Candidate actions generated at the same step, so we can reuse the summary from the first one without extra summarization cost.
+        else:
+            new_summary = self._summarize(old_msgs, last_summary)
+            
+        summary_node = node
+        steps_to_cover = min_steps # convert messages → steps
+        
+        # skip recent steps and summarize before that
+        for _ in range(steps_to_cover):
+            summary_node = summary_node.parent
+            
+        summary_node.history_summary = new_summary
+        
+        return fixed + [
+            {   
+                "role": "user",      
+                "content": f"[CONTEXT SUMMARY - DO NOT REPEAT VERBATIM]\n" + new_summary,
+            }
+        ] + recent_msgs, new_summary
+
+    def _format_msgs(self, msgs):
+        lines = []
+        for m in msgs:
+            role = m["role"]
+            content = m["content"]
+            lines.append(f"{role.upper()}: {content}")
+        return "\n".join(lines)
+
+    def _summarize(self, old_msgs: list, prev_summary: str = None) -> str:
+        instance_logger.debug(f">> Compacting history of {len(old_msgs)} messages into summary. Previous summary length: {len(prev_summary) if prev_summary else 0} characters.")
+    
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a memory compression module for an autonomous software engineering agent "
+                    "solving a bug-fixing task. Your job is to summarize past steps "
+                    "into a compact representation that preserves all critical technical information "
+                    "needed for future debugging and code editing decisions.\n\n"
+                    
+                    "Focus on:\n"
+                    "- The bug being investigated\n"
+                    "- Relevant files, functions, and code regions\n"
+                    "- Actions taken (e.g., code edits, searches, tests run)\n"
+                    "- Key observations and outputs (e.g., errors, logs, test failures)\n"
+                    "- What has been tried and whether it worked or failed\n"
+                    "- Current hypotheses about the bug\n"
+                    "- Important constraints or edge cases\n\n"
+                    
+                    "Do NOT restate the full bug description. "
+                    "Assume it is already known. Focus only on incremental progress and findings.\n\n"
+                    
+                    "Be concise but information-dense. Avoid redundancy. "
+                    "Do NOT include conversational fluff. Preserve technical details."
+                )
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Bug Description:\n{self.task}\n\n"
+                    f"{'[Previous summary]:\n' + prev_summary + '\n\n' if prev_summary else ''}"
+                    "Steps to summarize:\n\n"
+                    + self._format_msgs(old_msgs)
+                )
+            }
+        ]
+            
+        response = self.model.query(messages)
+        summary = response["content"].strip()   
+         
+         
+        prev_context_len = (len(prev_summary) if prev_summary else 0) + len(self._format_msgs(old_msgs))
+        new_context_len = len(summary)
+        compression_ratio = new_context_len / prev_context_len if prev_context_len > 0 else 1.0
+        
+        instance_logger.debug(f"Generated summary of length {len(summary)} ({(1.0-compression_ratio)*100:.2f}% reduction) characters.")
+        
+        # save messages and summary to file for debugging
+        with open("debug_summary.json", "w", encoding="utf-8") as f:
+            json.dump([
+                *messages,
+                {
+                    "role": "assistant",
+                    "content": summary,
+                }
+            ], f, indent=4, ensure_ascii=False)
+        return summary
+        
     
     def get_messages(self, node) -> List[dict]:
         messages = []
@@ -200,38 +345,42 @@ class SingleActionAgent(DefaultAgent):
         
         messages.append({
             "role": "user",
-            "content": self.USER_PROMPT,
-            "timestamp": time.time(),
+            "content": self.USER_PROMPT
         })
         messages.append({
             "role": "system",
-            "content": self.SYSTEM_PROMPT,
-            "timestamp": time.time(),
+            "content": self.SYSTEM_PROMPT
         })
         messages.reverse()
         
         
+        # ---- Context compaction if needed ----
+        if self.config.context_compaction and self.config.max_history and len(messages) > 2*self.config.max_history:
+            # Need to compact history
+            # Starting from node, go back max_history//2 steps and check if node.history_summary is available. If not, summarize that portion of history and save it in the node for future use.
+            messages, new_summary = self._compact_history(messages, node)
+                
+                
         # ---- Truncate history if needed ----
-        if self.config.max_history and len(messages) > 2*self.config.max_history+2:
-            raise NotImplementedError("History truncation not implemented yet. Please set max_history to None or a sufficiently large value.")
-            system_prompt = messages[0]
-            user_prompt = messages[1]
-            first_action = messages[2]
-            first_observation = messages[3]
-            last_msgs = messages[-2*(self.config.max_history-1):]
+        # if self.config.max_history and len(messages) > 2*self.config.max_history+2:
+        #     raise NotImplementedError("History truncation not implemented yet. Please set max_history to None or a sufficiently large value.")
+        #     system_prompt = messages[0]
+        #     user_prompt = messages[1]
+        #     first_action = messages[2]
+        #     first_observation = messages[3]
+        #     last_msgs = messages[-2*(self.config.max_history-1):]
 
-            messages = [
-                system_prompt,
-                user_prompt,
-                first_action,
-                first_observation,
-                {
-                    "role": "system",
-                    "content": "⚠️ Middle conversation history was truncated due to context limits. Earlier steps occurred but are omitted.",
-                    "timestamp": time.time(),
-                },
-                *last_msgs
-            ]
+        #     messages = [
+        #         system_prompt,
+        #         user_prompt,
+        #         first_action,
+        #         first_observation,
+        #         {
+        #             "role": "system",
+        #             "content": "⚠️ Middle conversation history was truncated due to context limits. Earlier steps occurred but are omitted."
+        #         },
+        #         *last_msgs
+        #     ]
         
         # ---- Step limit warning ----
         if self.n_expanded > max(0.85 * self.config.step_limit,  self.config.step_limit - 5):
@@ -239,8 +388,7 @@ class SingleActionAgent(DefaultAgent):
             instance_logger.debug(warning_msg)
             messages.append({
                 "role": "system",
-                "content": warning_msg,
-                "timestamp": time.time(),
+                "content": warning_msg
             })
         return messages
     
@@ -251,9 +399,11 @@ class SingleActionAgent(DefaultAgent):
         
         messages = self.get_messages(self.tree_node)
         # save to file for debugging
-        with open("debug_messages.json", "w") as f:
-            json.dump(messages, f, indent=4)
+        with open("debug_messages.json", "w", encoding="utf-8") as f:
+            json.dump(messages, f, indent=4, ensure_ascii=False)
         response = self.model.query(messages)
+        if "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in response["content"]:
+            response["content"] = response["content"].replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached")
         return response
     
     def _process_nodes(self, tree_nodes: List[TreeSearchNode]) -> List[TreeSearchNode]:

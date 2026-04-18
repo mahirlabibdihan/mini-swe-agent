@@ -217,24 +217,24 @@ EOF
     def _create_pseudo_root(self):
         if self._repo_has_changes():
             if self.env.config.clean_start:
-                self.env.execute("git reset --hard HEAD && git clean -fd && git checkout -b ts-agent-root")
-                action = "git reset --hard HEAD >/dev/null 2>&1 && git clean -fd >/dev/null 2>&1 && git checkout -b ts-agent-root >/dev/null 2>&1 && git rev-parse HEAD"
+                self.env.execute("git reset --hard HEAD && git clean -fd")
+                action = "git reset --hard HEAD >/dev/null 2>&1 && git clean -fd >/dev/null 2>&1 && git rev-parse HEAD"
                 self.add_message("system", f"THOUGHT: Starting with a clean state for tree search.\n\n```bash\n{action}\n```")
                 instance_logger.debug(">> Warning: Uncommitted changes detected at the start of tree search. Cleaning changes and starting tree search with a clean state...")
             else:
-                self.env.execute(f"git checkout -b ts-agent-root && git add -A && git commit -m 'Committing changes before starting tree search' --no-verify")
-                action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git add -A >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' --no-verify >/dev/null 2>&1 && git rev-parse HEAD"
+                self.env.execute(f"git add -A && git commit -m 'Committing changes before starting tree search' --no-verify")
+                action = "git add -A >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' --no-verify >/dev/null 2>&1 && git rev-parse HEAD"
                 self.add_message("system", f"THOUGHT: Need to commit changes before starting tree search.\n\n```bash\n{action}\n```")
-                instance_logger.debug(">> Warning: Uncommitted changes detected at the start of tree search. Committing changes to a new branch before starting tree search...")
+                instance_logger.debug(">> Warning: Uncommitted changes detected at the start of tree search. Committing changes before starting tree search...")
             
             if self._repo_has_changes():
                 if self._repo_has_submodules():
                     self.env.execute("git submodule foreach --recursive git reset --hard")
                     self.env.execute("git submodule foreach --recursive git clean -fd")
-        else:
-            self.env.execute(f"git checkout -b ts-agent-root")
-            action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git rev-parse HEAD"
-            self.add_message("system", f"THOUGHT: Switching to new branch before starting tree search.\n\n```bash\n{action}\n```")
+        # else:
+            # self.env.execute(f"git checkout -b ts-agent-root")
+            # action = "git checkout -b ts-agent-root >/dev/null 2>&1 && git rev-parse HEAD"
+            # self.add_message("system", f"THOUGHT: Switching to new branch before starting tree search.\n\n```bash\n{action}\n```")
             
         output = self.env.execute("git rev-parse HEAD")    
         observation = self.render_template(self.config.action_observation_template, output=output)
@@ -244,8 +244,8 @@ EOF
         self.tree_node.add_child(
             new_node
         )
-        new_node.branch = f"ts-agent-root"
-        new_node.commit = self._get_commit_hash() 
+        # new_node.branch = f"ts-agent-root"
+        new_node.commit = output["output"].strip() # Commit hash of the pseudo root node
         self.tree_node.executed = True
         self.tree_node = new_node
         self.tree_node.executed = True
@@ -289,8 +289,8 @@ EOF
     def _reset(self):
         super()._reset()
         # checkout to ts-main branch (new)
-        self.tree_root.branch = "ts-main"
-        self.env.execute("git checkout -b ts-main")
+        # self.tree_root.branch = "ts-main"
+        # self.env.execute("git checkout -b ts-main")
         self.tree_root.commit = self._get_commit_hash()
         self._create_pseudo_root()
         
@@ -545,7 +545,7 @@ EOF
                 else:
                     # Be-aware of potential terminating actions
                     if potential_termination:
-                        res = self.env.execute(f"git checkout {self.tree_root.branch} && git restore --source {self.tree_node.commit} .")
+                        res = self.env.execute(f"git checkout {self.tree_root.commit} && git restore --source {self.tree_node.commit} .")
                         if res.get("returncode", 0) != 0:
                             instance_logger.debug(">> Warning: Failed to restore to the current node's commit before executing potential terminating action.")
                             instance_logger.debug(f"Error details: {res}")  
@@ -715,16 +715,19 @@ EOF
             
     def _stage_to_main_branch(self):
         # self._repo_has_changes_with_main()
-        response = self.env.execute(f"git checkout {self.tree_root.branch} && git restore --source {self.tree_node.parent.commit} . && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D")
+        response = self.env.execute(f"git checkout {self.tree_root.commit} && git restore --source {self.tree_node.parent.commit} .")
         if response.get("returncode", 0) != 0:
             instance_logger.debug(">> Warning: Failed to stage changes to main branch before submission.")
             instance_logger.debug(f"Error details: {response}")
+            
+        output = self.env.execute(f"git fsck --unreachable")
+        instance_logger.debug(f">> Unreachable commits:\n{output.get('output', '')}")
             
         # Check for repo changes
         if not self._repo_has_changes():
             instance_logger.error(">> No changes detected to stage to main branch before submission.")
             
-        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.branch} && git restore --source {self.tree_node.parent.commit} . && git branch | grep '^  ts-agent' | sed 's/^  //' | xargs -r git branch -D\n```")
+        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.commit} && git restore --source {self.tree_node.parent.commit} .\n```")
             
     def step(self) -> dict:
         
@@ -743,6 +746,8 @@ EOF
         if self.tree_node.is_terminating:
             self._stage_to_main_branch()
             self.tree_node.is_submission = True
+            # self.tree_node.branch = self.tree_node.parent.branch
+            self.tree_node.commit = self.tree_node.parent.commit
 
         if self.tree_node.last_action["extra"]:
             self.add_message("assistant", **{"content": self.tree_node.last_action["thought"], "extra": self.tree_node.last_action.get("extra", {})})
@@ -764,12 +769,12 @@ EOF
         self.add_message("user", observation)
         self.tree_node.observation = observation
         self.tree_node.executed = True
-        self.tree_node.branch = self.tree_node.parent.branch
+        # self.tree_node.branch = self.tree_node.parent.branch
         if self.tree_node.modifies_code:
             self.tree_node.commit, _ = self._commit_changes()
             instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
         else:
-            self.tree_node.commit = self._get_commit_hash()
+            self.tree_node.commit = self._get_commit_hash() #  Can't we just keep the same commit if code isn't modified?
             instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
 
         return self.tree_node.observation

@@ -458,7 +458,7 @@ class RewardModel():
                         task=task,
                         trajectory=self.format_trajectory(trajectory, n_steps=n_steps),
                         action=action,
-                        observation=observation,
+                        observation=self.format_observation(observation),
                         score_format_prompt=score_format_prompt
                     )
                     curr_prompt = formatted_prompt
@@ -507,7 +507,7 @@ class RewardModel():
             task=task,
             trajectory=self.format_trajectory(trajectory, offset=offset, history_summary=history_summary, n_steps=n_steps),
             action=action,
-            observation=observation,
+            observation=self.format_observation(observation),
             score_format_prompt=combined_score_format_prompt
         )
 
@@ -538,7 +538,7 @@ class RewardModel():
                         task=task,
                         trajectory=self.format_trajectory(trajectory, n_steps=n_steps),
                         action=action,
-                        observation=observation,
+                        observation=self.format_observation(observation),
                         score_format_prompt=combined_score_format_prompt
                     )
                     curr_prompt = formatted_prompt
