@@ -47,17 +47,21 @@ class LitellmResponseAPIModel(LitellmModel):
         try:
             # Remove 'timestamp' field added by agent - not supported by OpenAI responses API
             clean_messages = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
-            resp = litellm.responses(
-                model=self.config.model_name,
-                input=clean_messages if self._previous_response_id is None else clean_messages[-1:],
-                previous_response_id=self._previous_response_id,
-                **(self.config.model_kwargs | kwargs),
-            )
+            with self._api_call_lock:
+                resp = litellm.responses(
+                    model=self.config.model_name,
+                    input=clean_messages if self._previous_response_id is None else clean_messages[-1:],
+                    previous_response_id=self._previous_response_id,
+                    **(self.config.model_kwargs | kwargs),
+                )
             self._previous_response_id = getattr(resp, "id", None)
             return resp
         except litellm.exceptions.AuthenticationError as e:
             e.message += " You can permanently set your API key with `mini-extra config set KEY VALUE`."
             raise e
+        except litellm.exceptions.InternalServerError as e:
+            self._log_query_exception(e, messages=messages, kwargs=kwargs)
+            raise
 
     def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
         response = self._query(messages, **kwargs)
@@ -73,6 +77,19 @@ class LitellmResponseAPIModel(LitellmModel):
             raise
         self.n_calls += 1
         self.cost += cost
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            if isinstance(usage, dict):
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+            else:
+                prompt_tokens = getattr(usage, "prompt_tokens", 0)
+                completion_tokens = getattr(usage, "completion_tokens", 0)
+
+            if isinstance(prompt_tokens, int | float):
+                self.input_tokens += int(prompt_tokens)
+            if isinstance(completion_tokens, int | float):
+                self.output_tokens += int(completion_tokens)
         GLOBAL_MODEL_STATS.add(cost)
         return {
             "content": text,

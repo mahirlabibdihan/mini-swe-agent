@@ -51,6 +51,8 @@ class OpenRouterModel:
         self.config = OpenRouterModelConfig(**kwargs)
         self.cost = 0.0
         self.n_calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
         self._api_url = "https://openrouter.ai/api/v1/chat/completions"
         self._api_key = os.getenv("OPENROUTER_API_KEY", "")
 
@@ -82,7 +84,14 @@ class OpenRouterModel:
         try:
             response = requests.post(self._api_url, headers=headers, data=json.dumps(payload), timeout=100)
             response.raise_for_status()
-            return response.json()
+            response_json = response.json()
+            choices = response_json.get("choices")
+            content = ""
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                content = (choices[0].get("message") or {}).get("content") or ""
+            if not content:
+                raise OpenRouterAPIError("OpenRouter response missing choices[0].message.content")
+            return response_json
         except requests.exceptions.HTTPError as e:
             # if response.status_code == 401:
             #     error_msg = "Authentication failed. You can permanently set your API key with `mini-extra config set OPENROUTER_API_KEY YOUR_KEY`."
@@ -112,14 +121,21 @@ class OpenRouterModel:
 
         self.n_calls += 1
         self.cost += cost
+        self.input_tokens += usage.get("prompt_tokens", 0)
+        self.output_tokens += usage.get("completion_tokens", 0)
         GLOBAL_MODEL_STATS.add(cost)
 
+        choices = response.get("choices")
+        content = ""
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            content = (choices[0].get("message") or {}).get("content") or ""
+
         return {
-            "content": response["choices"][0]["message"]["content"] or "",
+            "content": content,
             "extra": {
                 "response": response,  # already is json
             },
         }
 
     def get_template_vars(self) -> dict[str, Any]:
-        return self.config.model_dump() | {"n_model_calls": self.n_calls, "model_cost": self.cost}
+        return self.config.model_dump() | {"n_model_calls": self.n_calls, "model_cost": self.cost, "input_tokens": self.input_tokens, "output_tokens": self.output_tokens}

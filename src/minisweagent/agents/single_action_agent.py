@@ -7,6 +7,8 @@ from tabulate import tabulate
 import time
 import json
 import logging
+from pathlib import Path
+import subprocess
 
 from minisweagent.utils.log import instance_logger
 
@@ -14,6 +16,9 @@ class NoActionFound(Exception):
     """Raised when the agent has reached its cost or step limit."""
     
 class SingleActionAgentConfig(AgentConfig):
+    agent_role: str = "fixer"
+    """Agent role: 'fixer' or 'reproducer'."""
+
     depth_limit: int = 20
     """The maximum depth allowed for any node."""
     
@@ -56,9 +61,93 @@ class SingleActionAgent(DefaultAgent):
                 self.add_message("user", str(e))
                 self.tree_node.observation = str(e)
             except TerminatingException as e:
+                if self.config.agent_role == "reproducer":
+                    if self._should_block_reproduction_termination(e):
+                        blocked_msg = (
+                            "Reproduction submission rejected: you cannot stop before creating a new run_test.sh. "
+                            "Create run_test.sh, run it to check expected behavior, and submit again."
+                        )
+                        self.add_message("user", blocked_msg)
+                        self.tree_node.observation = blocked_msg
+                        continue
+
+                    validation_result = self._validate_reproduction_submission()
+                    if validation_result is not None:
+                        self.add_message("user", validation_result)
+                        instance_logger.debug(f"Reproduction submission failed validation: {validation_result}")
+                        self.tree_node.observation = validation_result
+                        continue
+
                 self.add_message("user", str(e))
-                self.tree_node.observation = str(e)
+                self.tree_node.observation = str(e) 
                 return type(e).__name__, str(e)
+
+    def _should_block_reproduction_termination(self, exc: TerminatingException) -> bool:
+        """For reproduction runs, block submission unless a new run_test.sh is present in staged diff."""
+        if self.config.agent_role != "reproducer":
+            return False
+        if not isinstance(exc, Submitted):
+            return False
+        return not self._submitted_patch_has_new_run_test_script(str(exc))
+
+    def _validate_reproduction_submission(self) -> str | None:
+        """Run run_test.sh and require at least one failing test in test_status.json before accepting submission.
+
+        Returns a rejection message if the submission should be blocked, otherwise None.
+        """
+        try:
+            output = self.env.execute("bash run_test.sh")
+            if output.get("returncode", 1) != 0:
+                return (
+                    "Reproduction submission rejected: run_test.sh failed to execute. "
+                    "Fix the reproduction script and submit again."
+                )
+
+            try:
+                status_data = json.loads(self.env.execute("cat test_status.json").get("output", ""))
+            except json.JSONDecodeError:
+                return (
+                    "Reproduction submission rejected: test_status.json is not valid JSON. "
+                    "Fix run_test.sh so it writes a valid status file."
+                )
+        except (TimeoutError, subprocess.TimeoutExpired) as e:
+            return (
+                "Reproduction submission rejected: run_test.sh execution timed out. "
+                "Ensure run_test.sh can complete within the time limit and try again."
+            )
+            
+
+        tests = status_data.get("tests", []) if isinstance(status_data, dict) else []
+        failed_tests = [test for test in tests if str(test.get("status", "")).upper() == "FAILED"]
+        if not failed_tests:
+            return (
+                "Reproduction submission rejected: test_status.json contains no FAILED tests. "
+                "This means the reproduction did not match a failing issue state. "
+                "Adjust run_test.sh and try again."
+            )
+            
+        # check if all the status are in PASSED|FAILED|SKIPPED|ERROR, if not, reject with error message
+        valid_statuses = {"PASSED", "FAILED", "SKIPPED", "ERROR"}
+        for test in tests:
+            if str(test.get("status", "")).upper() not in valid_statuses:
+                return (
+                    f"Reproduction submission rejected: test '{test.get('name', '<unknown>')}' has invalid status '{test.get('status', '')}'. "
+                    f"Statuses must be one of {', '.join(valid_statuses)}. Fix run_test.sh to produce valid statuses and try again."
+                )
+
+        instance_logger.debug(
+            "Reproduction submission validated with %d failed test(s): %s",
+            len(failed_tests),
+            ", ".join(str(test.get("name", "<unknown>")) for test in failed_tests),
+        )
+        return None
+
+    def _submitted_patch_has_new_run_test_script(self, patch: str) -> bool:
+        """Return True when submitted patch contains a newly added run_test.sh file."""
+        return (
+            "diff --git a/run_test.sh b/run_test.sh" in patch
+            and "new file mode" in patch
+        )
             
     def _handle_max_steps(self):
         if self.n_expanded < self.config.step_limit:
@@ -119,7 +208,7 @@ class SingleActionAgent(DefaultAgent):
         for i in range(n_actions):
             # Execute action to get observation
             try:
-                response = self.query(i)
+                response = self.query()
                 action = self.parse_action(response)
                 instance_logger.debug(f"Generated action #{i+1}: {action['action']}")
                 # Convert action to node
@@ -145,6 +234,7 @@ class SingleActionAgent(DefaultAgent):
                 
             time.sleep(2)  # To avoid rate limiting
             
+            new_node.value = new_node.merged_value = 0.0
             nodes.append(new_node)
         
         return nodes

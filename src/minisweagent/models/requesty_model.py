@@ -46,6 +46,8 @@ class RequestyModel:
         self.config = RequestyModelConfig(**kwargs)
         self.cost = 0.0
         self.n_calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
         self._api_url = "https://router.requesty.ai/v1/chat/completions"
         self._api_key = os.getenv("REQUESTY_API_KEY", "")
 
@@ -106,6 +108,12 @@ class RequestyModel:
 
         self.n_calls += 1
         self.cost += cost
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        if isinstance(prompt_tokens, int | float):
+            self.input_tokens += int(prompt_tokens)
+        if isinstance(completion_tokens, int | float):
+            self.output_tokens += int(completion_tokens)
         GLOBAL_MODEL_STATS.add(cost)
 
         return {
@@ -116,4 +124,9 @@ class RequestyModel:
         }
 
     def get_template_vars(self) -> dict[str, Any]:
-        return self.config.model_dump() | {"n_model_calls": self.n_calls, "model_cost": self.cost}
+        return self.config.model_dump() | {
+            "n_model_calls": self.n_calls,
+            "model_cost": self.cost,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+        }

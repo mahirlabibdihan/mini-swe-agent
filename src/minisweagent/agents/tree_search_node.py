@@ -30,6 +30,7 @@ class TreeSearchNode:
         self.changes = []
         self.diff_size = 0
         self.history_summary = None
+        self.test_status = []
         
     def __lt__(self, other):
         # based on frequency
@@ -88,6 +89,7 @@ class TreeSearchNode:
                 "command": self.last_action["command"],
                 "thought": self.last_action["thought"],
             } if self.last_action else None,
+            "test_status": self.test_status,
             "observation": self.observation,
             "children": [child.id for child in self.children],
         }, *[node for child in self.children for node in child.to_json()]]
@@ -114,6 +116,7 @@ class TreeSearchNode:
                     "command": self.last_action["command"],
                     "thought": self.last_action["thought"],
                 } if self.last_action else None,
+                "test_status": self.test_status,
                 "history_summary": self.history_summary,
                 "children": [child.to_tree() for child in self.children],
                 "observation": self.observation,

@@ -25,9 +25,12 @@ from minisweagent.agents.repo_tree import result_to_structure, RepoNode, collect
 import requests
 import re
 import math
+import tempfile
 
 class RewardGuidedAgentConfig(SingleActionAgentConfig):
     retrieval_template: str
+    reproduction_patch: str = ""
+    """Patch that adds/updates reproduction artifacts (typically run_test.sh) for test status checks."""
     branching_factor: int = 3
     """The maximum number of branches to explore at each node."""
     
@@ -216,16 +219,16 @@ EOF
     
     def _create_pseudo_root(self):
         if self._repo_has_changes():
-            if self.env.config.clean_start:
-                self.env.execute("git reset --hard HEAD && git clean -fd")
-                action = "git reset --hard HEAD >/dev/null 2>&1 && git clean -fd >/dev/null 2>&1 && git rev-parse HEAD"
-                self.add_message("system", f"THOUGHT: Starting with a clean state for tree search.\n\n```bash\n{action}\n```")
-                instance_logger.debug(">> Warning: Uncommitted changes detected at the start of tree search. Cleaning changes and starting tree search with a clean state...")
-            else:
-                self.env.execute(f"git add -A && git commit -m 'Committing changes before starting tree search' --no-verify")
-                action = "git add -A >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' --no-verify >/dev/null 2>&1 && git rev-parse HEAD"
-                self.add_message("system", f"THOUGHT: Need to commit changes before starting tree search.\n\n```bash\n{action}\n```")
-                instance_logger.debug(">> Warning: Uncommitted changes detected at the start of tree search. Committing changes before starting tree search...")
+            # if self.env.config.clean_start:
+            #     self.env.execute("git reset --hard HEAD && git clean -fd")
+            #     action = "git reset --hard HEAD >/dev/null 2>&1 && git clean -fd >/dev/null 2>&1 && git rev-parse HEAD"
+            #     self.add_message("system", f"THOUGHT: Starting with a clean state for tree search.\n\n```bash\n{action}\n```")
+            #     instance_logger.debug(">> Warning: Uncommitted changes detected at the start of tree search. Cleaning changes and starting tree search with a clean state...")
+            # else:
+            self.env.execute(f"git add -A && git commit -m 'Committing changes before starting tree search' --no-verify")
+            action = "git add -A >/dev/null 2>&1 && git commit -m 'Committing changes before starting tree search' --no-verify >/dev/null 2>&1 && git rev-parse HEAD"
+            self.add_message("system", f"THOUGHT: Need to commit changes before starting tree search.\n\n```bash\n{action}\n```")
+            instance_logger.debug(">> Warning: Uncommitted changes detected at the start of tree search. Committing changes before starting tree search...")
             
             if self._repo_has_changes():
                 if self._repo_has_submodules():
@@ -286,6 +289,84 @@ EOF
             raise Exception(">> Warning: Changes still detected after commit.")
         return output["output"].strip(), is_submodule_commit
     
+    def _get_test_status(self):
+        """Apply reproduction patch, run tests, and return parsed test entries from test_status.json."""
+        reproduction_patch = (self.config.reproduction_patch or "").strip()
+        if not reproduction_patch:
+            return None
+        if not reproduction_patch.startswith("diff --git"):
+            instance_logger.debug(">> Skipping test status: reproduction patch is missing or not a git diff.")
+            return None
+
+        patch_file = ".mini_swe_reproduction.patch"
+        patch_delim = "MINI_SWE_REPRO_PATCH_EOF"
+        git_apply_cmds = [
+            "git apply --verbose --reject",
+            "patch --batch --fuzz=5 -p1 -i",
+        ]
+
+        try:
+            copy_to_container = getattr(self.env, "copy_to_container", None)
+            if callable(copy_to_container):
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False, encoding="utf-8") as tmp_patch:
+                    tmp_patch.write(reproduction_patch)
+                    tmp_patch_path = Path(tmp_patch.name)
+                try:
+                    copy_to_container(tmp_patch_path, patch_file)
+                finally:
+                    tmp_patch_path.unlink(missing_ok=True)
+            else:
+                self.env.execute(
+                    f"cat <<'{patch_delim}' > {patch_file}\n{reproduction_patch}\n{patch_delim}"
+                )
+
+            applied_patch = False
+            last_apply_output = ""
+            for git_apply_cmd in git_apply_cmds:
+                instance_logger.debug(f">> Attempting to apply reproduction patch with command: {git_apply_cmd} {patch_file}")
+                apply_output = self.env.execute(f"{git_apply_cmd} {patch_file}")
+                applied_patch = True
+                # break
+                if apply_output.get("returncode", 1) != 0:
+                    instance_logger.debug(
+                        ">> Failed to apply reproduction patch with '%s': %s",
+                        git_apply_cmd,
+                        apply_output.get("output", "").strip(),
+                    )
+                break
+                # last_apply_output = apply_output.get("output", "").strip()
+
+            if not applied_patch:
+                instance_logger.debug(
+                    ">> Failed to apply reproduction patch for test status: %s",
+                    last_apply_output,
+                )
+                return None
+
+            output = self.env.execute("bash run_test.sh")
+            if output.get("returncode", 1) != 0:
+                instance_logger.debug(
+                    ">> run_test.sh exited with non-zero return code while collecting test status: %s",
+                    output.get("output", "").strip(),
+                )
+                return None
+
+            raw_status = self.env.execute("cat test_status.json").get("output", "")
+            status_data = json.loads(raw_status)
+            tests = status_data.get("tests", []) if isinstance(status_data, dict) else []
+            if not isinstance(tests, list):
+                return None
+            return tests
+        except json.JSONDecodeError:
+            instance_logger.debug(">> test_status.json is not valid JSON while collecting test status.")
+            return None
+        except (TimeoutError, subprocess.TimeoutExpired):
+            instance_logger.debug(">> run_test.sh timed out while collecting test status.")
+            return None
+        finally:
+            self.env.execute(f"rm -f {patch_file} test_status.json run_test.sh")
+            self.env.execute("git reset --hard HEAD && git clean -fd")
+        
     def _reset(self):
         super()._reset()
         # checkout to ts-main branch (new)
@@ -293,7 +374,10 @@ EOF
         # self.env.execute("git checkout -b ts-main")
         self.tree_root.commit = self._get_commit_hash()
         self._create_pseudo_root()
-        
+        self.tree_node.test_status = self._get_test_status()
+        if self.tree_node.test_status == None:
+            self.tree_node.test_status = []        
+    
         issue_tokens = self.task.split()
         scores = self.bm25.get_scores(issue_tokens)
         scores = (scores - scores.min()) / (scores.max() - scores.min())
@@ -584,10 +668,23 @@ EOF
                 new_node.modifies_code = True
                 has_write_child = True
                 new_node.modified_files = self._get_modified_files()
-                print(f">> Modified files: {new_node.modified_files}")
+                print(f">> Modified files: {new_node.modified_files[:10]}")  # Print the first 10 modified files for debugging
                 new_node.changes, new_node.diff_size = self.parse_git_diff()
-                for file, ctype, start, end in new_node.changes:
-                    instance_logger.debug(f">> Modified file: {file} | Change type: {ctype} | Lines: {start}-{end if end is not None else ''}")
+                # Print first 5 and last 5 modified files in case of large number of changes
+                if len(new_node.changes) > 10:
+                    instance_logger.debug(f">> More than 10 modified files detected. Showing first 5 and last 5 modified files:")
+                    for file, ctype, start, end in new_node.changes[:5]:
+                        instance_logger.debug(f">> Modified file: {file} | Change type: {ctype} | Lines: {start}-{end if end is not None else ''}")
+                    instance_logger.debug("...")
+                    for file, ctype, start, end in new_node.changes[-5:]:
+                        instance_logger.debug(f">> Modified file: {file} | Change type: {ctype} | Lines: {start}-{end if end is not None else ''}")
+                else:
+                    for file, ctype, start, end in new_node.changes:
+                        instance_logger.debug(f">> Modified file: {file} | Change type: {ctype} | Lines: {start}-{end if end is not None else ''}")
+                        
+                new_node.test_status = self._get_test_status()
+                if new_node.test_status == None:
+                    new_node.test_status = self.tree_node.test_status
                 # Rollback changes
                 # run tests
                 # test_result = self.env.execute("pytest --maxfail=1 --disable-warnings -q")
@@ -625,6 +722,7 @@ EOF
                                 instance_logger.debug(f">> Read-action detected. File: {arg}")
                         # for arg in cmd.get("args", []):
                         #     if not arg.startswith('-'):
+                new_node.test_status = self.tree_node.test_status
                                 
             # elif action['action'].startswith("nl"):
                 # import shlex
@@ -715,19 +813,25 @@ EOF
             
     def _stage_to_main_branch(self):
         # self._repo_has_changes_with_main()
-        response = self.env.execute(f"git checkout {self.tree_root.commit} && git restore --source {self.tree_node.parent.commit} .")
+        if self.env.config.clean_start:
+            response = self.env.execute(f"git checkout {self.tree_root.children[0].commit} && git restore --source {self.tree_node.parent.commit} .")
+            self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.children[0].commit} && git restore --source {self.tree_node.parent.commit} .\n```")
+        else:
+            response = self.env.execute(f"git checkout {self.tree_root.commit} && git restore --source {self.tree_node.parent.commit} .")
+            self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.commit} && git restore --source {self.tree_node.parent.commit} .\n```")
+            
         if response.get("returncode", 0) != 0:
             instance_logger.debug(">> Warning: Failed to stage changes to main branch before submission.")
             instance_logger.debug(f"Error details: {response}")
             
-        output = self.env.execute(f"git fsck --unreachable")
-        instance_logger.debug(f">> Unreachable commits:\n{output.get('output', '')}")
+        # output = self.env.execute(f"git fsck --unreachable")
+        # instance_logger.debug(f">> Unreachable commits:\n{output.get('output', '')}")
             
         # Check for repo changes
         if not self._repo_has_changes():
             instance_logger.error(">> No changes detected to stage to main branch before submission.")
             
-        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.commit} && git restore --source {self.tree_node.parent.commit} .\n```")
+        
             
     def step(self) -> dict:
         
@@ -838,6 +942,46 @@ EOF
         if self.is_test_command(action) and returncode == 1:
             return True
         return False
+
+    def _normalize_test_status_entries(self, tests) -> dict[str, str]:
+        """Normalize test entries to a name->status map with known statuses only."""
+        valid_statuses = {"PASSED", "FAILED", "SKIPPED", "ERROR"}
+        normalized = {}
+        if not isinstance(tests, list):
+            return normalized
+
+        for test in tests:
+            if not isinstance(test, dict):
+                continue
+            name = str(test.get("name", "")).strip()
+            status = str(test.get("status", "")).upper().strip()
+            if not name or status not in valid_statuses:
+                continue
+            normalized[name] = status
+        return normalized
+
+    def _compare_test_statuses(self, previous_tests, current_tests) -> int:
+        """Return signed status delta: positive means better, negative means worse."""
+        prev_map = self._normalize_test_status_entries(previous_tests)
+        curr_map = self._normalize_test_status_entries(current_tests)
+        if not prev_map or not curr_map:
+            return 0
+
+        common_tests = set(prev_map.keys()) & set(curr_map.keys())
+        if not common_tests:
+            return 0
+
+        status_score = {
+            "ERROR": 0,
+            "FAILED": 1,
+            "SKIPPED": 2,
+            "PASSED": 3,
+        }
+
+        delta = 0
+        for test_name in common_tests:
+            delta += status_score[curr_map[test_name]] - status_score[prev_map[test_name]]
+        return delta
     
     def _evaluate_node(self, node):
         if node.value is not None:
@@ -848,14 +992,27 @@ EOF
         
         # track the time taken for reward computation
         start_time = time.time()
-        cmd_type = "search"
+        cmd_type = "read"
         if node.last_action["command"] is not None:
             if node.is_terminating or node.invalid_termination:
                 cmd_type = "submit"
-            elif node.modifies_code:
+            elif "[EDIT]" in node.last_action["thought"] or node.modifies_code:
                 cmd_type = "edit"
-            elif self.is_test_command(node.last_action["command"]):
+            # elif self.is_test_command(node.last_action["command"]):
+            elif "[TEST]" in node.last_action["thought"] or ("[READ]" not in node.last_action["thought"] and self.is_test_command(node.last_action["command"])): # TEMP: Since test command detection is not very robust, we can also use a heuristic based on the thought content to identify potential test commands for better reward adjustment.
                 cmd_type = "test"
+        else:
+            if "[SUBMIT]" in node.last_action["thought"]:
+                cmd_type = "submit"
+            elif "[EDIT]" in node.last_action["thought"]:
+                cmd_type = "edit"
+            elif "[TEST]" in node.last_action["thought"]:
+                cmd_type = "test"
+        
+        gen_type = 'edit' if '[EDIT]' in node.last_action['thought'] else 'test' if '[TEST]' in node.last_action['thought'] else 'submit' if '[SUBMIT]' in node.last_action['thought'] else 'read'    
+        if gen_type != cmd_type:
+            instance_logger.debug(f">> Warning: Command type mismatch. Thought indicates {gen_type} but detected as {cmd_type}.")
+
         node.value = self.reward_model.compute_reward(node, self.task, cmd_type=cmd_type)
         if node.last_action["command"] is None:
             # Penalize invalid actions
@@ -912,12 +1069,36 @@ EOF
                 instance_logger.debug(f">> Test-failure reward adjustment: {node.value:.4f} -> {new_value:.4f}")
                 node.value = new_value
                 
-            # TODO: Penalize if the diff is excessive
+            
             if node.diff_size is not None and node.diff_size > 50:
                 penalty = math.exp(-(node.diff_size - 50) / 100.0)
                 new_value = node.value * penalty
                 instance_logger.debug(f">> Excessive-diff reward adjustment: {node.value:.4f} -> {new_value:.4f}")
                 node.value = new_value
+            # TODO: Penalize if the number of modified files is excessive (e.g., more than 5 files), as it may indicate unfocused modifications. We can use an exponential penalty based on the number of modified files to avoid hard thresholds.
+            elif len(node.modified_files) > 5:
+                penalty = math.exp(-(len(node.modified_files) - 5) / 5.0)
+                new_value = node.value * penalty
+                instance_logger.debug(f">> Excessive-modified-files reward adjustment: {node.value:.4f} -> {new_value:.4f}")
+                node.value = new_value
+                
+            status_delta = self._compare_test_statuses(self.tree_node.test_status, node.test_status)
+            if status_delta < 0:
+                penalty = max(0.7, 1.0 + 0.1 * status_delta)
+                new_value = node.value * penalty
+                instance_logger.debug(
+                    f">> Test-status regression adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
+                )
+                node.value = new_value
+            elif status_delta > 0:
+                boost = min(1.3, 1.0 + 0.1 * status_delta)
+                new_value = node.value * boost
+                instance_logger.debug(
+                    f">> Test-status improvement adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
+                )
+                node.value = new_value
+            
+                
                                     
         elif node.raw_observation is not None and node.raw_observation.get("output").strip() == "":
             # Penalize read actions that produce no output

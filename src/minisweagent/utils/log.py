@@ -11,7 +11,7 @@ def _setup_root_logger() -> None:
         show_path=False,
         show_time=False,
         show_level=False,
-        markup=True,
+        markup=False,
     )
     _formatter = logging.Formatter("%(name)s: %(levelname)s: %(message)s")
     _handler.setFormatter(_formatter)
@@ -24,7 +24,7 @@ def _setup_instance_logger() -> None:
         show_path=False,
         show_time=False,
         show_level=False,
-        markup=True,
+        markup=False,
     )
     _formatter = logging.Formatter("%(message)s")
     _handler.setFormatter(_formatter)

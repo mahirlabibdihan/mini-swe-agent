@@ -22,6 +22,8 @@ class DeterministicModel:
         self.current_index = -1
         self.cost = 0.0
         self.n_calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
 
     def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
         self.current_index += 1
@@ -39,4 +41,9 @@ class DeterministicModel:
         return {"content": output}
 
     def get_template_vars(self) -> dict[str, Any]:
-        return self.config.model_dump() | {"n_model_calls": self.n_calls, "model_cost": self.cost}
+        return self.config.model_dump() | {
+            "n_model_calls": self.n_calls,
+            "model_cost": self.cost,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+        }

@@ -26,8 +26,21 @@ class RouletteModel:
     def n_calls(self) -> int:
         return sum(model.n_calls for model in self.models)
 
+    @property
+    def input_tokens(self) -> int:
+        return sum(model.input_tokens for model in self.models)
+
+    @property
+    def output_tokens(self) -> int:
+        return sum(model.output_tokens for model in self.models)
+
     def get_template_vars(self) -> dict:
-        return self.config.model_dump() | {"n_model_calls": self.n_calls, "model_cost": self.cost}
+        return self.config.model_dump() | {
+            "n_model_calls": self.n_calls,
+            "model_cost": self.cost,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+        }
 
     def select_model(self) -> Model:
         return random.choice(self.models)

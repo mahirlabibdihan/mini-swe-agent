@@ -43,10 +43,14 @@ def save_traj(
             "model_stats": {
                 "instance_cost": 0.0,
                 "api_calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
             },
             "reward_model_stats": {
                 "instance_cost": 0.0,
                 "api_calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
             },
             "mini_version": __version__,
         },
@@ -56,9 +60,13 @@ def save_traj(
     if agent is not None:
         data["info"]["model_stats"]["instance_cost"] = agent.model.cost
         data["info"]["model_stats"]["api_calls"] = agent.model.n_calls
+        data["info"]["model_stats"]["input_tokens"] = agent.model.input_tokens
+        data["info"]["model_stats"]["output_tokens"] = agent.model.output_tokens
         if hasattr(agent, "reward_model"):
             data["info"]["reward_model_stats"]["instance_cost"] = agent.reward_model.model.cost
             data["info"]["reward_model_stats"]["api_calls"] = agent.reward_model.model.n_calls
+            data["info"]["reward_model_stats"]["input_tokens"] = agent.reward_model.model.input_tokens
+            data["info"]["reward_model_stats"]["output_tokens"] = agent.reward_model.model.output_tokens
         data["messages"] = agent.messages
         data["info"]["config"] = {
             "agent": agent.config.model_dump(),

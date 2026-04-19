@@ -587,7 +587,7 @@ class RewardModel():
         self,
         node: TreeSearchNode,
         task: Optional[str] = None,
-        cmd_type: str = "search"
+        cmd_type: str = "read"
     ) -> float:
         """Compute reward using single LLM call with chain of thought.
 
@@ -659,7 +659,7 @@ Your task is specifically to make changes to non-test files in the current direc
         self,
         node: TreeSearchNode,
         task: Optional[str] = None,
-        cmd_type: str = "search"
+        cmd_type: str = "read"
     ) -> float:
         """Compute reward for an action. Dispatches to appropriate method.
 
@@ -680,7 +680,7 @@ Your task is specifically to make changes to non-test files in the current direc
         self,
         node: TreeSearchNode,
         task: Optional[str] = None,
-        cmd_type: str = "search"
+        cmd_type: str = "read"
     ) -> float:
         """Legacy compute reward with 3 separate LLM calls.
         

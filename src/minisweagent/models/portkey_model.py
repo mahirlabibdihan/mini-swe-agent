@@ -50,6 +50,8 @@ class PortkeyModel:
         self.config = config_class(**kwargs)
         self.cost = 0.0
         self.n_calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
         if self.config.litellm_model_registry and Path(self.config.litellm_model_registry).is_file():
             litellm.utils.register_model(json.loads(Path(self.config.litellm_model_registry).read_text()))
 
@@ -94,6 +96,14 @@ class PortkeyModel:
         cost = self._calculate_cost(response)
         self.n_calls += 1
         self.cost += cost
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0)
+            completion_tokens = getattr(usage, "completion_tokens", 0)
+            if isinstance(prompt_tokens, int | float):
+                self.input_tokens += int(prompt_tokens)
+            if isinstance(completion_tokens, int | float):
+                self.output_tokens += int(completion_tokens)
         GLOBAL_MODEL_STATS.add(cost)
         return {
             "content": response.choices[0].message.content or "",
@@ -104,7 +114,12 @@ class PortkeyModel:
         }
 
     def get_template_vars(self) -> dict[str, Any]:
-        return self.config.model_dump() | {"n_model_calls": self.n_calls, "model_cost": self.cost}
+        return self.config.model_dump() | {
+            "n_model_calls": self.n_calls,
+            "model_cost": self.cost,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+        }
 
     def _calculate_cost(self, response) -> float:
         response_for_cost_calc = response.model_copy()

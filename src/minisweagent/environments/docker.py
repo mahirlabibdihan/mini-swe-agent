@@ -2,7 +2,10 @@ import logging
 import os
 import shlex
 import subprocess
+import tarfile
+import tempfile
 import uuid
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
@@ -108,6 +111,39 @@ class DockerEnvironment:
             stderr=subprocess.STDOUT,
         )
         return {"output": result.stdout, "returncode": result.returncode}
+
+    def copy_to_container(self, src: str | Path, dst: str | Path) -> None:
+        """Copy a local file into the running container using a tar archive."""
+        assert self.container_id, "Container not started"
+
+        src_path = Path(src)
+        dst_path = Path(dst)
+        dst_parent = dst_path.parent.as_posix() or "."
+
+        with tempfile.TemporaryDirectory(prefix="mswea-copy-") as tmp_dir:
+            tmp_dir_path = Path(tmp_dir)
+            tar_path = tmp_dir_path / f"{src_path.name}.tar"
+            with tarfile.open(tar_path, "w") as tar:
+                tar.add(src_path, arcname=dst_path.name)
+
+            container_tar_path = f"/tmp/{tar_path.name}"
+
+            subprocess.run(
+                [self.config.executable, "cp", str(tar_path), f"{self.container_id}:{container_tar_path}"],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            extract_cmd = (
+                f"mkdir -p {shlex.quote(dst_path.parent.as_posix())} "
+                f"&& tar -xf {shlex.quote(container_tar_path)} -C {shlex.quote(dst_path.parent.as_posix())} "
+                f"&& rm -f {shlex.quote(container_tar_path)}"
+            )
+            result = self.execute(extract_cmd)
+            if result.get("returncode", 1) != 0:
+                raise RuntimeError(f"Failed to extract copied file in container: {result.get('output', '').strip()}")
 
     def cleanup(self):
         """Stop and remove the Docker container."""
