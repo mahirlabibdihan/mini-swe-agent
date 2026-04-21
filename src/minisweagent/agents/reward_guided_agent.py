@@ -982,6 +982,22 @@ EOF
         for test_name in common_tests:
             delta += status_score[curr_map[test_name]] - status_score[prev_map[test_name]]
         return delta
+
+    def _test_status_component(self, current_tests) -> float:
+        """Return a normalized test-status component in [0, 1]."""
+        status_score = {
+            "ERROR": 0,
+            "FAILED": 1,
+            "SKIPPED": 2,
+            "PASSED": 3,
+        }
+
+        curr_map = self._normalize_test_status_entries(current_tests)
+        if not curr_map:
+            return 0.5
+
+        # For terminating actions, use absolute quality only.
+        return sum(status_score[s] for s in curr_map.values()) / (3.0 * len(curr_map))
     
     def _evaluate_node(self, node):
         if node.value is not None:
@@ -1084,14 +1100,14 @@ EOF
                 
             status_delta = self._compare_test_statuses(self.tree_node.test_status, node.test_status)
             if status_delta < 0:
-                penalty = max(0.7, 1.0 + 0.1 * status_delta)
+                penalty = max(0.7, 1.0 + 0.4 * status_delta)
                 new_value = node.value * penalty
                 instance_logger.debug(
                     f">> Test-status regression adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
                 )
                 node.value = new_value
             elif status_delta > 0:
-                boost = min(1.3, 1.0 + 0.1 * status_delta)
+                boost = min(1.5, 1.0 + 0.4 * status_delta)
                 new_value = node.value * boost
                 instance_logger.debug(
                     f">> Test-status improvement adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
@@ -1130,6 +1146,14 @@ EOF
         # Take weighted average of relevance score and current value
         new_value = (0.7 * node.value + 0.3 * relevance_score)
         instance_logger.debug(f">> Similarity reward adjustment: {node.value:.4f} -> {new_value:.4f}")
+
+        if node.is_terminating and not node.invalid_termination:
+            test_component = self._test_status_component(node.test_status)
+            final_value = 0.7 * new_value + 0.3 * test_component
+            instance_logger.debug(
+                f">> Terminating test-status adjustment: {new_value:.4f} + test({test_component:.4f}) -> {final_value:.4f}"
+            )
+            new_value = final_value
         
         end_time = time.time()
         instance_logger.debug(f"=>> Reward: {new_value:.4f} | Time taken: {end_time - start_time:.2f} seconds")
