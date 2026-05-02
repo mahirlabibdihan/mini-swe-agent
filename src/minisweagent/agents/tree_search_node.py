@@ -16,6 +16,8 @@ class TreeSearchNode:
         self.last_action = last_action
         self.visible = True
         self.level = 0
+        self.order = 0
+        self.itr = 0
         self.modifies_code = False
         self.modified_files = []
         self.read_files = []
@@ -40,25 +42,32 @@ class TreeSearchNode:
             return False
         return self.visits < other.visits
         
-    def get_path_value(self, discount_factor=1.0):
-        score = 0
+    def get_path_value(self, discount_factor=1.0, max_steps=5):
+        score = 0.0
         current = self
         f = 1.0
         norm = 0.0
+        steps = 0
 
-        while current.value is not None:
+        while (
+            current is not None
+            and current.value is not None
+            # and steps < max_steps # NEW: Limit the number of steps, so that deep nodes don't get too much advantage
+        ):
             score += f * current.merged_value
             norm += f
+
             current = current.parent
             f *= discount_factor
-            # f *= 0.0 # TODO: Set in config
-        
-        return score / norm if norm > 0 else 0
+            steps += 1
+
+        return score / norm if norm > 0 else 0.0
     
     def add_child(self, child_node):
         self.children.append(child_node)
         child_node.parent = self
-        child_node.level = self.level + 1
+        if child_node.last_action is not None:
+            child_node.level = self.level + 1
         
     def prune(self):
         self.visible = False
@@ -106,6 +115,9 @@ class TreeSearchNode:
                 "executed": self.executed,
                 "visible": self.visible,
                 "visits": self.visits,
+                "order": self.order,
+                "itr": self.itr,
+                "is_terminating": self.is_terminating,
                 "is_submission": self.is_submission,
                 "epsilon": self.epsilon,
                 "modified_files": self.modified_files,
@@ -115,6 +127,7 @@ class TreeSearchNode:
                 "last_action": {
                     "command": self.last_action["command"],
                     "thought": self.last_action["thought"],
+                    "type": self.last_action["type"],
                 } if self.last_action else None,
                 "test_status": self.test_status,
                 "history_summary": self.history_summary,

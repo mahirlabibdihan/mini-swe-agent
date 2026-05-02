@@ -57,6 +57,7 @@ class SingleActionAgent(DefaultAgent):
                 self.step()
             except NoActionFound as e:
                 self.add_message("system", str(e))
+                return type(e).__name__, str(e)
             except NonTerminatingException as e:
                 self.add_message("user", str(e))
                 self.tree_node.observation = str(e)
@@ -69,6 +70,10 @@ class SingleActionAgent(DefaultAgent):
                         )
                         self.add_message("user", blocked_msg)
                         self.tree_node.observation = blocked_msg
+                        
+                        if self.n_expanded + 1 >= self.config.step_limit:
+                            instance_logger.debug("Max step limit reached while blocking reproduction submission. Forcing termination.")
+                            return None, "Agent reached max step limit while blocking reproduction submission. Final output may be incomplete."
                         continue
 
                     validation_result = self._validate_reproduction_submission()
@@ -76,7 +81,13 @@ class SingleActionAgent(DefaultAgent):
                         self.add_message("user", validation_result)
                         instance_logger.debug(f"Reproduction submission failed validation: {validation_result}")
                         self.tree_node.observation = validation_result
+                        
+                        if self.n_expanded + 1 >= self.config.step_limit:
+                            instance_logger.debug("Max step limit reached while blocking reproduction submission. Forcing termination.")
+                            return None, "Agent reached max step limit while blocking reproduction submission. Final output may be incomplete."
+                        
                         continue
+                    
 
                 self.add_message("user", str(e))
                 self.tree_node.observation = str(e) 
@@ -121,7 +132,7 @@ class SingleActionAgent(DefaultAgent):
         failed_tests = [test for test in tests if str(test.get("status", "")).upper() == "FAILED"]
         if not failed_tests:
             return (
-                "Reproduction submission rejected: test_status.json contains no FAILED tests. "
+                "Reproduction submission rejected: after executing run_test.sh, the generated test_status.json contains no FAILED tests. "
                 "This means the reproduction did not match a failing issue state. "
                 "Adjust run_test.sh and try again."
             )
@@ -150,7 +161,7 @@ class SingleActionAgent(DefaultAgent):
         )
             
     def _handle_max_steps(self):
-        if self.n_expanded < self.config.step_limit:
+        if self.n_expanded + 1 < self.config.step_limit:
             return None
         return self._make_terminating_action(self.tree_node)
     
@@ -269,6 +280,7 @@ class SingleActionAgent(DefaultAgent):
         self.add_message("user", observation)
         self.tree_node.observation = observation
         self.tree_node.executed = True
+ 
         return self.tree_node.observation
     
     
@@ -474,7 +486,7 @@ class SingleActionAgent(DefaultAgent):
         
         # ---- Step limit warning ----
         if self.n_expanded > max(0.85 * self.config.step_limit,  self.config.step_limit - 5):
-            warning_msg = f"⚠️ Warning: Approaching step limit ({self.config.step_limit - self.n_expanded} steps remaining). Consider submitting soon."
+            warning_msg = f"⚠️ Warning: Approaching step limit ({self.config.step_limit - self.n_expanded} steps remaining). Consider finish editing and submitting soon to avoid forced termination."
             instance_logger.debug(warning_msg)
             messages.append({
                 "role": "system",

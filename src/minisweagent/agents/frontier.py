@@ -14,10 +14,13 @@ class Frontier:
         self.queue = []
         
     def reduce_budget(self):
-        self.budget = max(1, self.budget - 1)
+        if self.budget is not None:
+            self.budget = max(1, self.budget - 1)
+        else:
+            raise ValueError("Budget is not set. Cannot reduce budget.")
         
     def is_out_of_budget(self):
-        return len(self.queue) > self.budget
+        return self.budget is not None and len(self.queue) > self.budget
 
     def push(self, priority, node):
         heapq.heappush(self.queue, (priority, node))
