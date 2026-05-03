@@ -680,7 +680,7 @@ Given both trajectories, what is the best next action to take from this point?
                 and n.visible
                 and n.merged_value is not None
                 and (not to_execute or n.level < self.config.depth_limit)
-                and n.commit != self._get_root_commit()
+                and  (n.parent.commit != self._get_root_commit() or n.modifies_code)
             ),
             key=lambda n: (
                 n.parent.itr,  # NEW: recency bias (higher = newer)
@@ -815,7 +815,7 @@ Given both trajectories, what is the best next action to take from this point?
                         and n.visible
                         and n.merged_value is not None
                         and n.level < self.config.depth_limit
-                        and n.commit == self._get_root_commit()
+                        and (n.parent.commit == self._get_root_commit() and not n.modifies_code)
                     ),
                     key=lambda n: (
                         n.parent.itr,  # recency bias (higher = newer)
