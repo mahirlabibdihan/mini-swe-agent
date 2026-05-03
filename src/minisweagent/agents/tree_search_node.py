@@ -124,6 +124,7 @@ class TreeSearchNode:
                 "epsilon": self.epsilon,
                 "modified_files": self.modified_files,
                 "modifies_code": self.modifies_code,
+                "parent": self.parent.id if self.parent else None,
                 "diff_size": self.diff_size,
                 "read_files": self.read_files,
                 "last_action": {

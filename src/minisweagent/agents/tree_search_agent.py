@@ -514,7 +514,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         node_B.commit = node_B.parent.commit
         node_A.executed = node_B.executed = True
         node_A.itr = node_B.itr = self.itr + 1
-        node_A.order = node_B.order = self.n_expanded
+        node_A.order = node_B.order = self.n_expanded + 1
         self.n_expanded += 1
         response, action, error = self._generate_merge_action(node_A, node_B)
         return self._action_to_node(response, action, error, node_A) # A is parent, since it has higher value
@@ -660,7 +660,9 @@ Given both trajectories, what is the best next action to take from this point?
                         p[0].add_child(merged_node)
                         p[1].add_child(merged_node)
                         merged_node.merged = True
-                        merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node)
+                        merged_node.parent = p[0]
+                        # merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node) 
+                        merged_node.value = merged_node.merged_value = (0.9 * p[0].merged_value + 0.1 * p[1].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
                         merged_nodes.append(merged_node)
                         
         # return nodes[:k] # OLD
@@ -734,6 +736,7 @@ Given both trajectories, what is the best next action to take from this point?
         self.node_map_itr[self.itr] = self.node_map # NEW:
         
         if self.n_submissions >= self.config.sub_thres:
+            # TODO: Should we just terminate or consider terminating actions from here?
             
             # We are done exploring. Now check the tree if there is any terminating action. If multiple, choose the one with highest path value/reward. If none, choose the one with highest path value among all nodes and run sequentially from there until we reach a terminating node.   
             best_node = self._get_best_terminating_node()

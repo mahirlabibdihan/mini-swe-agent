@@ -97,11 +97,19 @@ def _format_score(value: Any) -> str:
 def parse_nested_tree(root: Dict[str, Any]) -> Tuple[Dict[str, Dict[str, Any]], List[Edge], str]:
     nodes: Dict[str, Dict[str, Any]] = {}
     edges: List[Edge] = []
+    visited: set[str] = set()
 
     def dfs(node: Dict[str, Any]) -> None:
         node_id = node.get("id")
         if not node_id:
             return
+        
+        # If we've already processed this node, don't traverse its children again
+        # (handles DAG case where multiple parents can point to same child)
+        if node_id in visited:
+            return
+        
+        visited.add(node_id)
         nodes[node_id] = node
         for child in node.get("children", []) or []:
             if isinstance(child, dict):
@@ -230,20 +238,40 @@ def build_dot(
     for edge in edges:
         if edge.parent in nodes and edge.child in nodes:
             child_node = nodes[edge.child]
+            real_child = (child_node.get("parent") is None or child_node.get("parent") == nodes[edge.parent]["id"])
             if child_node.get("modifies_code", False):
-                lines.append(
-                    f'  "{edge.parent}" -> "{edge.child}" [color="#d62728" penwidth=2.0];'
-                )
+                if real_child:
+                    lines.append(
+                        f'  "{edge.parent}" -> "{edge.child}" [color="#d62728" penwidth=2.0];'
+                    )
+                else: # dashed
+                    lines.append(
+                        f'  "{edge.parent}" -> "{edge.child}" [color="#d62728" penwidth=2.0 style=dashed];'
+                    )
+                    
             elif child_node.get("is_terminating", False):
-                lines.append(
-                    f'  "{edge.parent}" -> "{edge.child}" [color="#2ca02c" penwidth=2.0];'
-                )
+                if real_child:
+                    lines.append(
+                        f'  "{edge.parent}" -> "{edge.child}" [color="#2ca02c" penwidth=2.0];'
+                    )
+                else: # dashed
+                    lines.append(
+                        f'  "{edge.parent}" -> "{edge.child}" [color="#2ca02c" penwidth=2.0 style=dashed];'
+                    )
             elif _none_commit(child_node):
-                lines.append(
-                    f'  "{edge.parent}" -> "{edge.child}" [color="#999999"];'
-                )
+                if real_child:
+                    lines.append(
+                        f'  "{edge.parent}" -> "{edge.child}" [color="#999999"];'
+                    )
+                else:
+                    lines.append(
+                        f'  "{edge.parent}" -> "{edge.child}" [color="#999999" style=dashed];'
+                    )
             else:
-                lines.append(f'  "{edge.parent}" -> "{edge.child}" [color="#000000"];')
+                if real_child:
+                    lines.append(f'  "{edge.parent}" -> "{edge.child}" [color="#000000"];')
+                else: # dashed
+                    lines.append(f'  "{edge.parent}" -> "{edge.child}" [color="#000000" style=dashed];')
 
     lines.append("}")
     return "\n".join(lines)

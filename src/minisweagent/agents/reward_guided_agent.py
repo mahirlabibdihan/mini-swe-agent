@@ -1162,14 +1162,14 @@ EOF
                 
             status_delta = self._compare_test_statuses(self.tree_node.test_status, node.test_status)
             if status_delta < 0:
-                penalty = max(0.7, 1.0 + 0.3 * status_delta)
+                penalty = max(0.9, 1.0 + 0.1 * status_delta)
                 new_value = node.value * penalty
                 instance_logger.debug(
                     f">> Test-status regression adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
                 )
                 node.value = new_value
             elif status_delta > 0:
-                boost = min(1.4, 1.0 + 0.3 * status_delta)
+                boost = min(1.1, 1.0 + 0.1 * status_delta)
                 new_value = node.value * boost
                 instance_logger.debug(
                     f">> Test-status improvement adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
