@@ -595,7 +595,6 @@ EOF
         potential_termination = False
         
         if error is None:
-            instance_logger.debug(f"Generated action #{i+1}: {action['action']}")
             new_node = self._create_node(
                 last_action={
                     "command": action["action"],
@@ -768,6 +767,8 @@ EOF
         self.SYSTEM_PROMPT = self.candidates[i % len(self.candidates)]["SYSTEM_PROMPT"]
         self.USER_PROMPT = self.candidates[i % len(self.candidates)]["USER_PROMPT"]
         response, action, error = self._generate_action()
+        if error is None:
+            instance_logger.debug(f"Generated action #{i+1}: {action['action']}")
         return self._action_to_node(response, action, error, self.tree_node)
             
     def _generate_new_nodes(self, n_actions) -> List[TreeSearchNode]:
