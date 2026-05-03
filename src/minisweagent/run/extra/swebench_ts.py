@@ -54,6 +54,25 @@ DATASET_MAPPING = {
 _OUTPUT_FILE_LOCK = threading.Lock()
 _REPRODUCTION_LOCK = threading.Lock()
 
+
+def _reproduction_patch_path(reproductions_dir: Path, instance_id: str) -> Path:
+    return reproductions_dir / f"{instance_id}.patch"
+
+
+def _load_reproduction_results(reproductions_dir: Path) -> list[dict]:
+    """Load reproduction results from per-instance patch files."""
+    reproduction_results: list[dict] = []
+
+    for reproduction_patch_file in sorted(reproductions_dir.glob("*.patch")):
+        reproduction_results.append(
+            {
+                "instance_id": reproduction_patch_file.stem,
+                "reproduction_patch": reproduction_patch_file.read_text(),
+            }
+        )
+
+    return reproduction_results
+
 class ProgressTrackingAgent(TreeSearchAgent):
     """Simple wrapper around TreeSearchAgent that provides progress updates."""
 
@@ -162,46 +181,26 @@ def remove_from_preds_file(output_path: Path, instance_id: str):
 
 
 def update_reproductions_file(reproductions_dir: Path, instance_id: str, model_name: str, reproduction_patch: str):
-    """Update the reproductions JSON file with results from a single instance."""
-    reproductions_file = reproductions_dir / "reproductions.json"
+    """Write the reproduction patch for a single instance to <instance_id>.patch."""
+    reproduction_file = _reproduction_patch_path(reproductions_dir, instance_id)
+    reproduction_file.parent.mkdir(parents=True, exist_ok=True)
+    patch_content = reproduction_patch if reproduction_patch.endswith("\n") else reproduction_patch + "\n"
     with _REPRODUCTION_LOCK:
-        reproductions_data = []
-        if reproductions_file.exists():
-            reproductions_data = json.loads(reproductions_file.read_text())
-        # Remove existing entry for this instance if it exists
-        reproductions_data = [r for r in reproductions_data if r.get("instance_id") != instance_id]
-        # Add new entry
-        reproductions_data.append({
-            "model_name_or_path": model_name,
-            "instance_id": instance_id,
-            "reproduction_patch": reproduction_patch,
-        })
-        reproductions_file.write_text(json.dumps(reproductions_data, indent=2))
+        reproduction_file.write_text(patch_content)
 
 
 def remove_from_reproductions_file(reproductions_dir: Path, instance_id: str):
-    """Remove an instance from the reproductions file."""
-    reproductions_file = reproductions_dir / "reproductions.json"
-    if not reproductions_file.exists():
-        return
+    """Remove an instance's patch file."""
+    reproduction_file = _reproduction_patch_path(reproductions_dir, instance_id)
     with _REPRODUCTION_LOCK:
-        reproductions_data = json.loads(reproductions_file.read_text())
-        reproductions_data = [r for r in reproductions_data if r.get("instance_id") != instance_id]
-        reproductions_file.write_text(json.dumps(reproductions_data, indent=2))
+        reproduction_file.unlink(missing_ok=True)
 
 
 def get_reproduction_patch_for_instance(reproductions_dir: Path, instance_id: str) -> str:
     """Return the stored reproduction patch for an instance, or an empty string if not found."""
-    reproductions_file = reproductions_dir / "reproductions.json"
-    if not reproductions_file.exists():
-        return ""
-    with _REPRODUCTION_LOCK:
-        reproductions_data = json.loads(reproductions_file.read_text())
-        
-    for reproduction_result in reproductions_data:
-        if reproduction_result.get("instance_id") == instance_id:
-            # print(reproduction_result.get("reproduction_patch", "")[:200])
-            return reproduction_result.get("reproduction_patch", "")
+    reproduction_file = _reproduction_patch_path(reproductions_dir, instance_id)
+    if reproduction_file.exists():
+        return reproduction_file.read_text()
     return ""
 
 
@@ -432,9 +431,9 @@ def main(
         instances_to_process = [instance for instance in instances_to_process if instance["instance_id"] not in skip_instance_ids]
 
     # Check for existing reproduction results; this is controlled separately from redo_existing.
-    reproductions_file = reproductions_dir / "reproductions.json"
-    if not redo_existing_repro and reproductions_file.exists():
-        reproductions_data = json.loads(reproductions_file.read_text())
+    reproduction_patch_files = sorted(reproductions_dir.glob("*.patch"))
+    if not redo_existing_repro and reproduction_patch_files:
+        reproductions_data = _load_reproduction_results(reproductions_dir)
         existing_repro_ids = {r.get("instance_id") for r in reproductions_data}
         redo_repro_ids = {
             r.get("instance_id")
