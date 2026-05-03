@@ -56,9 +56,9 @@ class SingleActionAgent(DefaultAgent):
         while True:
             try:
                 self.step()
-            except NoActionFound as e:
-                self.add_message("system", str(e))
-                return type(e).__name__, str(e)
+            # except NoActionFound as e:
+            #     self.add_message("system", str(e))
+            #     return type(e).__name__, str(e)
             except NonTerminatingException as e:
                 self.add_message("user", str(e))
                 self.tree_node.observation = str(e)
@@ -88,7 +88,6 @@ class SingleActionAgent(DefaultAgent):
                             return None, "Agent reached max step limit while blocking reproduction submission. Final output may be incomplete."
                         
                         continue
-                    
 
                 self.add_message("user", str(e))
                 self.tree_node.observation = str(e) 

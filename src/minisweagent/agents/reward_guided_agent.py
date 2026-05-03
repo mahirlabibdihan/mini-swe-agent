@@ -590,14 +590,10 @@ EOF
             return self.tree_root.children[0].commit
         return self.tree_root.commit
     
-    def _generate_new_node(self, i) -> TreeSearchNode:
+    def _action_to_node(self, response, action, error, current_node):
         # get_observation action to get observation
         potential_termination = False
         
-        self.SYSTEM_PROMPT = self.candidates[i % len(self.candidates)]["SYSTEM_PROMPT"]
-        self.USER_PROMPT = self.candidates[i % len(self.candidates)]["USER_PROMPT"]
-        
-        response, action, error = self._generate_action()
         if error is None:
             instance_logger.debug(f"Generated action #{i+1}: {action['action']}")
             new_node = self._create_node(
@@ -615,7 +611,8 @@ EOF
                     "extra": response["extra"]
                 },
             )
-        
+            
+            
         if error is None:
             try:
                 def is_git_command(cmd: str):
@@ -627,8 +624,8 @@ EOF
                         return True
                     return False
                                             
-                potential_termination = is_terminating(action["action"])                       
-                if not potential_termination and is_git_command(action["action"]):
+                potential_termination = is_terminating(new_node.last_action["command"])                       
+                if not potential_termination and is_git_command(new_node.last_action["command"]):
                     instance_logger.debug(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
                     new_node.observation = "Error: git commands are not allowed."
                     new_node.raw_observation = None
@@ -639,20 +636,20 @@ EOF
                 else:
                     # Be-aware of potential terminating actions
                     if potential_termination:
-                        res = self.env.execute(f"git checkout {self._get_root_commit()} && git restore --source {self.tree_node.commit} .")
+                        res = self.env.execute(f"git checkout {self._get_root_commit()} && git restore --source {current_node.commit} .")
                             
                         if res.get("returncode", 0) != 0:
                             instance_logger.debug(">> Warning: Failed to restore to the current node's commit before executing potential terminating action.")
                             instance_logger.debug(f"Error details: {res}")  
                             
-                    output = self.env.execute(action["action"])
+                    output = self.env.execute(new_node.last_action["command"])
                     # Check for terminating action
                     lines = output.get("output", "").lstrip().splitlines(keepends=True)
                     if lines and lines[0].strip() in ["MINI_SWE_AGENT_FINAL_OUTPUT", "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"]:
                         instance_logger.debug(">> Terminating action detected.")
                         new_node.is_terminating = True   
                         
-                        if self.tree_node.commit == self._get_root_commit():
+                        if current_node.commit == self._get_root_commit():
                             instance_logger.debug(">> Warning: Terminating action detected without any modifications.")
                             new_node.observation = "Error: Submission detected without any modifications."
                             new_node.raw_observation = output
@@ -668,12 +665,12 @@ EOF
                         self.env.execute("git restore . && git checkout -")
                 observation = self.render_template(self.config.action_observation_template, output=output) 
                 raw_observation = output
-                
+            
             except (TimeoutError, subprocess.TimeoutExpired) as e:
                 output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
                 observation = self.render_template(self.config.timeout_template, action=action, output=output)
                 raw_observation = None
-
+                
             # Check for code modifications
             if self._repo_has_changes():
                 new_node.modifies_code = True
@@ -695,7 +692,7 @@ EOF
                         
                 new_node.test_status = self._get_test_status()
                 if new_node.test_status == None:
-                    new_node.test_status = self.tree_node.test_status
+                    new_node.test_status = current_node.test_status
                 # Rollback changes
                 # run tests
                 # test_result = self.env.execute("pytest --maxfail=1 --disable-warnings -q")
@@ -716,7 +713,7 @@ EOF
                     else:
                         raise Exception(">> Error: Changes still detected after reset and clean.")
             else:
-                commands = parser.parse(action["action"])  # Check if it's a read action and can be parsed
+                commands = parser.parse(new_node.last_action["command"])  # Check if it's a read action and can be parsed
                 # Slightly boost nodes that read files based on relevance
                 def normalize_path(p: str) -> str:
                     p = p.lstrip("./")  # remove leading ./ or /
@@ -733,28 +730,27 @@ EOF
                                 instance_logger.debug(f">> Read-action detected. File: {arg}")
                         # for arg in cmd.get("args", []):
                         #     if not arg.startswith('-'):
-                new_node.test_status = self.tree_node.test_status
-                                
-            # elif action['action'].startswith("nl"):
-                # import shlex
-                # cmd = action['action']
-                # tokens = shlex.split(cmd)
-                # filename = None
-                # if tokens[0] == "nl":
-                #     for token in tokens[1:]:
-                #         if not token.startswith('-'):
-                #             filename = token
-                #             break
-                
-                # if filename is not None:
-                #     new_node.read_files = [filename]
-                #     instance_logger.debug(f">> Read-action detected. File: {filename}")
-            
+                new_node.test_status = current_node.test_status
+
+                # elif action['action'].startswith("nl"):
+                    # import shlex
+                    # cmd = action['action']
+                    # tokens = shlex.split(cmd)
+                    # filename = None
+                    # if tokens[0] == "nl":
+                    #     for token in tokens[1:]:
+                    #         if not token.startswith('-'):
+                    #             filename = token
+                    #             break
+                    
+                    # if filename is not None:
+                    #     new_node.read_files = [filename]
+                    #     instance_logger.debug(f">> Read-action detected. File: {filename}")
+             
             if not new_node.invalid_termination and new_node.is_terminating != potential_termination:
                 instance_logger.debug(">> Warning: Invalid terminating action detected. Skipping this action...")
                 time.sleep(2)  # To avoid rate limiting
                 return None     
-            
         else:
             instance_logger.debug(f"Generated action #{i+1}: <<Invalid Action>>")
             observation = error
@@ -764,14 +760,15 @@ EOF
             new_node.observation = observation
             new_node.raw_observation = raw_observation
             
-        # if not new_node.is_terminating and new_node.level >= self.config.depth_limit:
-        #     instance_logger.debug(f"Non-terminating Node {new_node.last_action['command']} exceeded max depth {self.config.depth_limit}, skipping...")
-        #     new_node.prune()
-        #     return None
-        
-        # new_node.value = self._evaluate_node(new_node)
-        new_node.parent = self.tree_node
+        new_node.parent = current_node
         return new_node
+      
+
+    def _generate_new_node(self, i) -> TreeSearchNode:
+        self.SYSTEM_PROMPT = self.candidates[i % len(self.candidates)]["SYSTEM_PROMPT"]
+        self.USER_PROMPT = self.candidates[i % len(self.candidates)]["USER_PROMPT"]
+        response, action, error = self._generate_action()
+        return self._action_to_node(response, action, error, self.tree_node)
             
     def _generate_new_nodes(self, n_actions) -> List[TreeSearchNode]:
         nodes = []
@@ -952,11 +949,11 @@ EOF
     
     def is_test_failure(self, node: TreeSearchNode, returncode: int) -> bool:
         # OLD:
-        if self.is_test_command(node) and returncode == 1:
-            return True
-        # NEW:
-        # if node.last_action["type"] == "test" and returncode == 1:
+        # if self.is_test_command(node) and returncode == 1:
         #     return True
+        # NEW:
+        if node.last_action["type"] == "test" and returncode == 1:
+            return True
         return False
 
     def _normalize_test_status_entries(self, tests) -> dict[str, str]:
@@ -1184,9 +1181,9 @@ EOF
             node.value = new_value
         
         # OLD:
-        elif (node.last_action["command"] is None or not self.is_test_command(node)) and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
+        # elif (node.last_action["command"] is None or not self.is_test_command(node)) and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
         # NEW:
-        # elif (node.last_action["command"] is None or node.last_action["type"] != "test") and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
+        elif (node.last_action["command"] is None or node.last_action["type"] != "test") and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
             # Penalize read actions that produce excessive output
             penalty = math.exp(-(len(node.raw_observation.get("output").strip()) - 5000) / 3000.0)
             new_value = max(0.8, penalty) * node.value
