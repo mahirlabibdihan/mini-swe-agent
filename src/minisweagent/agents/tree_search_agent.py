@@ -516,14 +516,11 @@ class TreeSearchAgent(RewardGuidedAgent):
         node_A.order = node_B.order = self.n_expanded
         self.n_expanded += 1
         response, action, error = self._generate_merge_action(node_A, node_B)
-        return self._action_to_node(response, action, error, self.tree_node)
+        return self._action_to_node(response, action, error, node_A) # A is parent, since it has higher value
             
     def get_messages_two_nodes(self, node_A, node_B) -> List[dict]:
         if node_A.commit != node_B.commit:
             raise ValueError("Nodes must be on the same commit to merge their paths for messaging.")
-            
-        if node_A.merged_value > node_B.merged_value:
-            node_A, node_B = node_B, node_A  # Swap so that node_A is the one with lower value (worse performing path) and node_B is the one with higher value (better performing path)
 
         def linearize_path(path):
             messages = []
@@ -577,10 +574,10 @@ From this point, two alternative action sequences were explored.
 Your task is to reason across both and decide the best next action.
 
 === Path A ===
-{format_suffix(suffix_a)}
+{format_suffix(suffix_b)}
 
 === Path B ===
-{format_suffix(suffix_b)}
+{format_suffix(suffix_a)}
 
 Given both trajectories, what is the best next action to take from this point?
 """   
