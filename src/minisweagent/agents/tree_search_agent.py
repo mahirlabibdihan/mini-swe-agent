@@ -1,5 +1,6 @@
 from pathlib import Path
 from platform import node
+import uuid
 
 from matplotlib.hatch import get_path
 from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, FormatError, TerminatingException, Submitted, ExecutionTimeoutError
@@ -630,8 +631,10 @@ Given both trajectories, what is the best next action to take from this point?
         chunk_size = 2
         for node in nodes:
             if node.modifies_code: 
-                continue # If the last action modified code, we can't treat the parent's commit as child's commit.
-            if not buckets.get(node.parent.commit):
+                if bucket_count < k:
+                    buckets[str(uuid.uuid4())] = [node]
+                    bucket_count += 1
+            elif not buckets.get(node.parent.commit):
                 if bucket_count < k:
                     buckets[node.parent.commit] = [node]
                     bucket_count += 1
@@ -657,8 +660,11 @@ Given both trajectories, what is the best next action to take from this point?
                         p[0].add_child(merged_node)
                         p[1].add_child(merged_node)
                         merged_node.merged = True
+                        merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node)
                         merged_nodes.append(merged_node)
-        return nodes[:k]
+                        
+        # return nodes[:k] # OLD
+        return merged_nodes[:k] # NEW:
     
         
     def _get_topk_edit_paths(self, k=3, to_execute=True):
