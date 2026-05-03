@@ -36,7 +36,7 @@ agent:
     2. Provide exactly ONE bash command to execute
 
     ## Important Boundaries
-    - MODIFY: Regular source code files in /testbed (this is the working directory for all your subsequent commands)
+    - MODIFY: Regular source code files in /app (this is the working directory for all your subsequent commands)
     - DO NOT MODIFY: Tests, configuration files (pyproject.toml, setup.cfg, etc.)
 
     ## Recommended Workflow
@@ -227,12 +227,14 @@ agent:
     </output_tail>
     {%- endif %}
     Please try another command and make sure to avoid those requiring interactive input.
-  step_limit: 250
+  step_limit: 30
   cost_limit: 3.
 
 environment:
-  cwd: "/testbed"
-  timeout: 60
+  cwd: "/app"
+  timeout: 120
+  pull_timeout: 500
+  clean_start: true
   env:
     PAGER: cat
     MANPAGER: cat
@@ -242,7 +244,9 @@ environment:
   environment_class: docker
 
 model:
-  model_name: "Qwen/Qwen2.5-7B-Instruct"
-  model_class: openhf
+  model_name: "hosted_vllm/google/gemma-4-E4B-it"
+  # model_class: openrouter
   model_kwargs:
+    api_base: "http://10.141.10.34:3000/v1"
+    drop_params: true
     temperature: 0.7

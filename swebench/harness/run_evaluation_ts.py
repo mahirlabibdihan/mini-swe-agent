@@ -26,7 +26,7 @@ from swebench.harness.constants import (
     LOG_REPORT,
     LOG_INSTANCE,
     LOG_TEST_OUTPUT,
-    RUN_EVALUATION_LOG_DIR,
+    RUN_EVALUATION_TS_LOG_DIR,
     UTF8,
 )
 from swebench.harness.docker_utils import (
@@ -56,6 +56,7 @@ from swebench.harness.utils import (
     EvaluationError,
     load_swebench_dataset,
     get_predictions_from_file,
+    get_predictions_from_tree_dir,
     run_threadpool,
     str2bool,
     optional_str,
@@ -68,6 +69,49 @@ GIT_APPLY_CMDS = [
 ]
 
 
+def _set_node_pass_flag(node: dict, node_id: str, passed: bool) -> bool:
+    """Recursively find a node by id and set its pass flag."""
+    if node.get("id") == node_id:
+        node["pass"] = bool(passed)
+        return True
+
+    for child in node.get("children", []) or []:
+        if _set_node_pass_flag(child, node_id, passed):
+            return True
+    return False
+
+
+def _update_tree_nodes_passes(preds: list[dict], pass_by_node_id: dict[str, bool]) -> None:
+    """Write pass/fail flags to each source tree JSON once, after candidate evaluation."""
+    preds_by_tree_file: dict[str, list[dict]] = {}
+    for pred in preds:
+        tree_file = pred.get("tree_file")
+        node_id = pred.get("node_id")
+        if not tree_file or not node_id:
+            continue
+        preds_by_tree_file.setdefault(tree_file, []).append(pred)
+
+    for tree_file, tree_preds in preds_by_tree_file.items():
+        tree_path = Path(tree_file)
+        if not tree_path.exists():
+            continue
+
+        try:
+            tree = json.loads(tree_path.read_text())
+            modified = False
+            for pred in tree_preds:
+                node_id = pred.get("node_id")
+                if node_id not in pass_by_node_id:
+                    continue
+                if _set_node_pass_flag(tree, node_id, pass_by_node_id[node_id]):
+                    modified = True
+            if modified:
+                tree_path.write_text(json.dumps(tree, indent=4))
+        except Exception:
+            # Tree update failure should not interrupt evaluation.
+            pass
+
+
 def run_instance(
     test_spec: TestSpec,
     pred: dict,
@@ -78,6 +122,7 @@ def run_instance(
     timeout: int | None = None,
     rewrite_reports: bool = False,
     clean_start: bool = False,
+    redo: bool = False,
 ) -> dict:
     """
     Run a single instance with the given prediction.
@@ -95,7 +140,7 @@ def run_instance(
     # Set up logging directory
     instance_id = test_spec.instance_id
     model_name_or_path = pred.get(KEY_MODEL, "None").replace("/", "__")
-    log_dir = RUN_EVALUATION_LOG_DIR / run_id / model_name_or_path / instance_id
+    log_dir = RUN_EVALUATION_TS_LOG_DIR / run_id / model_name_or_path / instance_id
 
     # Set up report file
     report_path = log_dir / LOG_REPORT
@@ -116,12 +161,14 @@ def run_instance(
             "completed": True,
             "resolved": report[instance_id]["resolved"],
         }
-    if report_path.exists():
+    if report_path.exists() and not redo:
         report = json.loads(report_path.read_text())
         return {
             "completed": True,
             "resolved": report[instance_id]["resolved"],
         }
+    if report_path.exists() and redo:
+        report_path.unlink(missing_ok=True)
 
     if not test_spec.is_remote_image:
         # Link the image build dir in the log dir
@@ -283,8 +330,55 @@ def run_instance(
         }
 
 
+def run_instance_candidates(
+    test_spec: TestSpec,
+    preds: list[dict],
+    rm_image: bool,
+    force_rebuild: bool,
+    client: docker.DockerClient,
+    run_id: str,
+    timeout: int | None = None,
+    rewrite_reports: bool = False,
+    clean_start: bool = False,
+    redo: bool = False,
+) -> dict:
+    """
+    Run all candidate predictions for one instance and mark resolved if any passes.
+    Persist tree pass/fail flags once after all candidates are evaluated.
+    """
+    any_completed = False
+    any_resolved = False
+    pass_by_node_id: dict[str, bool] = {}
+
+    for pred in preds:
+        result = run_instance(
+            test_spec,
+            pred,
+            rm_image,
+            force_rebuild,
+            client,
+            run_id,
+            timeout,
+            rewrite_reports,
+            clean_start,
+            redo,
+        )
+        node_id = pred.get("node_id")
+        if node_id:
+            pass_by_node_id[node_id] = bool(result["resolved"])
+
+        any_completed = any_completed or result["completed"]
+        any_resolved = any_resolved or result["resolved"]
+
+    _update_tree_nodes_passes(preds, pass_by_node_id)
+
+    if any_completed:
+        return {"completed": True, "resolved": any_resolved}
+    return {"completed": False, "resolved": False}
+
+
 def run_instances(
-    predictions: dict,
+    predictions_by_instance: dict,
     instances: list,
     cache_level: str,
     clean: bool,
@@ -297,12 +391,13 @@ def run_instances(
     env_image_tag: str = "latest",
     rewrite_reports: bool = False,
     clean_start: bool = False,
+    redo: bool = False,
 ):
     """
     Run all instances for the given predictions in parallel.
 
     Args:
-        predictions (dict): Predictions dict generated by the model
+        predictions_by_instance (dict): Mapping instance_id -> list[prediction]
         instances (list): List of instances
         cache_level (str): Cache level
         clean (bool): Clean images above cache level
@@ -341,10 +436,13 @@ def run_instances(
     # run instances in parallel
     payloads = []
     for test_spec in test_specs:
+        preds = predictions_by_instance.get(test_spec.instance_id, [])
+        if not preds:
+            continue
         payloads.append(
             (
                 test_spec,
-                predictions[test_spec.instance_id],
+                preds,
                 should_remove(
                     test_spec.instance_image_key,
                     cache_level,
@@ -357,6 +455,7 @@ def run_instances(
                 timeout,
                 rewrite_reports,
                 clean_start,
+                redo,
             )
         )
 
@@ -367,7 +466,7 @@ def run_instances(
     lock = threading.Lock()
 
     def run_evaluation_with_progress(*args):
-        result = run_instance(*args)
+        result = run_instance_candidates(*args)
         with lock:
             if result["completed"]:
                 if result["resolved"]:
@@ -431,7 +530,7 @@ def get_dataset_from_preds(
                 continue
             prediction = predictions[instance[KEY_INSTANCE_ID]]
             test_output_file = (
-                RUN_EVALUATION_LOG_DIR
+                RUN_EVALUATION_TS_LOG_DIR
                 / run_id
                 / prediction["model_name_or_path"].replace("/", "__")
                 / prediction[KEY_INSTANCE_ID]
@@ -455,7 +554,7 @@ def get_dataset_from_preds(
             continue
         prediction = predictions[instance[KEY_INSTANCE_ID]]
         report_file = (
-            RUN_EVALUATION_LOG_DIR
+            RUN_EVALUATION_TS_LOG_DIR
             / run_id
             / prediction[KEY_MODEL].replace("/", "__")
             / prediction[KEY_INSTANCE_ID]
@@ -489,7 +588,6 @@ def main(
     dataset_name: str,
     split: str,
     instance_ids: list,
-    predictions_path: str,
     max_workers: int,
     force_rebuild: bool,
     cache_level: str,
@@ -501,6 +599,9 @@ def main(
     rewrite_reports: bool,
     redo: bool,
     modal: bool,
+    verbose: bool,
+    predictions_path: str = None,
+    predictions_dir: str = None,
     instance_image_tag: str = "latest",
     env_image_tag: str = "latest",
     report_dir: str = ".",
@@ -516,6 +617,11 @@ def main(
         )
         return
 
+    # Validate that either predictions_path or predictions_dir is provided (but not both)
+    if predictions_path and predictions_dir:
+        raise ValueError("Cannot provide both --predictions_path and --predictions_dir")
+    if not predictions_path and not predictions_dir:
+        raise ValueError("Must provide either --predictions_path or --predictions_dir")
     
     # set open file limit
     assert len(run_id) > 0, "Run ID must be provided"
@@ -527,22 +633,42 @@ def main(
     if force_rebuild and namespace is not None:
         raise ValueError("Cannot force rebuild and use a namespace at the same time.")
 
-    # load predictions as map of instance_id to prediction
-    predictions = get_predictions_from_file(predictions_path, dataset_name, split)
-    predictions = {pred[KEY_INSTANCE_ID]: pred for pred in predictions}
-    
+    # load predictions as list
+    if predictions_path:
+        predictions_list = get_predictions_from_file(predictions_path, dataset_name, split)
+    else:
+        predictions_list = get_predictions_from_tree_dir(predictions_dir)
+
+    # Build instance -> list[prediction]
+    predictions_by_instance = {}
+    for pred in predictions_list:
+        instance_id = pred[KEY_INSTANCE_ID]
+        predictions_by_instance.setdefault(instance_id, []).append(pred)
+
+    # For dataset filtering/build flow, keep one representative prediction per instance.
+    predictions_for_dataset = {}
+    for pred in predictions_list:
+        instance_id = pred[KEY_INSTANCE_ID]
+        if instance_id in predictions_for_dataset:
+            continue
+        predictions_for_dataset[instance_id] = pred
+
+    # For reporting aggregation in tree mode, preserve all predictions with unique keys.
+    predictions_for_report = {}
+    for idx, pred in enumerate(predictions_list):
+        predictions_for_report[f"{pred[KEY_INSTANCE_ID]}::{idx}"] = pred
 
     # get dataset from predictions
     dataset = get_dataset_from_preds(
         dataset_name,
         split,
         instance_ids,
-        predictions,
+        predictions_for_dataset,
         run_id,
         rewrite_reports,
         exclude_completed=False,
-    )
-
+    )[:50]
+    
     full_dataset = load_swebench_dataset(dataset_name, split, instance_ids)[:50]
 
 
@@ -552,7 +678,7 @@ def main(
             print("No instances to run.")
         else:
             validate_modal_credentials()
-            run_instances_modal(predictions, dataset, full_dataset, run_id, timeout)
+            run_instances_modal(predictions_for_dataset, dataset, full_dataset, run_id, timeout)
         return
 
     # run instances locally
@@ -576,7 +702,7 @@ def main(
                 env_image_tag,
             )
         run_instances(
-            predictions,
+            predictions_by_instance,
             dataset,
             cache_level,
             clean,
@@ -589,19 +715,21 @@ def main(
             env_image_tag=env_image_tag,
             rewrite_reports=rewrite_reports,
             clean_start=clean_start,
+            redo=redo,
         )
 
     # clean images + make final report
     clean_images(client, existing_images, cache_level, clean)
     return make_run_report(
-        predictions,
+        predictions_for_report,
         full_dataset,
         run_id,
         client,
         namespace,
         instance_image_tag,
         env_image_tag,
-        report_dir
+        report_dir,
+        verbose=verbose,
     )
 
 
@@ -633,8 +761,12 @@ if __name__ == "__main__":
         "-p",
         "--predictions_path",
         type=str,
-        help="Path to predictions file - if 'gold', uses gold predictions",
-        required=True,
+        help="Path to predictions file - if 'gold', uses gold predictions. Cannot be used with --predictions_dir",
+    )
+    parser.add_argument(
+        "--predictions_dir",
+        type=str,
+        help="Path to predictions directory with instance_id subdirectories containing *.tree.json files. Cannot be used with --predictions_path",
     )
     # Local execution args
     parser.add_argument(
@@ -700,6 +832,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--report_dir", type=str, default=".", help="Directory to write reports to"
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print a per-instance tree summary table in addition to the aggregate report",
     )
     parser.add_argument(
         "--clean-start",

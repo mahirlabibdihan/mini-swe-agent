@@ -127,7 +127,7 @@ class TreeSearchNode:
                 "last_action": {
                     "command": self.last_action["command"],
                     "thought": self.last_action["thought"],
-                    "type": self.last_action["type"],
+                    "type": self.last_action.get("type", "unknown"),
                 } if self.last_action else None,
                 "test_status": self.test_status,
                 "history_summary": self.history_summary,

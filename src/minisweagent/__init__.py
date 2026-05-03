@@ -28,7 +28,7 @@ global_config_file = Path(global_config_dir) / ".env"
 
 if not os.getenv("MSWEA_SILENT_STARTUP"):
     Console().print(
-        f"👋 This is [bold green]mini-swe-agent[/bold green] version [bold green]{__version__}[/bold green].\n"
+        f"👋 This is [bold green]git-tree-search[/bold green] version [bold green]{__version__}[/bold green].\n"
         f"Loading global config from [bold green]'{global_config_file}'[/bold green]"
     )
 dotenv.load_dotenv(dotenv_path=global_config_file)

@@ -20,15 +20,21 @@ import pickle
 import os
 import numpy as np
 from minisweagent.utils.log import instance_logger
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
 
 class TreeSearchAgentConfig(RewardGuidedAgentConfig):
-    frontier_budget: int = 4
+    frontier_budget: int = None
     """The maximum number of nodes allowed in the action queue."""
     epsilon: float = 0.3
     selection_scope: str = "local"
     """Scope for action selection: 'local' or 'global'."""
     max_expansion: int = 5
     """Maximum number of nodes to expand per step."""
+    sub_thres: int = 3
+    """Number of submissions after which to switch to phase 3."""
+    itr_limit: int = 4
+    
 
 import json
 
@@ -43,7 +49,10 @@ class TreeSearchAgent(RewardGuidedAgent):
         self.n_prune = 0
         self.curr_epsilon = self.config.epsilon
         self.phase = 1
-        
+        self.itr = 1
+        # create an empty list of size self.config.itr_limit+1
+        self.node_map_itr = [{} for _ in range(self.config.itr_limit+2)] # NEW:
+
     def _reset(self):
         super()._reset()
         self.curr_epsilon = self.config.epsilon
@@ -91,6 +100,32 @@ class TreeSearchAgent(RewardGuidedAgent):
             return 0.0
         return total_reward / write_actions
     
+    def _get_best_terminating_node(self) -> Optional[TreeSearchNode]:
+        terminating_nodes = [
+            n
+            for n in self.all_node_map.values() # OLD
+            # for node_dict in self.node_map_itr # NEW
+            # for n in node_dict.values()
+            if n.is_terminating and n.merged_value is not None
+        ]
+        
+        if not terminating_nodes:
+            return None
+        
+        best_node = max(
+            terminating_nodes,
+            key=lambda x: (
+                x.merged_value,
+                # 0.9 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1, # NEW:  Should give priority to early discovered solutions
+                # x.get_path_value(0.85) # NEW: In case of tie
+            ),
+            default=None
+        )
+        
+        return best_node
+    
+    
+    # OLD:
     def _handle_max_steps(self):
         # instance_logger.debug(f">> Checking for max steps... {self.n_expanded} / {self.config.step_limit}")
         if self.n_expanded + 1 < self.config.step_limit:
@@ -141,6 +176,63 @@ class TreeSearchAgent(RewardGuidedAgent):
             # best_node.add_child(term_node)
         
         return best_node
+    
+    # NEW:
+    # def _handle_max_steps(self):
+    #     # instance_logger.debug(f">> Checking for max steps... {self.n_expanded} / {self.config.step_limit}")
+    #     if self.n_expanded + 1 < self.config.step_limit:
+    #         return None
+        
+    #     self.node_map_itr[self.itr] = self.node_map
+        
+    #     instance_logger.debug(">> Max steps reached, selecting best terminating action...")
+        
+    #     best_node = self._get_best_terminating_node()
+        
+    #     if best_node is None:
+    #         candidates = self._get_topk_edit_paths(k=3)    
+                    
+    #         # For each candidate, compute average write reward along path
+    #         best_node = None
+    #         best_value = float("-inf")
+
+    #         # NEW: We can generate a terminating node under all the paths with at least one edit action, evaluate those terminating nodes, and pick the best one among them.
+    #         if len(candidates) > 0:
+    #             futures = []
+    #             max_workers = 4
+    #             term_nodes = []
+    #             with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    #                 for node in tqdm(candidates, desc="Generating nodes"):
+    #                     node.visits += 1
+    #                     term_node = self._make_terminating_action(node)
+    #                     term_nodes.append(term_node)
+    #                     print(f">> Adding terminating node [{term_node.id}] under node [{node.id}]")
+    #                     futures.append((term_node, executor.submit(self._evaluate_node, term_node)))
+    #                 if futures:
+    #                     for term_node, future in tqdm(futures, total=len(futures), desc="Waiting for node scores"):
+    #                         term_node.merged_value = term_node.value = future.result()
+                
+                
+    #             # Now select the best terminating node among the generated ones
+    #             best_node = max(
+    #                 term_nodes,
+    #                 key=lambda x:(
+    #                     x.merged_value,
+    #                     x.get_path_value(0.85) # NEW: In case of tie
+    #                 ),
+    #                 default=None
+    #             )
+    #             best_node = best_node.parent # We want to execute the parent node which is the original candidate node. The terminating node will be executed implicitly after that.
+            
+    #         else:
+    #         # if best_value == 0:
+    #             best_node = max(candidates, key=lambda x: x.merged_value, default=None) # Fallback to max reward node
+    #             print(f">> No write actions found, fallback to node with highest merged value [{best_node.id}] with merged value {best_node.merged_value}")
+    #             term_node = self._make_terminating_action(best_node)
+    #             best_node.visits += 1
+    #             print(f">> Adding terminating node [{term_node.id}] under node [{best_node.id}]")
+        
+    #     return best_node
 
     # def go_to_best_expandable_node(self):
     #     best_node = best_node = max(
@@ -161,27 +253,10 @@ class TreeSearchAgent(RewardGuidedAgent):
     #         instance_logger.debug(">> No expandable nodes found, reverting to root.")
             
             
-    def compute_alpha(self, progress: float, alpha_min: float = 0.4, alpha_max: float = 0.8) -> float:
-        """
-        Compute alpha based on fraction of executed nodes.
-
-        Args:
-            progress: float in [0,1], fraction of executed nodes
-            alpha_min: minimum alpha (late in search)
-            alpha_max: maximum alpha (early in search)
-        Returns:
-            alpha: float in [alpha_min, alpha_max]
-        """
-        progress = min(max(progress, 0.0), 1.0)  # clamp
-        return alpha_max - (alpha_max - alpha_min) * progress
-
+    
+        
     def _go_to_best_executable_node(self, k: int = 1) -> List[TreeSearchNode]:
         # TODO: Find best on a subtree basis. Root should be provided.
-        def node_priority(n, gamma=0.9, max_depth=50):
-            path_value = n.get_path_value(gamma)
-            depth_score = math.log1p(n.level) / math.log1p(max_depth)
-            alpha = self.compute_alpha(progress=self.n_expanded / self.config.step_limit)
-            return alpha * path_value + (1 - alpha) * depth_score
 
         # Materialize candidates (important)
         while True:
@@ -190,7 +265,6 @@ class TreeSearchAgent(RewardGuidedAgent):
                 if n.merged_value is not None
                 and n.visible
                 and not n.executed
-                and n.id != self.tree_root.id
                 and (self.phase > 1 or not n.modifies_code)
                 and (self.phase > 2 or not n.is_terminating)
             ]
@@ -216,7 +290,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         top_k = heapq.nlargest(
             min(k, len(candidates)),
             candidates,
-            key=lambda x: node_priority(x, max_depth=max_depth)
+            key=lambda x: self.node_priority(x, max_depth=max_depth)
         )
         
         # Step 2: lowest-valued node among top-k
@@ -247,6 +321,21 @@ class TreeSearchAgent(RewardGuidedAgent):
             return None
         best_leaf = max(write_leaves, key=lambda x: x.get_path_value(0.85))
         return best_leaf
+    
+    def _find_all_write_leaves(self) -> TreeSearchNode:
+        write_leaves = [
+            n for n in self.node_map.values()
+            if n.visible
+            and not n.executed
+            and n.modifies_code
+            and not n.is_terminating
+            and n.merged_value is not None
+        ]
+        if not write_leaves:
+            return []
+        # convert to a sorted list of all write leaves based on path value
+        sorted_leaves = sorted(write_leaves, key=lambda x: x.get_path_value(0.85), reverse=True)
+        return sorted_leaves
 
     def _find_best_read_leaf(self) -> TreeSearchNode:
         read_leaves = [
@@ -260,26 +349,47 @@ class TreeSearchAgent(RewardGuidedAgent):
             return None
         best_leaf = max(read_leaves, key=lambda x: x.get_path_value(0.85))
         return best_leaf
+    
+    def _find_all_read_leaves(self) -> TreeSearchNode:
+        read_leaves = [
+            n for n in self.node_map.values()
+            if n.visible
+            and not n.executed
+            and not n.is_terminating
+            and n.merged_value is not None
+        ]
+        if not read_leaves:
+            return []
+        # convert to a sorted list of all read leaves based on path value
+        sorted_leaves = sorted(read_leaves, key=lambda x: x.get_path_value(0.85), reverse=True)
+        return sorted_leaves
         
     def _switch_to_phase_2(self):
-        best_leaf = self._find_best_write_leaf()
-        if best_leaf is not None:
-            instance_logger.debug(":: Switching to phase 2: Prioritizing write actions.")
+        # TODO: Keep top-k nodes instead of just the best node
+        # best_leaf = self._find_best_write_leaf()
+        sorted_writes = self._find_all_write_leaves()
+        sorted_reads = self._find_all_read_leaves()
+        sorted_leaves = sorted_writes + sorted_reads
+        k = 1
+        if len(sorted_leaves) > 0:
             self.phase = 2  # Switch to phase 2 after 30% of steps
-            self.node_map = {best_leaf.id: best_leaf} # Clearing all other nodes as they are now stale when we switch to phase 2 with a promising write action. This is a design choice to focus the search on the promising write action and its subtree, but it can be adjusted to keep some of the tree if desired.
-            self.frontier.clear()  # Clear frontier when switching phases
+            # Keep top k, say k = 3 for example
+            top_k = sorted_leaves[:k]
+            self.node_map = {leaf.id: leaf for leaf in top_k}
+            
+            # Clear frontier when switching phases
+            self.frontier.clear()
+            best_leaf = top_k[0]
             self._update_frontier([best_leaf])
-            return best_leaf
-        else:
-            best_leaf = self._find_best_read_leaf()
-            if best_leaf is not None:
+            
+            if len(sorted_writes) > 0:
+                instance_logger.debug(":: Switching to phase 2: Prioritizing write actions.")
+            else:
                 instance_logger.debug(":: Switching to phase 2: No promising write actions, converging on best read action for phase 2.")
-                self.phase = 2
-                self.node_map = {best_leaf.id: best_leaf}
-                self.frontier.clear()  # Clear frontier when switching phases
-                self._update_frontier([best_leaf])
                 self.frontier.reduce_budget() # Reduce budget to focus on this promising read action
-                return best_leaf
+            # Start with the best leaf
+            return best_leaf
+
         return None
     
     def _switch_to_phase_3(self):
@@ -287,8 +397,406 @@ class TreeSearchAgent(RewardGuidedAgent):
         self.phase = 3  # Switch to phase 3
         self.frontier.clear()  # Clear frontier when switching 
         
+    def _has_write_parent(self, node: TreeSearchNode) -> bool:
+        current = node.parent
+        while current is not None:
+            if current.modifies_code:
+                return True
+            current = current.parent
+        return False
+    
+    def compute_alpha(self, progress: float, alpha_min: float = 0.4, alpha_max: float = 0.8) -> float:
+        """
+        Compute alpha based on fraction of executed nodes.
+
+        Args:
+            progress: float in [0,1], fraction of executed nodes
+            alpha_min: minimum alpha (late in search)
+            alpha_max: maximum alpha (early in search)
+        Returns:
+            alpha: float in [alpha_min, alpha_max]
+        """
+        progress = min(max(progress, 0.0), 1.0)  # clamp
+        return alpha_max - (alpha_max - alpha_min) * progress
+
+    def node_priority(self, n, gamma=0.9, max_depth=50):
+        path_value = n.get_path_value(gamma)
+        depth_score = math.log1p(n.level) / math.log1p(max_depth)
+        alpha = self.compute_alpha(progress=self.n_expanded / self.config.step_limit)
+        return alpha * path_value + (1 - alpha) * depth_score
+    
+    
+
+    # def _best_terminating_node(self):
+    #     terminating_nodes = [
+    #         n for n in self.node_map.values()
+    #         if n.is_terminating and n.merged_value is not None
+    #     ]
+    #     if not terminating_nodes:
+    #         return None
         
+    #     # Find the modified filenames from diff
+    #     for t in terminating_nodes:
+    #         patch = t.observation
+    #         modified_files = self._extract_changed_files(patch)
+    #         # Now calculate average reward of modified files based on relevance dict
+    #         if len(modified_files) > 0:
+    #             file_rewards = [
+    #                 self.relevance_dict[f]
+    #                 for f in modified_files
+    #                 if f in self.relevance_dict
+    #             ]
+                
+    #             if len(file_rewards) > 0:
+    #                 avg_file_reward = sum(file_rewards) / len(file_rewards)
+    #             else:
+    #                 avg_file_reward = 0  # or handle this case however you prefer
+            
+        
+    #     return best_node
+    
+    def _slice_topk(self, nodes: List[TreeSearchNode], k: int) -> List[TreeSearchNode]:
+        # Future Work
+        # Instead of discarding nodes beyond top-k, we can gather information from them and merge nodes with same commit.
+        # Merging nodes means, let's say 3 nodes in the array have the same commit, then we will give the diverge path trajectory of all of them to agent, and ask it to consider all information and generate next step based on that. This way we can keep more information from the tree and also encourage exploration of different paths while still keeping the search focused on promising trajectories. This can be especially helpful in cases where the reward signal is sparse and we want to gather as much information as possible to guide the search.
+        # Since the array is sorted, we will traverse it from start to end, and keep adding nodes to the top-k array until we have k unique commits.
+        # We don't want to merge more than 2 nodes for now, so let's say there are 3 same commit at the start of an array, we will group the first 2, and treat 3rd as separate commit to encourage exploration of different paths. This is a hyperparameter that can be tuned based on the task and the size of the tree.
+        
+        buckets = {} # commit -> array of buckets -> each bucket is an array of nodes with same commit and at most 2 nodes in each bucket
+        bucket_count = 0
+        for node in nodes:
+            if not buckets.get(node.commit):
+                if bucket_count < k:
+                    buckets[node.commit] = [[node]]
+            elif len(buckets[node.commit][-1]) < 3:
+                buckets[node.commit][-1].append(node)
+            elif bucket_count < k:
+                buckets[node.commit].append([node])
+                bucket_count += 1
+                
+        # Flatten
+        bucket_array = []
+        for commit, bucket_list in buckets.items():
+            for bucket in bucket_list:
+                bucket_array.append(bucket)
+                
+        # Merge
+        merged_nodes = []
+        for bucket in bucket_array:
+            if len(bucket) == 1:
+                merged_nodes.append(bucket[0])
+            elif len(bucket) == 2:
+                # Merge nodes in the bucket
+                # Give all the path to agent, and generate next step based on that.
+                # merged_nodes.append(merged_node)
+                pass
+            else:
+                # Not Implemented: More than 2 nodes in the same bucket.
+                pass
+                
+        return nodes[:k]
+    
+        
+    def _get_topk_edit_paths(self, k=3):
+        curr_i = self.itr
+        sorted_leaves = []
+        
+        # NEW: Extract edit paths from all iterations. Give priority to more recent iterations.
+        # while len(sorted_leaves) < k and curr_i > 0:
+        #     max_depth = max(n.level for n in self.all_node_map[curr_i].values())
+        #     scored_candidates = [
+        #         (
+        #             n,
+        #             self.node_priority(n, gamma=0.85, max_depth=max_depth)
+        #         )
+        #         for n in self.all_node_map[curr_i].values()
+        #         if not n.executed
+        #         and not n.is_terminating
+        #         and n.visible
+        #         and n.merged_value is not None
+        #         and n.level < self.config.depth_limit
+        #         and n.commit != self._get_root_commit()
+        #     ]
+
+        #     # sort by score
+        #     scored_candidates.sort(key=lambda x: x[1], reverse=True)
+
+        #     # unpack if you still want just nodes
+        #     candidates = [n for n, _ in scored_candidates]
+            
+        #     sorted_leaves.extend(candidates)
+        #     curr_i -= 1
+        
+        candidates = [
+            n for n in self.node_map.values()
+            if not n.executed
+            and not n.is_terminating
+            and n.visible
+            and n.merged_value is not None
+            and n.level < self.config.depth_limit
+            and n.commit != self._get_root_commit()
+        ]
+        
+        sorted_leaves = sorted(
+            candidates,
+            key=lambda x: self.node_priority(x, gamma=0.85, max_depth=max(n.level for n in candidates)),
+            reverse=True
+        )
+        
+        if len(sorted_leaves) < k:
+            candidates = [
+                n 
+                for n in self.all_node_map.values() # OLD
+                if not n.executed
+                and not n.is_terminating
+                and n.visible
+                and n.merged_value is not None
+                and n.level < self.config.depth_limit
+                and n.commit != self._get_root_commit()
+            ]
+            
+            sorted_leaves = sorted(
+                candidates,
+                key=lambda x: self.node_priority(x, gamma=0.85, max_depth=max(n.level for n in candidates)),
+                reverse=True
+            )
+            
+        return self._slice_topk(sorted_leaves, k)
+    
+    
+                    
+    def _update_iteration(self):
+        self.node_map_itr[self.itr] = self.node_map # NEW:
+        
+        if self.n_submissions >= self.config.sub_thres:
+            
+            # We are done exploring. Now check the tree if there is any terminating action. If multiple, choose the one with highest path value/reward. If none, choose the one with highest path value among all nodes and run sequentially from there until we reach a terminating node.   
+            best_node = self._get_best_terminating_node()
+            instance_logger.debug(">> Discovered enough solutions. Best terminating node: [{}] with merged value {}".format(best_node.id, best_node.merged_value))
+            self.frontier.clear()
+            self.itr += 1
+            self.node_map = {best_node.id: best_node}
+          
+            return best_node
+            
+        elif self.itr == self.config.itr_limit:
+            top_k = self._get_topk_edit_paths(k=1)
+            if len(top_k) > 0:
+                best_node = top_k[0]
+            
+            else:
+                # If no nodes with edits are found, fallback to any promising node regardless of edits to at least have some path to follow.
+                best_node = max(
+                    (
+                        n for n in self.node_map.values() 
+                        if n.merged_value is not None 
+                        and n.visible 
+                        and not n.executed
+                        and n.level < self.config.depth_limit
+                    ),
+                    key=lambda x: self.node_priority(x, gamma=0.85, max_depth=max_depth),
+                    default=None
+                )
+                
+            instance_logger.debug(">> Iteration limit reached with no terminating nodes. Selecting best node based on merged value: [{}] with merged value {}".format(best_node.id, best_node.merged_value if best_node else "N/A"))
+
+            self.frontier.clear()
+            self.itr += 1
+            self.node_map = {best_node.id: best_node} # Prune the rest of the tree by keeping only the best node in the node map
+            
+            return best_node
+
+        else: 
+            
+            self.frontier.clear()
+            # Update frontier with top-k non-terminating leaves [EXPLOITATION]
+            # Find max depth among all nodes
+            max_depth = max(n.level for n in self.node_map.values())
+            
+            if self.itr + 1 < self.config.itr_limit:
+                scored_leaves = [
+                    (n, self.node_priority(n, gamma=0.85, max_depth=max_depth))
+                    for n in self.node_map.values()
+                    if not n.executed
+                    and not n.is_terminating
+                    and n.visible
+                    and n.merged_value is not None
+                    and n.level < self.config.depth_limit
+                ]
+
+                # sort by score
+                scored_leaves.sort(key=lambda x: x[1], reverse=True)
+
+                # unpack if needed
+                sorted_leaves = [n for n, _ in scored_leaves]
+            else: # On the last iteration, prioritize nodes with edits regardless of score to encourage exploitation of promising edit paths. If not enough edit paths are found, go for read paths.
+                instance_logger.debug(">> Iteration {} reached. Prioritizing nodes with edits for exploitation.".format(self.itr + 1))
+                sorted_writes = self._get_topk_edit_paths(k=3)
+                # If not enough edit paths are found, go for read paths.
+
+                sorted_reads = sorted(
+                    (
+                        n for n in self.node_map.values()
+                        if not n.executed
+                        and not n.is_terminating
+                        and n.visible
+                        and n.merged_value is not None
+                        and n.level < self.config.depth_limit
+                        and n.commit == self._get_root_commit()
+                    ),
+                    key=lambda n: self.node_priority(n, gamma=0.85, max_depth=max_depth),
+                    reverse=True,
+                )
+                
+                # final list
+                sorted_leaves = sorted_writes + sorted_reads  
+                # sorted_leaves = sorted(
+                #     (
+                #         n for n in self.node_map.values()
+                #         if not n.executed
+                #         and not n.is_terminating
+                #         and n.visible
+                #         and n.merged_value is not None
+                #         and n.level < self.config.depth_limit
+                #     ),
+                #     key=lambda x: (
+                #         x.commit != self._get_root_commit(),  # True = higher priority now
+                #         self.node_priority(x, gamma=0.85, max_depth=max_depth)
+                #     ),
+                #     reverse=True
+                # )
+                
+            top_k = self._slice_topk(sorted_leaves, k=3) # Keep top 3
+            
+            # OLD:
+            self._update_frontier(top_k) # -> It will sort based on merged_value
+            
+            # Keep top-k active nodes
+            self.node_map = {n.id: n for n in top_k}
+            self.itr += 1
+            instance_logger.debug(f">> Iteration {self.itr}: Updating frontier with top {len(top_k)} non-terminating leaves based on path value.")
+        return None
+
     def step(self) -> dict:
+        if self.tree_node.is_terminating:
+            self._create_pseudo_root()
+            
+            
+        if self.tree_node.visits == 0:
+            tree_nodes = self._generate_new_nodes(self.config.branching_factor)
+            self._update_tree(tree_nodes)
+        
+        self.tree_node.visits += 1
+        self.tree_node.itr = self.itr
+        self.tree_node.order = self.n_expanded
+        
+        best_node = None 
+        while best_node is None:
+            if self.tree_node.visits == 1:
+                # Only update frontier when node first expanded.
+                candidates = []
+                # if self.itr > self.config.itr_limit:
+                #     # prioritize terminating nodes when iteration limit is reached to encourage exploitation and avoid over-exploration which can lead to noise and long backtracking
+ 
+                candidates = [
+                    c for c in self.tree_node.children 
+                    if not c.executed 
+                    and c.visible 
+                    and not c.is_terminating # Don't need to execute terminating actions. Generating them is enough.
+                    and (c.level < self.itr * 5 or (self.itr > self.config.itr_limit and c.level < self.config.depth_limit)) # Don't expand too deep to avoid noise and long backtracking
+                ]
+                
+                if self.itr > self.config.itr_limit:
+                    self.frontier.clear() # Clear frontier when iteration limit is reached to focus on exploitation of promising node
+                    if len(candidates) == 0: # Only terminating actions are left
+                        self.node_map_itr[self.itr] = self.node_map # NEW:
+                        candidates = [self._get_best_terminating_node()] # Get the best terminating node among all nodes in the current iteration. Generating new nodes won't help at this point, so we directly go for the best terminating node if there are no non-terminating nodes left to execute.
+                         
+                self._update_frontier(candidates)
+                
+            if self.n_expanded >= self.itr * 10 and self.itr <= self.config.itr_limit:
+                best_node = self._update_iteration()
+
+            if best_node is None:
+                if not self.frontier.empty():
+                    best_node = self._select_action()
+                    if best_node.parent != self.tree_node:
+                        self._backtrack(best_node.parent)    
+                        best_node.parent.visits += 1
+                        self.n_backtracks += 1   
+                        instance_logger.debug(">> Backtrack needed to execute the highest-rewarded action.")
+                else:
+                    instance_logger.debug(f">> No actions in frontier. Updating iteration to expand more nodes. Current iteration: {self.itr}")
+                    # NEW:
+                    # best_node = self._update_iteration()
+                    
+                    # OLD:
+                    max_depth = max(n.level for n in self.node_map.values())
+                    scored_leaves = [
+                        (n, self.node_priority(n, gamma=0.85, max_depth=max_depth))
+                        for n in self.node_map.values()
+                        if not n.executed
+                        and not n.is_terminating
+                        and n.visible
+                        and n.merged_value is not None
+                        and n.level < self.config.depth_limit
+                    ]
+                    # sort by score
+                    scored_leaves.sort(key=lambda x: x[1], reverse=True)
+                    # unpack if needed
+                    sorted_leaves = [n for n, _ in scored_leaves]
+                    top_k = sorted_leaves[:3] # Keep top 3
+                    self._update_frontier(top_k) # -> It will sort based on merged_value
+                    # Keep top-k active nodes
+                    self.node_map = {n.id: n for n in top_k}
+                    self.itr += 1
+        
+        self.tree_node = best_node
+                
+        if self.tree_node.is_terminating:
+            self._stage_to_main_branch()
+            self.tree_node.is_submission = True
+            self.frontier.reset()
+            
+        if self.tree_node.last_action["extra"]:
+            self.add_message("assistant", **{"content": self.tree_node.last_action["thought"], "extra": self.tree_node.last_action.get("extra", {})})
+        else: # Action generated by System
+            self.add_message("system", self.tree_node.last_action["thought"])
+            
+        instance_logger.debug(f">> Executing selected action #{self.n_expanded + 1}: {self.tree_node.last_action['command']}")
+        if self.tree_node.last_action["command"] is None or (not self.tree_node.is_terminating and not self.tree_node.modifies_code): # For read-only action, no need to re-execute
+            observation = self.tree_node.observation
+        else: # For write action, need to change the environment and get new (which will be basically same as before) observation
+            output = self.get_observation(
+                {
+                    "action": self.tree_node.last_action["command"]
+                }
+            )
+            observation = self.render_template(self.config.action_observation_template, output=output)
+        
+        self.n_expanded += 1
+        
+        self.add_message("user", observation)
+        self.tree_node.observation = observation
+        self.tree_node.executed = True
+        
+        if self.tree_node.modifies_code:            
+            self.tree_node.commit, _ = self._commit_changes()
+            instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
+            
+        else:
+            self.tree_node.commit = self._get_commit_hash()
+            instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
+            
+        with open("debug_tree.json", "w", encoding="utf-8") as f:
+            json.dump(self.tree_root.to_tree(), f, indent=4, ensure_ascii=False)
+
+        with open("debug_nodes.json", "w", encoding="utf-8") as f:
+            json.dump(self.tree_root.to_json(), f, indent=4, ensure_ascii=False)
+                
+        return self.tree_node.observation
+        
+    def step_v2(self) -> dict:
         """Query the LM, execute the action, return the observation."""
         if self.tree_node.is_terminating:
             self._create_pseudo_root()
@@ -301,7 +809,6 @@ class TreeSearchAgent(RewardGuidedAgent):
                         n.prune()
                         # Prune terminating actions in phase 1. Because there's no modifications yet.
                         
-                        
             self._update_tree(tree_nodes)
 
         self.tree_node.visits += 1
@@ -313,7 +820,7 @@ class TreeSearchAgent(RewardGuidedAgent):
             if self.config.selection_scope == "local":
                 self.frontier.clear() # Local frontier only
             
-            if self.config.selection_scope == "global" and (self.n_submissions >= 2) and self.phase == 2:
+            if self.config.selection_scope == "global" and (self.n_submissions >= self.config.sub_thres) and self.phase == 2:
                 instance_logger.debug(":: Switching to phase 3: Allowing terminating actions.")
                 self.phase = 3  # Switch to phase 3 after 50% of steps
                 candidates = [
@@ -321,7 +828,6 @@ class TreeSearchAgent(RewardGuidedAgent):
                     if n.merged_value is not None
                     and n.visible
                     and not n.executed
-                    and n.id != self.tree_root.id
                     and n.is_terminating
                     and self.is_promising(n)
                     and n.parent.id != self.tree_node.id
@@ -330,6 +836,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                 self._update_frontier(candidates)
                 self.add_message("system", "Switching to phase 3: Allowing terminating actions.")
                 # TODO: May do more sophisticated checks for choosing the best terminating node
+                # Compare test status?
                 
             if self.config.selection_scope == "local" or self.tree_node.visits == 1: # Local or First visit
                 unexecuted = [
@@ -356,6 +863,9 @@ class TreeSearchAgent(RewardGuidedAgent):
                 (self.n_expanded >= 2*self.config.step_limit/3)
             ):
                 self._switch_to_phase_2()
+                
+            if self.config.selection_scope == "global" and self.phase == 2 and self.n_modifications == 0 and self.n_expanded >= 4*self.config.step_limit/5 and self.frontier.budget > 2:
+                self.frontier.reduce_budget() # Try hard to find some modification actions if we haven't found any yet in phase 2
                  
             
             if not self.frontier.empty():
@@ -474,7 +984,7 @@ class TreeSearchAgent(RewardGuidedAgent):
             self.n_prune += 1
             instance_logger.debug(f"Queue size {self.frontier.length()}. Tree pruned.")
         else:
-            instance_logger.debug(f"Queue size {self.frontier.length()}. Adding new actions...")
+            instance_logger.debug(f"Queue size {self.frontier.length()}. Adding new {len(tree_nodes)} actions...")
             
         # PRUNE READ Action
         # best_node = max(tree_nodes, key=lambda x: x.merged_value)

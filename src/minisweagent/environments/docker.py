@@ -66,8 +66,6 @@ class DockerEnvironment:
             "-d",
             "--name",
             container_name,
-            "--entrypoint",
-            "/bin/bash",
             "-w",
             self.config.cwd,
             *self.config.run_args,
@@ -76,6 +74,7 @@ class DockerEnvironment:
         if "swebench" in self.config.image.lower():
             cmd.extend(["sleep", self.config.container_timeout])
         else:
+            cmd.extend(["--entrypoint", "/bin/bash"])
             cmd.extend(["-c", f"sleep {self.config.container_timeout}"])
         self.logger.debug(f"Starting container with command: {shlex.join(cmd)}")
         result = subprocess.run(

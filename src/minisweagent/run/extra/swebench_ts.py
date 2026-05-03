@@ -3,7 +3,6 @@
 """Run mini-SWE-agent on SWE-bench instances in batch mode."""
 # Read this first: https://mini-swe-agent.com/latest/usage/swebench/  (usage docs)
 
-import concurrent.futures
 import json
 import random
 import re
@@ -15,9 +14,9 @@ from pathlib import Path
 import typer
 import yaml
 from datasets import load_dataset
+from rich.live import Live
 from rich.markup import escape as rich_escape
 from jinja2 import StrictUndefined, Template
-from rich.live import Live
 
 from minisweagent import Environment
 from minisweagent.agents.default import DefaultAgent
@@ -198,8 +197,10 @@ def get_reproduction_patch_for_instance(reproductions_dir: Path, instance_id: st
         return ""
     with _REPRODUCTION_LOCK:
         reproductions_data = json.loads(reproductions_file.read_text())
+        
     for reproduction_result in reproductions_data:
         if reproduction_result.get("instance_id") == instance_id:
+            # print(reproduction_result.get("reproduction_patch", "")[:200])
             return reproduction_result.get("reproduction_patch", "")
     return ""
 
@@ -211,19 +212,17 @@ def reproduce_instance(
     config: dict,
     repro_config: dict,
     progress_manager: RunBatchProgressManager,
-) -> None:
+) -> str | None:
     """Reproduce a single SWEBench instance using SingleActionAgent."""
     instance_id = instance["instance_id"]
     instance_dir = output_dir / instance_id
     
-    # Clear existing reproduction files
-    remove_from_reproductions_file(reproductions_dir, instance_id)
-    (instance_dir / f"{instance_id}.reproduction.traj.json").unlink(missing_ok=True)
+    # Keep existing reproduction entry until we have a replacement result.
+    # (instance_dir / f"{instance_id}.reproduction.traj.json").unlink(missing_ok=True)
     
     model = get_model(config=repro_config.get("model", {}))
     task = instance["problem_statement"]
     
-    progress_manager.on_instance_start(instance_id)
     progress_manager.update_instance_status(instance_id, "[Reproduction] Pulling/starting docker")
     
     agent = None
@@ -248,6 +247,9 @@ def reproduce_instance(
             **repro_config.get("agent", {}),
         )
         exit_status, result = agent.run(task)
+        if result and not result.lstrip().startswith("diff --git"):
+            raise ValueError(f"Invalid reproduction patch format for instance {instance_id}: {result[:200]}")
+        update_reproductions_file(reproductions_dir, instance_id, model.config.model_name, result)
     except Exception as e:
         logger.error(f"Error reproducing instance {rich_escape(instance_id)}: {rich_escape(str(e))}", exc_info=True)
         exit_status, result = type(e).__name__, str(e)
@@ -266,9 +268,8 @@ def reproduce_instance(
         if agent is not None and hasattr(agent, 'tree_root') and agent.tree_root is not None:
             with (instance_dir / f"{instance_id}.reproduction.tree.json").open("w", encoding="utf-8") as f:
                 json.dump(agent.tree_root.to_tree(), f, indent=2, ensure_ascii=False)
-        
-        update_reproductions_file(reproductions_dir, instance_id, model.config.model_name, result)
-        progress_manager.on_instance_end(instance_id, exit_status)
+
+    return exit_status
 
 
 def process_instance(
@@ -277,13 +278,12 @@ def process_instance(
     config: dict,
     progress_manager: RunBatchProgressManager,
     reproduction_patch: str = "",
-) -> None:
+) -> str | None:
     """Process a single SWEBench instance."""
     instance_id = instance["instance_id"]
     instance_dir = output_dir / instance_id
-    # avoid inconsistent state if something here fails and there's leftover previous files
-    remove_from_preds_file(output_dir / "preds.json", instance_id)
-    (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
+    # Keep existing prediction entry until we have a replacement result.
+    # (instance_dir / f"{instance_id}.traj.json").unlink(missing_ok=True)
     model = get_model(config=config.get("model", {}))
     reward_config = config.get("reward_model", {})
     reward_model = RewardModel(
@@ -293,7 +293,6 @@ def process_instance(
     )
     task = instance["problem_statement"]
 
-    progress_manager.on_instance_start(instance_id)
     progress_manager.update_instance_status(instance_id, "[Fixer] Pulling/starting docker")
 
     agent = None
@@ -318,6 +317,7 @@ def process_instance(
             **agent_config,
         )
         exit_status, result = agent.run(task)
+        update_preds_file(output_dir / "preds.json", instance_id, model.config.model_name, result)
     except Exception as e:
         logger.error(f"Error processing instance {rich_escape(instance_id)}: {rich_escape(str(e))}", exc_info=True)
         exit_status, result = type(e).__name__, str(e)
@@ -336,9 +336,8 @@ def process_instance(
         if agent is not None:
             with (instance_dir / f"{instance_id}.tree.json").open("w", encoding="utf-8") as f:
                 json.dump(agent.tree_root.to_tree(), f, indent=2, ensure_ascii=False)
-            
-        update_preds_file(output_dir / "preds.json", instance_id, model.config.model_name, result)
-        progress_manager.on_instance_end(instance_id, exit_status)
+
+    return exit_status
 
 
 def filter_instances(
@@ -376,7 +375,7 @@ def main(
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     redo_existing_repro: bool = typer.Option(False, "--redo-existing-repro", help="Redo existing reproduction instances", rich_help_panel="Data selection"),
     reproduce_only: bool = typer.Option(False, "--reproduce-only", help="Only run reproduction stage, skip fixing", rich_help_panel="Reproduction"),
-    config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_ts.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
+    config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_ts_2.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
     repro_config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_repro.yaml", "--repro-config", help="Path to reproduction config file", rich_help_panel="Reproduction"),
 ) -> None:
@@ -416,44 +415,45 @@ def main(
     
     
     
-    if not redo_existing:
-        # Check for existing fix results
-        if (output_path / "preds.json").exists():
-            existing_results = json.loads((output_path / "preds.json").read_text())
-            existing_instance_ids = set(existing_results.keys())
-            redo_instance_ids = {
-                instance_id
-                for instance_id, instance_result in existing_results.items()
-                if should_redo_existing_instance(instance_result)
-            }
-            skip_instance_ids = existing_instance_ids - redo_instance_ids
-            if skip_instance_ids:
-                logger.info(
-                    f"Skipping {len(skip_instance_ids)} existing fix instances and redoing {len(redo_instance_ids)} instances with invalid model_patch values"
-                )
-            instances_to_process = [instance for instance in instances_to_process if instance["instance_id"] not in skip_instance_ids]
-        
-        # Check for existing reproduction results
-        reproductions_file = reproductions_dir / "reproductions.json"
-        if not redo_existing_repro and reproductions_file.exists():
-            reproductions_data = json.loads(reproductions_file.read_text())
-            existing_repro_ids = {r.get("instance_id") for r in reproductions_data}
-            redo_repro_ids = {
-                r.get("instance_id")
-                for r in reproductions_data
-                if should_redo_existing_reproduction(r)
-            }
-            skip_repro_ids = existing_repro_ids - redo_repro_ids
-            if skip_repro_ids:
-                logger.info(f"Skipping {len(skip_repro_ids)} existing reproduction instances")
-            instances_to_reproduce = [instance for instance in instances_to_reproduce if instance["instance_id"] not in skip_repro_ids]
+    # Check for existing fix results
+    if not redo_existing and (output_path / "preds.json").exists():
+        existing_results = json.loads((output_path / "preds.json").read_text())
+        existing_instance_ids = set(existing_results.keys())
+        redo_instance_ids = {
+            instance_id
+            for instance_id, instance_result in existing_results.items()
+            if should_redo_existing_instance(instance_result)
+        }
+        skip_instance_ids = existing_instance_ids - redo_instance_ids
+        if skip_instance_ids:
+            logger.info(
+                f"Skipping {len(skip_instance_ids)} existing fix instances and redoing {len(redo_instance_ids)} instances with invalid model_patch values"
+            )
+        instances_to_process = [instance for instance in instances_to_process if instance["instance_id"] not in skip_instance_ids]
+
+    # Check for existing reproduction results; this is controlled separately from redo_existing.
+    reproductions_file = reproductions_dir / "reproductions.json"
+    if not redo_existing_repro and reproductions_file.exists():
+        reproductions_data = json.loads(reproductions_file.read_text())
+        existing_repro_ids = {r.get("instance_id") for r in reproductions_data}
+        redo_repro_ids = {
+            r.get("instance_id")
+            for r in reproductions_data
+            if should_redo_existing_reproduction(r)
+        }
+        skip_repro_ids = existing_repro_ids - redo_repro_ids
+        if skip_repro_ids:
+            logger.info(f"Skipping {len(skip_repro_ids)} existing reproduction instances")
+        instances_to_reproduce = [instance for instance in instances_to_reproduce if instance["instance_id"] not in skip_repro_ids]
     
     # Log processing plan
     if reproduce_only:
         logger.info(f"Running in reproduction-only mode on {len(instances_to_reproduce)} instances...")
         instances_to_process = []
     else:
-        logger.info(f"Running in two-stage mode: reproduction on {len(instances_to_reproduce)} instances, then fix on {len(instances_to_process)} instances...")
+        logger.info(
+            f"Running in per-instance mode: reproduction on {len(instances_to_reproduce)} instances and fix on {len(instances_to_process)} instances..."
+        )
 
     config_path = get_config_path(config_spec)
     logger.info(f"Loading agent config from '{config_path}'")
@@ -467,73 +467,70 @@ def main(
 
     
 
-    def process_futures(futures: dict[concurrent.futures.Future, str]):
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                future.result()
-            except concurrent.futures.CancelledError:
-                pass
-            except Exception as e:
-                instance_id = futures[future]
-                logger.error(f"Error in future for instance {rich_escape(instance_id)}: {rich_escape(str(e))}", exc_info=True)
+    if workers != 1:
+        logger.info(
+            "Per-instance mode is sequential (reproduce -> fix for each instance); ignoring workers=%d",
+            workers,
+        )
 
-    # Stage 1: Reproduction
-    if instances_to_reproduce:
-        logger.info(f"[Stage 1/2] Running reproduction on {len(instances_to_reproduce)} instances...")
-        progress_manager_repro = RunBatchProgressManager(len(instances_to_reproduce), output_path / f"reproduction_statuses_{time.time()}.yaml")
-        
-        with Live(progress_manager_repro.render_group, refresh_per_second=4):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                futures_repro = {
-                    executor.submit(reproduce_instance, instance, output_path, reproductions_dir, config, repro_config, progress_manager_repro): instance["instance_id"]
-                    for instance in instances_to_reproduce
-                }
-                try:
-                    process_futures(futures_repro)
-                except KeyboardInterrupt:
-                    logger.info("Cancelling all pending reproduction jobs. Press ^C again to exit immediately.")
-                    for future in futures_repro:
-                        if not future.running() and not future.done():
-                            future.cancel()
-                    process_futures(futures_repro)
-        logger.info("[Stage 1/2] Reproduction complete.")
-    
-    # Stage 2: Fixing
-    if instances_to_process:
-        if instances_to_reproduce:
-            logger.info(f"[Stage 2/2] Running fix on {len(instances_to_process)} instances...")
-        else:
-            logger.info(f"Running fix on {len(instances_to_process)} instances...")
-        
-        progress_manager = RunBatchProgressManager(len(instances_to_process), output_path / f"fixer_statuses_{time.time()}.yaml")
+    repro_ids = {instance["instance_id"] for instance in instances_to_reproduce}
+    process_ids = {instance["instance_id"] for instance in instances_to_process}
 
-        with Live(progress_manager.render_group, refresh_per_second=4):
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                futures = {
-                    executor.submit(
-                        process_instance,
-                        instance,
-                        output_path,
-                        config,
-                        progress_manager,
-                        get_reproduction_patch_for_instance(reproductions_dir, instance["instance_id"]),
-                    ): instance[
-                        "instance_id"
-                    ]
-                    for instance in instances_to_process
-                }
-                try:
-                    process_futures(futures)
-                except KeyboardInterrupt:
-                    logger.info("Cancelling all pending jobs. Press ^C again to exit immediately.")
-                    for future in futures:
-                        if not future.running() and not future.done():
-                            future.cancel()
-                    process_futures(futures)
-        
-        if instances_to_reproduce:
-            logger.info("[Stage 2/2] Fixing complete.")
+    total_progress_tasks = sum(
+        1 for instance in instances if instance["instance_id"] in repro_ids or instance["instance_id"] in process_ids
+    )
+    progress_manager = RunBatchProgressManager(
+        total_progress_tasks,
+        output_path
+        / (
+            f"reproduction_statuses_{time.time()}.yaml"
+            if reproduce_only
+            else f"run_statuses_{time.time()}.yaml"
+        ),
+    )
 
+    if reproduce_only:
+        logger.info("Running per-instance mode in reproduction-only flow...")
+    else:
+        logger.info("Running per-instance mode: reproduction then fix for each instance...")
+
+    with Live(progress_manager.render_group, refresh_per_second=4):
+        for idx, instance in enumerate(instances, start=1):
+            instance_id = instance["instance_id"]
+            do_repro = instance_id in repro_ids
+            do_fix = (not reproduce_only) and (instance_id in process_ids)
+
+            if not do_repro and not do_fix:
+                continue
+
+            logger.info(
+                f"[{idx}/{len(instances)}] Processing {rich_escape(instance_id)} "
+                f"(repro={'yes' if do_repro else 'no'}, fix={'yes' if do_fix else 'no'})"
+            )
+
+            progress_manager.on_instance_start(instance_id)
+            final_exit_status = None
+
+            if do_repro:
+                final_exit_status = reproduce_instance(
+                    instance,
+                    output_path,
+                    reproductions_dir,
+                    config,
+                    repro_config,
+                    progress_manager,
+                )
+
+            if do_fix:
+                final_exit_status = process_instance(
+                    instance,
+                    output_path,
+                    config,
+                    progress_manager,
+                    get_reproduction_patch_for_instance(reproductions_dir, instance_id),
+                )
+
+            progress_manager.on_instance_end(instance_id, final_exit_status)
 
 if __name__ == "__main__":
     app()

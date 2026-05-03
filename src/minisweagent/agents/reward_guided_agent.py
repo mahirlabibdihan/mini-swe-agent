@@ -291,12 +291,17 @@ EOF
     
     def _get_test_status(self):
         """Apply reproduction patch, run tests, and return parsed test entries from test_status.json."""
-        reproduction_patch = (self.config.reproduction_patch or "").strip()
-        if not reproduction_patch:
+        raw_patch = self.config.reproduction_patch or ""
+        if not raw_patch.strip():
             return None
-        if not reproduction_patch.startswith("diff --git"):
+
+        # Preserve patch body as-is; only normalize encoding/line endings.
+        reproduction_patch = raw_patch.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+        if not reproduction_patch.lstrip().startswith("diff --git"):
             instance_logger.debug(">> Skipping test status: reproduction patch is missing or not a git diff.")
             return None
+        # git apply expects a newline-terminated patch file.
+        patch_content = reproduction_patch if reproduction_patch.endswith("\n") else reproduction_patch + "\n"
 
         patch_file = ".mini_swe_reproduction.patch"
         patch_delim = "MINI_SWE_REPRO_PATCH_EOF"
@@ -309,7 +314,7 @@ EOF
             copy_to_container = getattr(self.env, "copy_to_container", None)
             if callable(copy_to_container):
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False, encoding="utf-8") as tmp_patch:
-                    tmp_patch.write(reproduction_patch)
+                    tmp_patch.write(patch_content)
                     tmp_patch_path = Path(tmp_patch.name)
                 try:
                     copy_to_container(tmp_patch_path, patch_file)
@@ -317,7 +322,7 @@ EOF
                     tmp_patch_path.unlink(missing_ok=True)
             else:
                 self.env.execute(
-                    f"cat <<'{patch_delim}' > {patch_file}\n{reproduction_patch}\n{patch_delim}"
+                    f"cat <<'{patch_delim}' > {patch_file}\n{patch_content}{patch_delim}"
                 )
 
             applied_patch = False
@@ -580,6 +585,11 @@ EOF
         # return total_score / count if count > 0 else 0.0
         return max_score
         
+    def _get_root_commit(self) -> str:
+        if self.env.config.clean_start:
+            return self.tree_root.children[0].commit
+        return self.tree_root.commit
+    
     def _generate_new_node(self, i) -> TreeSearchNode:
         # get_observation action to get observation
         potential_termination = False
@@ -629,7 +639,8 @@ EOF
                 else:
                     # Be-aware of potential terminating actions
                     if potential_termination:
-                        res = self.env.execute(f"git checkout {self.tree_root.commit} && git restore --source {self.tree_node.commit} .")
+                        res = self.env.execute(f"git checkout {self._get_root_commit()} && git restore --source {self.tree_node.commit} .")
+                            
                         if res.get("returncode", 0) != 0:
                             instance_logger.debug(">> Warning: Failed to restore to the current node's commit before executing potential terminating action.")
                             instance_logger.debug(f"Error details: {res}")  
@@ -641,7 +652,7 @@ EOF
                         instance_logger.debug(">> Terminating action detected.")
                         new_node.is_terminating = True   
                         
-                        if self.tree_node.commit == self.tree_root.commit:
+                        if self.tree_node.commit == self._get_root_commit():
                             instance_logger.debug(">> Warning: Terminating action detected without any modifications.")
                             new_node.observation = "Error: Submission detected without any modifications."
                             new_node.raw_observation = output
@@ -753,10 +764,10 @@ EOF
             new_node.observation = observation
             new_node.raw_observation = raw_observation
             
-        if not new_node.is_terminating and new_node.level >= self.config.depth_limit:
-            instance_logger.debug(f"Non-terminating Node {new_node.last_action['command']} exceeded max depth {self.config.depth_limit}, skipping...")
-            new_node.prune()
-            return None
+        # if not new_node.is_terminating and new_node.level >= self.config.depth_limit:
+        #     instance_logger.debug(f"Non-terminating Node {new_node.last_action['command']} exceeded max depth {self.config.depth_limit}, skipping...")
+        #     new_node.prune()
+        #     return None
         
         # new_node.value = self._evaluate_node(new_node)
         new_node.parent = self.tree_node
@@ -789,14 +800,14 @@ EOF
         return nodes
     
     def _repo_has_changes_with_main(self):
-        if self.tree_node.parent.commit == self.tree_root.commit:
+        if self.tree_node.parent.commit == self._get_root_commit():
             return False
-        output = self.env.execute(f"git diff {self.tree_root.commit}..{self.tree_node.parent.commit}")
+        output = self.env.execute(f"git diff {self._get_root_commit()}..{self.tree_node.parent.commit}")
 
         diff_text = output.get("output", "").strip()
 
         if not diff_text:
-            instance_logger.debug(f"No change between {self.tree_root.commit} and {self.tree_node.parent.commit}.")
+            instance_logger.debug(f"No change between {self._get_root_commit()} and {self.tree_node.parent.commit}.")
             raise Exception(">> No changes detected to stage to main branch.")
         else:
             # instance_logger.debug(">> Staging changes to main branch before submission...")
@@ -813,13 +824,9 @@ EOF
             
     def _stage_to_main_branch(self):
         # self._repo_has_changes_with_main()
-        if self.env.config.clean_start:
-            response = self.env.execute(f"git checkout {self.tree_root.children[0].commit} && git restore --source {self.tree_node.parent.commit} .")
-            self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.children[0].commit} && git restore --source {self.tree_node.parent.commit} .\n```")
-        else:
-            response = self.env.execute(f"git checkout {self.tree_root.commit} && git restore --source {self.tree_node.parent.commit} .")
-            self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self.tree_root.commit} && git restore --source {self.tree_node.parent.commit} .\n```")
-            
+        response = self.env.execute(f"git checkout {self._get_root_commit()} && git restore --source {self.tree_node.parent.commit} .")
+        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self._get_root_commit()} && git restore --source {self.tree_node.parent.commit} .\n```")
+        
         if response.get("returncode", 0) != 0:
             instance_logger.debug(">> Warning: Failed to stage changes to main branch before submission.")
             instance_logger.debug(f"Error details: {response}")
@@ -841,6 +848,7 @@ EOF
             
         tree_nodes = self._generate_new_nodes(self.config.branching_factor)
         tree_nodes = self._update_tree(tree_nodes)
+        
         self._update_frontier(tree_nodes)
         best_node = self._select_action()
         self.tree_node = best_node
@@ -881,6 +889,10 @@ EOF
             self.tree_node.commit = self._get_commit_hash() #  Can't we just keep the same commit if code isn't modified?
             instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
 
+        if self.tree_node.level == self.config.depth_limit:
+            instance_logger.debug(f">> Reached max depth limit at node with action: {self.tree_node.last_action['command']}. Marking as leaf node.")
+            raise Exception(">> Reached max depth limit. Stopping expansion at this node.")
+            
         return self.tree_node.observation
     
     def _calculate_relevance(self, action, observation) -> float:
@@ -931,16 +943,20 @@ EOF
         
         return formatted_trajectory.strip()
     
-    def is_test_command(self, command: str) -> bool:
+    def is_test_command(self, node: str) -> bool:
         import re
         TEST_CMD = re.compile(
             r'(^|\s)(pytest|python\s+-m\s+pytest|python\s+-m\s+unittest|unittest|runtests)(\s|$)'
         )
-        return bool(TEST_CMD.search(command))
+        return bool(TEST_CMD.search(node.last_action["command"]))
     
-    def is_test_failure(self, action: str, returncode: int) -> bool:
-        if self.is_test_command(action) and returncode == 1:
+    def is_test_failure(self, node: TreeSearchNode, returncode: int) -> bool:
+        # OLD:
+        if self.is_test_command(node) and returncode == 1:
             return True
+        # NEW:
+        # if node.last_action["type"] == "test" and returncode == 1:
+        #     return True
         return False
 
     def _normalize_test_status_entries(self, tests) -> dict[str, str]:
@@ -960,16 +976,26 @@ EOF
             normalized[name] = status
         return normalized
 
-    def _compare_test_statuses(self, previous_tests, current_tests) -> int:
-        """Return signed status delta: positive means better, negative means worse."""
+    def _baseline_failure_count(self) -> int:
+        """Return the number of failing tests in the baseline reproduction status."""
+        baseline_tests = []
+        if getattr(self, "tree_root", None) is not None and getattr(self.tree_root, "children", None):
+            baseline_tests = getattr(self.tree_root.children[0], "test_status", []) or []
+
+        baseline_map = self._normalize_test_status_entries(baseline_tests)
+        failure_count = sum(1 for status in baseline_map.values() if status in {"FAILED", "ERROR"})
+        return max(1, failure_count)
+
+    def _compare_test_statuses(self, previous_tests, current_tests) -> float:
+        """Return normalized signed status delta: positive means better, negative means worse."""
         prev_map = self._normalize_test_status_entries(previous_tests)
         curr_map = self._normalize_test_status_entries(current_tests)
         if not prev_map or not curr_map:
-            return 0
+            return 0.0
 
         common_tests = set(prev_map.keys()) & set(curr_map.keys())
         if not common_tests:
-            return 0
+            return 0.0
 
         status_score = {
             "ERROR": 0,
@@ -981,7 +1007,7 @@ EOF
         delta = 0
         for test_name in common_tests:
             delta += status_score[curr_map[test_name]] - status_score[prev_map[test_name]]
-        return delta
+        return delta / self._baseline_failure_count()
 
     def _test_status_component(self, current_tests) -> float:
         """Return a normalized test-status component in [0, 1]."""
@@ -999,6 +1025,40 @@ EOF
         # For terminating actions, use absolute quality only.
         return sum(status_score[s] for s in curr_map.values()) / (3.0 * len(curr_map))
     
+    def _extract_changed_files(self, patch_text: str):
+        files = []
+        for line in patch_text.splitlines():
+            if line.startswith("diff --git"):
+                parts = line.split()
+                if len(parts) >= 4:
+                    # take the "b/..." path
+                    files.append(parts[3][2:])
+        return files
+    
+    def _adjust_terminating_reward(self, node, value):
+        test_component = self._test_status_component(node.test_status)
+        final_value = 0.7 * value + 0.3 * test_component
+        instance_logger.debug(
+            f">> Terminating test-status adjustment: {value:.4f} + test({test_component:.4f}) -> {final_value:.4f}"
+        )
+        new_value = final_value
+        
+        patch = node.observation
+        modified_files = self._extract_changed_files(patch)
+        # Now calculate average reward of modified files based on relevance dict
+        if len(modified_files) > 0:
+            file_rewards = [
+                self.relevance_dict[f]
+                for f in modified_files
+                if f in self.relevance_dict
+            ]
+            
+            if len(file_rewards) > 0:
+                avg_file_reward = sum(file_rewards) / len(file_rewards)
+                new_value = 0.7 * new_value + 0.3 * avg_file_reward
+                
+        return new_value
+    
     def _evaluate_node(self, node):
         if node.value is not None:
             return node.value
@@ -1012,11 +1072,13 @@ EOF
         if node.last_action["command"] is not None:
             if node.is_terminating or node.invalid_termination:
                 cmd_type = "submit"
-            elif "[EDIT]" in node.last_action["thought"] or node.modifies_code:
+            elif "[EDIT]" in node.last_action["thought"]: #  or node.modifies_code --- testing may have side effects. Can ignore that.
                 cmd_type = "edit"
             # elif self.is_test_command(node.last_action["command"]):
             elif "[TEST]" in node.last_action["thought"] or ("[READ]" not in node.last_action["thought"] and self.is_test_command(node.last_action["command"])): # TEMP: Since test command detection is not very robust, we can also use a heuristic based on the thought content to identify potential test commands for better reward adjustment.
                 cmd_type = "test"
+            elif node.modifies_code:
+                cmd_type = "edit"
         else:
             if "[SUBMIT]" in node.last_action["thought"]:
                 cmd_type = "submit"
@@ -1028,7 +1090,8 @@ EOF
         gen_type = 'edit' if '[EDIT]' in node.last_action['thought'] else 'test' if '[TEST]' in node.last_action['thought'] else 'submit' if '[SUBMIT]' in node.last_action['thought'] else 'read'    
         if gen_type != cmd_type:
             instance_logger.debug(f">> Warning: Command type mismatch. Thought indicates {gen_type} but detected as {cmd_type}.")
-
+            
+        node.last_action['type'] = cmd_type
         node.value = self.reward_model.compute_reward(node, self.task, cmd_type=cmd_type)
         if node.last_action["command"] is None:
             # Penalize invalid actions
@@ -1045,11 +1108,11 @@ EOF
             instance_logger.debug(f">> Invalid-action reward adjustment: {node.value:.4f} -> {new_value:.4f}")
             node.value = new_value
             
-        elif node.raw_observation is not None and not self.is_test_failure(node.last_action["command"], node.raw_observation.get("returncode", 0)) and node.raw_observation.get("returncode", 0) != 0:
+        elif node.raw_observation is not None and not self.is_test_failure(node, node.raw_observation.get("returncode", 0)) and node.raw_observation.get("returncode", 0) != 0:
             penalty = 1
             curr = node
             while curr is not None:
-                if curr.raw_observation is not None and not self.is_test_failure(curr.last_action["command"], curr.raw_observation.get("returncode", 0)) and curr.raw_observation.get("returncode", 0) != 0:
+                if curr.raw_observation is not None and not self.is_test_failure(curr, curr.raw_observation.get("returncode", 0)) and curr.raw_observation.get("returncode", 0) != 0:
                     penalty *= 0.8
                 else:
                     break
@@ -1100,28 +1163,30 @@ EOF
                 
             status_delta = self._compare_test_statuses(self.tree_node.test_status, node.test_status)
             if status_delta < 0:
-                penalty = max(0.7, 1.0 + 0.4 * status_delta)
+                penalty = max(0.7, 1.0 + 0.3 * status_delta)
                 new_value = node.value * penalty
                 instance_logger.debug(
                     f">> Test-status regression adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
                 )
                 node.value = new_value
             elif status_delta > 0:
-                boost = min(1.5, 1.0 + 0.4 * status_delta)
+                boost = min(1.4, 1.0 + 0.3 * status_delta)
                 new_value = node.value * boost
                 instance_logger.debug(
                     f">> Test-status improvement adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
                 )
                 node.value = new_value
-            
-                
-                                    
+        
         elif node.raw_observation is not None and node.raw_observation.get("output").strip() == "":
             # Penalize read actions that produce no output
             new_value = 0.7 * node.value
             instance_logger.debug(f">> Empty-output reward adjustment: {node.value:.4f} -> {new_value:.4f}")
             node.value = new_value
-        elif (node.last_action["command"] is None or not self.is_test_command(node.last_action["command"])) and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
+        
+        # OLD:
+        elif (node.last_action["command"] is None or not self.is_test_command(node)) and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
+        # NEW:
+        # elif (node.last_action["command"] is None or node.last_action["type"] != "test") and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
             # Penalize read actions that produce excessive output
             penalty = math.exp(-(len(node.raw_observation.get("output").strip()) - 5000) / 3000.0)
             new_value = max(0.8, penalty) * node.value
@@ -1148,13 +1213,8 @@ EOF
         instance_logger.debug(f">> Similarity reward adjustment: {node.value:.4f} -> {new_value:.4f}")
 
         if node.is_terminating and not node.invalid_termination:
-            test_component = self._test_status_component(node.test_status)
-            final_value = 0.7 * new_value + 0.3 * test_component
-            instance_logger.debug(
-                f">> Terminating test-status adjustment: {new_value:.4f} + test({test_component:.4f}) -> {final_value:.4f}"
-            )
-            new_value = final_value
-        
+            new_value = self._adjust_terminating_reward(node, new_value)
+            
         end_time = time.time()
         instance_logger.debug(f"=>> Reward: {new_value:.4f} | Time taken: {end_time - start_time:.2f} seconds")
         return new_value

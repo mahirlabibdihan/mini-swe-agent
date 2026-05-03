@@ -1,5 +1,7 @@
 import json
 import tempfile
+import threading
+from queue import Queue
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -121,6 +123,60 @@ def test_litellm_model_cost_validation_zero_cost():
 
             assert "Cost must be > 0.0, got 0.0" in str(exc_info.value)
             assert "MSWEA_COST_TRACKING='ignore_errors'" in str(exc_info.value)
+
+
+def test_litellm_model_serializes_concurrent_calls():
+    """Test that concurrent calls do not enter litellm at the same time."""
+    model = LitellmModel(model_name="gpt-4o", cost_tracking="ignore_errors")
+
+    active_calls = 0
+    max_active_calls = 0
+    call_lock = threading.Lock()
+    first_call_entered = threading.Event()
+    release_first_call = threading.Event()
+    results: Queue[str] = Queue()
+
+    def completion_side_effect(*args, **kwargs):
+        nonlocal active_calls, max_active_calls
+        with call_lock:
+            active_calls += 1
+            max_active_calls = max(max_active_calls, active_calls)
+            if active_calls > 1:
+                raise AssertionError("litellm.completion was entered concurrently")
+            first_call_entered.set()
+
+        release_first_call.wait(timeout=2)
+
+        with call_lock:
+            active_calls -= 1
+
+        mock_response = Mock()
+        mock_response.choices = [Mock(message=Mock(content="Test response"))]
+        mock_response.model_dump.return_value = {"test": "response"}
+        mock_response.usage = {"prompt_tokens": 1, "completion_tokens": 1}
+        return mock_response
+
+    def worker() -> None:
+        result = model.query([{"role": "user", "content": "test"}])
+        results.put(result["content"])
+
+    with (
+        patch("litellm.completion", side_effect=completion_side_effect),
+        patch("litellm.cost_calculator.completion_cost", return_value=0.01),
+    ):
+        thread1 = threading.Thread(target=worker)
+        thread2 = threading.Thread(target=worker)
+        thread1.start()
+        first_call_entered.wait(timeout=2)
+        thread2.start()
+        release_first_call.set()
+        thread1.join(timeout=2)
+        thread2.join(timeout=2)
+
+    assert thread1.is_alive() is False
+    assert thread2.is_alive() is False
+    assert max_active_calls == 1
+    assert sorted(results.get() for _ in range(results.qsize())) == ["Test response", "Test response"]
 
 
 def test_response_api_model_basic_query():

@@ -63,6 +63,19 @@ class PortkeyResponseAPIModel(PortkeyModel):
             cost = 0.0
         self.n_calls += 1
         self.cost += cost
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            if isinstance(usage, dict):
+                prompt_tokens = usage.get("prompt_tokens", 0)
+                completion_tokens = usage.get("completion_tokens", 0)
+            else:
+                prompt_tokens = getattr(usage, "prompt_tokens", 0)
+                completion_tokens = getattr(usage, "completion_tokens", 0)
+
+            if isinstance(prompt_tokens, int | float):
+                self.input_tokens += int(prompt_tokens)
+            if isinstance(completion_tokens, int | float):
+                self.output_tokens += int(completion_tokens)
         GLOBAL_MODEL_STATS.add(cost)
         return {
             "content": text,

@@ -1,0 +1,22 @@
+environment:
+  cwd: "/testbed"
+  timeout: 60
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: 'off'
+    TQDM_DISABLE: '1'
+  environment_class: docker
+
+framework:
+  step_limit: 30
+  cost_limit: 3.
+  depth_limit: 20
+  max_expansion: 5
+  frontier_budget: 4
+  selection_scope: "global"
+  epsilon: 0.3
+  candidates:
+    - swebench_ts.yaml
+    - swebench_ts.yaml

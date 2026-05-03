@@ -4,10 +4,12 @@ agent:
     Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).
 
     Include a THOUGHT section before your command where you explain your reasoning process.
+    Include a COMMAND_TYPE line before your command. It must be exactly one of: [READ], [EDIT], [TEST], [SUBMIT].
     Format your response as shown in <format_example>.
 
     <format_example>
     THOUGHT: Your reasoning and analysis here
+    COMMAND_TYPE: [READ]
     
     ```bash
     your_command_here
@@ -33,7 +35,8 @@ agent:
 
     For each response:
     1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish
-    2. Provide exactly ONE bash command to execute
+    2. Include a COMMAND_TYPE line with exactly one of: [READ], [EDIT], [TEST], [SUBMIT]
+    3. Provide exactly ONE bash command to execute
 
     ## Important Boundaries
     - MODIFY: Regular source code files in /app (this is the working directory for all your subsequent commands)
@@ -55,13 +58,15 @@ agent:
 
     Each response should include:
     1. A **THOUGHT** section where you explain your reasoning and plan
-    2. A single bash code block with your command
+    2. A **COMMAND_TYPE** line with exactly one of: [READ], [EDIT], [TEST], [SUBMIT]
+    3. A single bash code block with your command
 
     Format your responses like this:
 
     <format_example>
     THOUGHT: Here I explain my reasoning process, analysis of the current situation,
     and what I'm trying to accomplish with the command below.
+    COMMAND_TYPE: [WRITE]
 
     ```bash
     your_command_here
@@ -76,6 +81,7 @@ agent:
 
     **CRITICAL REQUIREMENTS:**
     - Your response SHOULD include a THOUGHT section explaining your reasoning
+    - Your response MUST include exactly one COMMAND_TYPE line with one of: [READ], [EDIT], [TEST], [SUBMIT]
     - Your response MUST include EXACTLY ONE bash code block
     - This bash block MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)
     - If you include zero or multiple bash blocks, or no command at all, YOUR RESPONSE WILL FAIL
@@ -86,6 +92,7 @@ agent:
     Example of a CORRECT response:
     <example_response>
     THOUGHT: I need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.
+    COMMAND_TYPE: [READ]
 
     ```bash
     ls -la
@@ -95,6 +102,7 @@ agent:
     Example of an INCORRECT response:
     <example_response>
     THOUGHT: I need to examine the codebase and then look at a specific file. I'll run multiple commands to do this.
+    COMMAND_TYPE: [READ]
 
     ```bash
     ls -la
@@ -207,10 +215,11 @@ agent:
   format_error_template: |
     Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.
 
-    Please format your action in triple backticks as shown in <response_example>.
+    Please include THOUGHT, COMMAND_TYPE ([READ]/[EDIT]/[TEST]/[SUBMIT]), and exactly one action in triple backticks as shown in <response_example>.
 
     <response_example>
-    Here are some thoughts about why you want to perform the action.
+    THOUGHT: Here are some thoughts about why you want to perform the action.
+    COMMAND_TYPE: [READ]
 
     ```bash
     <action>
@@ -252,7 +261,7 @@ environment:
   cwd: "/app"
   timeout: 120
   pull_timeout: 500
-  clean_start: false
+  clean_start: true
   env:
     PAGER: cat
     MANPAGER: cat

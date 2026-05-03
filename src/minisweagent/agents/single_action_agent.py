@@ -42,6 +42,7 @@ class SingleActionAgent(DefaultAgent):
         self.n_submissions = 0
         self.frontier = Frontier(budget=1)
         self.node_map = {}
+        self.all_node_map = {} # OLD:
         self.task = None
     
     def run(self, task: str, **kwargs) -> tuple[str, str]:
@@ -170,7 +171,8 @@ class SingleActionAgent(DefaultAgent):
             last_action={
                 "command": f"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached",
                 "thought": "THOUGHT: MAX STEPS REACHED\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
-                "extra": None
+                "extra": None,
+                "type": "submit"
             },
         )
         node.value = node.merged_value = 0.0
@@ -200,6 +202,7 @@ class SingleActionAgent(DefaultAgent):
             last_action=last_action,
         )
         self.node_map[node.id] = node
+        self.all_node_map[node.id] = node # OLD:
         return node
     
     def _reset(self):
