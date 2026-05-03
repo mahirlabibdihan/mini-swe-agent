@@ -1,0 +1,105 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..a68a50ce3
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,24 @@
++#!/bin/bash
++set -uo pipefail
++# Run pytest via an embedded Python script; ignore pytest non-zero exit so the script itself succeeds
++python3 - <<'PY' || true
++import json, sys
++from pathlib import Path
++import pytest
++
++class Collector:
++    def __init__(self):
++        self.results = []
++    def pytest_runtest_logreport(self, report):
++        if report.when == "call":
++            status = "PASSED" if report.passed else ("FAILED" if report.failed else "SKIPPED")
++            self.results.append({"name": report.nodeid, "status": status})
++
++collector = Collector()
++ret = pytest.main([str(Path("/testbed/test_marks.py"))], plugins=[collector])
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": collector.results}, indent=2))
++print("Wrote /testbed/test_status.json; pytest exit code:", ret)
++# exit with pytest's code inside python (will be ignored by the shell due to || true)
++sys.exit(ret)
++PY
++echo "run_test.sh completed"
+diff --git a/test_marks.py b/test_marks.py
+new file mode 100644
+index 000000000..25e41a7dc
+--- /dev/null
++++ b/test_marks.py
+@@ -0,0 +1,50 @@
++import pytest
++import itertools
++
++class BaseMeta(type):
++    @property
++    def pytestmark(self):
++        return (
++            getattr(self, "_pytestmark", []) +
++            list(itertools.chain.from_iterable(getattr(x, "_pytestmark", []) for x in self.__mro__))
++        )
++
++    @pytestmark.setter
++    def pytestmark(self, value):
++        self._pytestmark = value
++
++# --- Without metaclass: markers are attached to bases and MRO resolution may drop one ---
++class BaseNoMeta:
++    pass
++
++@pytest.mark.foo
++class Foo(BaseNoMeta):
++    pass
++
++@pytest.mark.bar
++class Bar(BaseNoMeta):
++    pass
++
++class TestNoMeta(Foo, Bar):
++    def test_marks_no_meta(self, request):
++        names = [m.name for m in request.node.iter_markers()]
++        # Expect both markers, but on many pytest versions MRO causes one to be lost,
++        # so this assertion reproduces the failure described in the PR.
++        assert 'foo' in names and 'bar' in names
++
++# --- With metaclass merging pytestmark from MRO: both markers should be present ---
++class BaseWithMeta(metaclass=BaseMeta):
++    pass
++
++@pytest.mark.foo
++class FooM(BaseWithMeta):
++    pass
++
++@pytest.mark.bar
++class BarM(BaseWithMeta):
++    pass
++
++class TestWithMeta(FooM, BarM):
++    def test_marks_with_meta(self, request):
++        names = [m.name for m in request.node.iter_markers()]
++        assert 'foo' in names and 'bar' in names
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..43a63faaf
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_marks.py::TestNoMeta::test_marks_no_meta",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_marks.py::TestWithMeta::test_marks_with_meta",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,301 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 0000000000..c9622bb617
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,124 @@
++#!/bin/bash
++set -u
++LOG=/tmp/repro_run.log
++: > "$LOG"
++
++echo "Installing Django 2.2..." >>"$LOG" 2>&1
++python3 -m pip install "Django==2.2.24" --quiet >>"$LOG" 2>&1 || true
++
++WORKDIR=/testbed/testproject
++rm -rf "$WORKDIR"
++mkdir -p "$WORKDIR"
++cd "$WORKDIR"
++
++# manage.py
++cat > manage.py <<'PY' 
++#!/usr/bin/env python
++import os, sys
++if __name__ == "__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "testproject.settings")
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
++PY
++chmod +x manage.py
++
++# project package
++mkdir -p testproject
++cat > testproject/__init__.py <<'PY'
++PY
++
++cat > testproject/settings.py <<'PY'
++SECRET_KEY = 'secret'
++INSTALLED_APPS = [
++    'django.contrib.auth',
++    'django.contrib.contenttypes',
++    'testapp1',
++    'testapp2',
++]
++DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3','NAME': ':memory:'}}
++MIDDLEWARE = []
++ROOT_URLCONF = ''
++USE_TZ = False
++DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
++PY
++
++# Create apps
++for app in testapp1 testapp2; do
++  mkdir -p $app/migrations
++  cat > $app/__init__.py <<'PY'
++PY
++  cat > $app/migrations/__init__.py <<'PY'
++PY
++  cat > $app/apps.py <<PY
++from django.apps import AppConfig
++class ${app.capitalize()}Config(AppConfig):
++    name = '$app'
++PY
++done
++
++# Initial models (another_app is UUIDField)
++cat > testapp2/models.py <<'PY'
++from django.db import models
++import uuid
++class App2(models.Model):
++    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
++    text = models.CharField(max_length=100)
++PY
++
++cat > testapp1/models.py <<'PY'
++from django.db import models
++import uuid
++class App1(models.Model):
++    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
++    text = models.CharField(max_length=100)
++    another_app = models.UUIDField(null=True, blank=True)
++PY
++
++# Run initial makemigrations
++echo "Running initial makemigrations..." >>"$LOG" 2>&1
++python3 manage.py makemigrations --noinput >>"$LOG" 2>&1 || true
++
++# Now change testapp1.another_app to ForeignKey to testapp2.App2
++cat > testapp1/models.py <<'PY'
++from django.db import models
++import uuid
++class App1(models.Model):
++    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
++    text = models.CharField(max_length=100)
++    another_app = models.ForeignKey('testapp2.App2', null=True, blank=True, on_delete=models.SET_NULL)
++PY
++
++# Run makemigrations again to create the AlterField migration
++echo "Running second makemigrations (after changing field to FK)..." >>"$LOG" 2>&1
++python3 manage.py makemigrations --noinput >>"$LOG" 2>&1 || true
++
++# Show migrations created
++echo "Listing migration files:" >>"$LOG" 2>&1
++find . -path "./*/migrations/*.py" -not -name "__init__.py" -print >>"$LOG" 2>&1 || true
++
++# Try to run migrate to trigger potential ValueError
++echo "Running migrate to apply migrations..." >>"$LOG" 2>&1
++python3 manage.py migrate --noinput --run-syncdb >>"$LOG" 2>&1 || true
++
++# Inspect log for the expected ValueError
++if grep -q "Related model 'testapp2.App2' cannot be resolved" "$LOG" || grep -q "ValueError: Related model 'testapp2.App2' cannot be resolved" "$LOG"; then
++  STATUS="FAILED"
++  MSG="Observed ValueError about unresolved related model (reproduced)"
++else
++  STATUS="PASSED"
++  MSG="Did not observe the expected ValueError"
++fi
++
++# Write test status JSON to /testbed/test_status.json
++python3 - <<PY
++import json, sys, pathlib
++res = {"tests": [{"name": "reproduce_django_uuid_to_fk::migration_resolution", "status": "$STATUS"}]}
++path = pathlib.Path("/testbed/test_status.json")
++path.write_text(json.dumps(res, indent=2))
++print("Wrote", path)
++PY
++
++echo "---- LOG BEGIN ----"
++tail -n +1 "$LOG" | sed -n '1,200p'
++echo "---- LOG END ----"
++echo "Result: $MSG"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e896c21cd1
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "reproduce_django_uuid_to_fk::migration_resolution",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testproject/manage.py b/testproject/manage.py
+new file mode 100755
+index 0000000000..362f4174a3
+--- /dev/null
++++ b/testproject/manage.py
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python
++import os, sys
++if __name__ == "__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "testproject.settings")
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
+diff --git a/testproject/testapp1/__init__.py b/testproject/testapp1/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testproject/testapp1/apps.py b/testproject/testapp1/apps.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testproject/testapp1/migrations/0001_initial.py b/testproject/testapp1/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..64425c6de3
+--- /dev/null
++++ b/testproject/testapp1/migrations/0001_initial.py
+@@ -0,0 +1,23 @@
++# Generated by Django 2.2.24 on 2026-04-23 06:49
++
++from django.db import migrations, models
++import uuid
++
++
++class Migration(migrations.Migration):
++
++    initial = True
++
++    dependencies = [
++    ]
++
++    operations = [
++        migrations.CreateModel(
++            name='App1',
++            fields=[
++                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('text', models.CharField(max_length=100)),
++                ('another_app', models.UUIDField(blank=True, null=True)),
++            ],
++        ),
++    ]
+diff --git a/testproject/testapp1/migrations/0002_auto_20260423_0649.py b/testproject/testapp1/migrations/0002_auto_20260423_0649.py
+new file mode 100644
+index 0000000000..6383c0f41d
+--- /dev/null
++++ b/testproject/testapp1/migrations/0002_auto_20260423_0649.py
+@@ -0,0 +1,19 @@
++# Generated by Django 2.2.24 on 2026-04-23 06:49
++
++from django.db import migrations, models
++import django.db.models.deletion
++
++
++class Migration(migrations.Migration):
++
++    dependencies = [
++        ('testapp1', '0001_initial'),
++    ]
++
++    operations = [
++        migrations.AlterField(
++            model_name='app1',
++            name='another_app',
++            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='testapp2.App2'),
++        ),
++    ]
+diff --git a/testproject/testapp1/migrations/__init__.py b/testproject/testapp1/migrations/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testproject/testapp1/models.py b/testproject/testapp1/models.py
+new file mode 100644
+index 0000000000..836a503b4b
+--- /dev/null
++++ b/testproject/testapp1/models.py
+@@ -0,0 +1,6 @@
++from django.db import models
++import uuid
++class App1(models.Model):
++    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
++    text = models.CharField(max_length=100)
++    another_app = models.ForeignKey('testapp2.App2', null=True, blank=True, on_delete=models.SET_NULL)
+diff --git a/testproject/testapp2/__init__.py b/testproject/testapp2/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testproject/testapp2/apps.py b/testproject/testapp2/apps.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testproject/testapp2/migrations/0001_initial.py b/testproject/testapp2/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..15c5e65b05
+--- /dev/null
++++ b/testproject/testapp2/migrations/0001_initial.py
+@@ -0,0 +1,22 @@
++# Generated by Django 2.2.24 on 2026-04-23 06:49
++
++from django.db import migrations, models
++import uuid
++
++
++class Migration(migrations.Migration):
++
++    initial = True
++
++    dependencies = [
++    ]
++
++    operations = [
++        migrations.CreateModel(
++            name='App2',
++            fields=[
++                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('text', models.CharField(max_length=100)),
++            ],
++        ),
++    ]
+diff --git a/testproject/testapp2/migrations/__init__.py b/testproject/testapp2/migrations/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testproject/testapp2/models.py b/testproject/testapp2/models.py
+new file mode 100644
+index 0000000000..820e110ff4
+--- /dev/null
++++ b/testproject/testapp2/models.py
+@@ -0,0 +1,5 @@
++from django.db import models
++import uuid
++class App2(models.Model):
++    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
++    text = models.CharField(max_length=100)
+diff --git a/testproject/testproject/__init__.py b/testproject/testproject/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testproject/testproject/settings.py b/testproject/testproject/settings.py
+new file mode 100644
+index 0000000000..e2d5f9d931
+--- /dev/null
++++ b/testproject/testproject/settings.py
+@@ -0,0 +1,12 @@
++SECRET_KEY = 'secret'
++INSTALLED_APPS = [
++    'django.contrib.auth',
++    'django.contrib.contenttypes',
++    'testapp1',
++    'testapp2',
++]
++DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3','NAME': ':memory:'}}
++MIDDLEWARE = []
++ROOT_URLCONF = ''
++USE_TZ = False
++DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'

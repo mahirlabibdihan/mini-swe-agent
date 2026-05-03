@@ -1,0 +1,66 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 0000000000..ad15b98658
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,41 @@
++#!/bin/bash
++set -euo pipefail
++
++python3 - <<'PY'
++import json, sys
++try:
++    from sympy.polys.polytools import sqf_list
++    from sympy import symbols
++except Exception as e:
++    statuses = [
++        {"name": "test_repro::sqf_list_example1", "status": "ERROR"},
++        {"name": "test_repro::sqf_list_example2", "status": "ERROR"}
++    ]
++    open("/testbed/test_status.json","w").write(json.dumps({"tests":statuses}, indent=2))
++    print("IMPORT_ERROR", str(e))
++    sys.exit(0)
++
++x = symbols('x')
++p1 = (x**2 + 1) * (x - 1)**2 * (x - 2)**3 * (x - 3)**3
++p2 = x**5 - 2*x**4 - 2*x**3 + 4*x**2 + x - 2
++
++r1 = sqf_list(p1)
++r2 = sqf_list(p2)
++
++print("OBSERVED_R1:", r1)
++print("OBSERVED_R2:", r2)
++
++expected1 = (1, [(x**2 + 1, 1), (x - 1, 2), (x - 2, 3), (x - 3, 3)])
++expected2 = (1, [(x - 2, 1), (x**2 - 1, 2)])
++
++status1 = "PASSED" if r1 == expected1 else "FAILED"
++status2 = "PASSED" if r2 == expected2 else "FAILED"
++
++statuses = [
++    {"name": "test_repro::sqf_list_example1", "status": status1},
++    {"name": "test_repro::sqf_list_example2", "status": status2}
++]
++
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": statuses}, indent=2))
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..6b78bc2a9f
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_repro::sqf_list_example1",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro::sqf_list_example2",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

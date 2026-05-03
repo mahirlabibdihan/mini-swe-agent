@@ -1,0 +1,54 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..1cc1162b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++# echo the raw output for visibility
++echo "$output"
++status="PASSED"
++if echo "$output" | grep -q "Invalid fill method"; then
++  status="FAILED"
++elif echo "$output" | grep -q "Traceback"; then
++  status="ERROR"
++fi
++python3 - <<PY "$output" "$status"
++import json, sys
++out=sys.argv[1]
++status=sys.argv[2]
++tests=[{"name":"/testbed/test_repro.py::test_loc_method","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++print("Wrote /testbed/test_status.json with status", status)
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 00000000..e5413597
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,8 @@
++import numpy as np
++from xarray import DataArray
++empty = np.zeros((2,2))
++D1 = DataArray(empty, dims=['dim1', 'dim2'],   coords={'dim1':['x', 'y'], 'dim2':['a', 'b']})
++D2 = DataArray(empty, dims=['dim1', 'method'], coords={'dim1':['x', 'y'], 'method':['a', 'b']})
++
++print("D1:", D1.loc[dict(dim1='x', dim2='a')])
++print("D2:", D2.loc[dict(dim1='x', method='a')])
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..0d0aa53e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_repro.py::test_loc_method",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,102 @@
+diff --git a/pylint_out.txt b/pylint_out.txt
+new file mode 100644
+index 00000000..709dcaf2
+--- /dev/null
++++ b/pylint_out.txt
+@@ -0,0 +1,6 @@
++************* Module about
++src/gen/about.py:2:0: R0205: Class 'Ui_AboutAutoSplitWidget' inherits from object, can be safely removed from bases in python3 (useless-object-inheritance)
++
++------------------------------------------------------------------
++Your code has been rated at 9.57/10 (previous run: 9.57/10, +0.00)
++
+diff --git a/pyproject.toml b/pyproject.toml
+new file mode 100644
+index 00000000..cdd835c4
+--- /dev/null
++++ b/pyproject.toml
+@@ -0,0 +1,4 @@
++[tool.pylint.MASTER]
++ignore-paths = [
++  "^src/gen/.*$",
++]
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..bbf2d951
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++# Run pylint (allow non-zero exit) and capture output
++pylint --recursive=y src/ 2>&1 | tee pylint_out.txt || true
++# Detect occurrences of src/gen with forward or backslashes
++if grep -E 'src[/\\]gen' pylint_out.txt >/dev/null 2>&1; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++# Ensure /testbed exists and write test_status.json
++python3 - <<PY
++import json, os
++os.makedirs("/testbed", exist_ok=True)
++tests = [{"name": "repro/pylint_recursive_ignore", "status": "$status"}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("TEST_STATUS_WRITTEN:", "$status")
++PY
++# Show pylint output for verification
++echo "----- PYLINT OUTPUT BEGIN -----"
++sed -n '1,400p' pylint_out.txt || true
++echo "----- PYLINT OUTPUT END -----"
+diff --git a/src/gen/about.py b/src/gen/about.py
+new file mode 100644
+index 00000000..24fddb7a
+--- /dev/null
++++ b/src/gen/about.py
+@@ -0,0 +1,6 @@
++# Intentionally bad style to trigger pylint warnings in generated code
++class Ui_AboutAutoSplitWidget(object):
++    def setupUi(self, AboutAutoSplitWidget):
++        pass
++    def retranslateUi(self, AboutAutoSplitWidget):
++        pass
+diff --git a/src/region_selection.py b/src/region_selection.py
+new file mode 100644
+index 00000000..70637769
+--- /dev/null
++++ b/src/region_selection.py
+@@ -0,0 +1,19 @@
++# Another file to be checked normally
++def some_function():
++    a = 1
++    b = 2
++    c = 3
++    d = 4
++    e = 5
++    f = 6
++    g = 7
++    h = 8
++    i = 9
++    j = 10
++    k = 11
++    l = 12
++    m = 13
++    n = 14
++    o = 15
++    p = 16  # should trigger too-many-locals or similar if analyzed
++    return a+b+c+d+e+f+g+h+i+j+k+l+m+n+o+p
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..1c9a5bd4
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "repro/pylint_recursive_ignore",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

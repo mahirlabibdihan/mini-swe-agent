@@ -1,0 +1,96 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..408c321484
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Run the reproduction, capture exit code and output
++set +e
++python3 test_repro.py > test_output.txt 2>&1
++rc=$?
++set -e
++
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++
++# Write JSON result file
++printf '%s\n' "{\"tests\": [{\"name\": \"test_repro.py\", \"status\": \"$status\"}]}" > test_status.json
++echo "Wrote test_status.json with status: $status"
++
++# Print captured output for visibility
++echo "---- test_repro.py output ----"
++sed -n '1,200p' test_output.txt || true
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 0000000000..a2ac294016
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,12 @@
++Resolved field validators: [<__main__.MaxLengthValidator object at 0x7ffff7978700>]
++Calling clean('1') ...
++Traceback (most recent call last):
++  File "/testbed/test_repro.py", line 38, in <module>
++    reproduce()
++  File "/testbed/test_repro.py", line 35, in reproduce
++    y.clean('1', model_instance=None)
++  File "/testbed/test_repro.py", line 18, in clean
++    v(value)
++  File "/testbed/test_repro.py", line 7, in __call__
++    if len(value) > self.limit_value:
++TypeError: '>' not supported between instances of 'int' and 'NoneType'
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..7b6262bc30
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,38 @@
++class MaxLengthValidator:
++    def __init__(self, limit_value):
++        self.limit_value = limit_value
++    def __call__(self, value):
++        # Simulate Django's compare: len(value) > limit_value
++        # If limit_value is None, this will raise TypeError as described.
++        if len(value) > self.limit_value:
++            raise ValueError("Ensure this value has at most %s characters" % self.limit_value)
++
++class CharField:
++    def __init__(self, max_length=None):
++        self.max_length = max_length
++        self.validators = []
++        # Buggy behavior: always append MaxLengthValidator even if max_length is None
++        self.validators.append(MaxLengthValidator(self.max_length))
++    def clean(self, value, model_instance=None):
++        for v in self.validators:
++            v(value)
++        return value
++
++class Value:
++    def __init__(self, value):
++        self.value = value
++    def _resolve_output_field(self):
++        if isinstance(self.value, str):
++            return CharField()
++        return None
++
++def reproduce():
++    x = Value('test')
++    y = x._resolve_output_field()
++    print("Resolved field validators:", y.validators)
++    print("Calling clean('1') ...")
++    # This should raise TypeError due to comparing int and None inside the validator
++    y.clean('1', model_instance=None)
++
++if __name__ == "__main__":
++    reproduce()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..80881b058d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_repro.py", "status": "FAILED"}]}

@@ -1,0 +1,137 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..d7ee0bd84e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,41 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++python3 - <<'PY' "$output"
++import sys, json, re
++out = sys.argv[1]
++tests = []
++status = "FAILED"
++if "Traceback" in out:
++    status = "ERROR"
++else:
++    m_up = re.search(r'update_count:\s*(\d+)', out)
++    m_child = re.search(r'child_values:\s*(\[[^\]]*\])', out)
++    m_other = re.search(r'other_values:\s*(\[[^\]]*\])', out)
++    if m_up and m_child and m_other:
++        upd = int(m_up.group(1))
++        try:
++            child = eval(m_child.group(1))
++            other = eval(m_other.group(1))
++        except Exception:
++            status = "ERROR"
++        else:
++            # Now mark FAIL if observed behavior matches the reported bug:
++            # - update_count == 2
++            # - Child rows unchanged (0,1)
++            # - OtherBase rows updated to 55,55
++            if upd == 2 and child == [{'field_otherbase': 0}, {'field_otherbase': 1}] and other == [{'field_otherbase': 55}, {'field_otherbase': 55}]:
++                status = "FAILED"
++            # If child rows were updated (correct behavior), mark PASSED
++            elif upd == 2 and child == [{'field_otherbase': 55}, {'field_otherbase': 55}] and other == [{'field_otherbase': 55}, {'field_otherbase': 55}]:
++                status = "PASSED"
++            else:
++                status = "ERROR"
++    else:
++        status = "ERROR"
++tests.append({"name":"/testbed/test_reproduction.py::reproduce_queryset_update_bug","status":status})
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..ed1815b6fb
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,65 @@
++import os, sys
++from django.conf import settings
++BASE_DIR = os.getcwd()
++settings.configure(
++    DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME': os.path.join(BASE_DIR,'testdb.sqlite3')}},
++    INSTALLED_APPS=[],
++    TIME_ZONE='UTC',
++    USE_TZ=False,
++)
++import django
++django.setup()
++from django.db import models, connection
++
++class Base(models.Model):
++    base_id = models.AutoField(primary_key=True)
++    field_base = models.IntegerField()
++    class Meta:
++        db_table = "appliances_base"
++        app_label = "appliances"
++
++class OtherBase(models.Model):
++    otherbase_id = models.AutoField(primary_key=True)
++    field_otherbase = models.IntegerField()
++    class Meta:
++        db_table = "appliances_otherbase"
++        app_label = "appliances"
++
++class Child(Base, OtherBase):
++    class Meta:
++        db_table = "appliances_child"
++        app_label = "appliances"
++
++def create_schema():
++    with connection.schema_editor() as schema:
++        for model in (Base, OtherBase, Child):
++            try:
++                schema.create_model(model)
++            except Exception as e:
++                # propagate to show issues
++                raise
++
++def run_scenario():
++    OtherBase.objects.create(field_otherbase=100)
++    OtherBase.objects.create(field_otherbase=101)
++    Child.objects.create(field_base=0, field_otherbase=0)
++    Child.objects.create(field_base=1, field_otherbase=1)
++    count = Child.objects.update(field_otherbase=55)
++    child_vals = list(Child.objects.values('field_otherbase'))
++    other_vals = list(OtherBase.objects.filter(otherbase_id__in=[1,2]).values('field_otherbase'))
++    print("update_count:", count)
++    print("child_values:", child_vals)
++    print("other_values:", other_vals)
++
++if __name__ == '__main__':
++    try:
++        # ensure deterministic run
++        dbpath = os.path.join(BASE_DIR,'testdb.sqlite3')
++        if os.path.exists(dbpath):
++            os.remove(dbpath)
++        create_schema()
++        run_scenario()
++    except Exception as e:
++        import traceback
++        traceback.print_exc()
++        sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..bd7247d46e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::reproduce_queryset_update_bug",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testdb.sqlite3 b/testdb.sqlite3
+new file mode 100644
+index 0000000000..962c24c788
+Binary files /dev/null and b/testdb.sqlite3 differ

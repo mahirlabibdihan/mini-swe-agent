@@ -1,0 +1,73 @@
+diff --git a/docs/source/conf.py b/docs/source/conf.py
+new file mode 100644
+index 000000000..add89958f
+--- /dev/null
++++ b/docs/source/conf.py
+@@ -0,0 +1,6 @@
++import os, sys
++sys.path.insert(0, os.path.abspath('../../'))
++project = 'example'
++extensions = ['sphinx.ext.autodoc']
++master_doc = 'index'
++autodoc_default_options = {'members': True, 'private-members': False}
+diff --git a/docs/source/index.rst b/docs/source/index.rst
+new file mode 100644
+index 000000000..740c3c182
+--- /dev/null
++++ b/docs/source/index.rst
+@@ -0,0 +1,2 @@
++.. automodule:: example
++   :members:
+diff --git a/example.py b/example.py
+new file mode 100644
+index 000000000..1eacd2d2d
+--- /dev/null
++++ b/example.py
+@@ -0,0 +1 @@
++_foo = None  #: :meta public:
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..b4bc18cce
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++# Try installing sphinx (non-fatal)
++python -m pip install -q sphinx >/dev/null 2>&1 || true
++# Clean previous builds
++rm -rf docs/build build || true
++mkdir -p build
++# Build the docs (capture output)
++sphinx-build -b html docs/source docs/build > build/sphinx_build_out.txt 2>&1 || true
++# If _foo is present in generated HTML, mark the test as FAILED to reflect the bug state
++if grep -R --context=0 "_foo" docs/build >/dev/null 2>&1; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++# Write test_status.json using Python to avoid shell heredoc expansion issues
++python3 - <<PY2 "$status"
++import json,sys
++status = sys.argv[1]
++open('/testbed/test_status.json','w').write(json.dumps({"tests":[{"name":"reproduction/autodoc_meta_public_variable","status":status}]}, indent=2))
++PY2
++# Summary
++echo "Test status: $status"
++sed -n '1,200p' build/sphinx_build_out.txt || true
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..8025783c0
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "reproduction/autodoc_meta_public_variable",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

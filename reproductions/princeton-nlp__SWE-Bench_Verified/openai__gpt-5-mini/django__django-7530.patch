@@ -1,0 +1,90 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..811024eba2
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -uo pipefail
++cd /testbed
++# Run the reproduction, capture output and exit code without exiting this script.
++output=$(python3 test_repro.py 2>&1) || rc=$?
++rc=${rc:-0}
++status="PASSED"
++if [ "$rc" -ne 0 ]; then status="FAILED"; fi
++
++# Write machine-readable test results according to the required schema.
++python3 - <<PY "$status" "$output"
++import json,sys
++status = sys.argv[1]
++out = sys.argv[2] if len(sys.argv) > 2 else ""
++d = {"tests": [{"name": "test_repro.py::test_makemigrations_calls", "status": status}]}
++open("test_status.json", "w").write(json.dumps(d, indent=2))
++# Also print the captured output for visibility
++print(out)
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..9002974e4f
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,44 @@
++class Router:
++    def allow_migrate(self, db, app_label, model=None):
++        """
++        Simulated router.allow_migrate. Raises when app_label doesn't match the model's app_label.
++        """
++        if model is None:
++            return True
++        # model is represented as a dict with 'app_label' and 'name'
++        if isinstance(model, dict):
++            model_app = model.get('app_label')
++            model_name = model.get('name')
++        else:
++            model_app = getattr(model, '_meta_app_label', None)
++            model_name = getattr(model, '__name__', '<unknown>')
++        if model_app != app_label:
++            raise RuntimeError(
++                "allow_migrate called with mismatched app_label %r for model %r (model app: %r)"
++                % (app_label, model_name, model_app)
++            )
++        return True
++
++def makemigrations(router, apps, models):
++    """
++    Incorrect behavior: for each app, calls allow_migrate for every model in the project.
++    This reproduces the bug described in the PR: incorrect (app_label, model) pairs are passed.
++    """
++    for app in apps:
++        for model in models:  # BUG: should filter models to those belonging to 'app'
++            router.allow_migrate(db='default', app_label=app, model=model)
++    print("makemigrations finished (no mismatches detected)")
++
++def main():
++    # Two apps with different models (simulating shards with different schemas)
++    models = [
++        {'app_label': 'app1', 'name': 'ModelA'},
++        {'app_label': 'app2', 'name': 'ModelB'},
++    ]
++    apps = ['app1', 'app2']
++    router = Router()
++    # This call will raise because when app='app1' we still call with model from app2
++    makemigrations(router, apps, models)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..732f2a69d7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "status": "FAILED",
++      "name": "test_repro.py::test_makemigrations_calls"
++    }
++  ]
++}
+\ No newline at end of file

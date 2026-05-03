@@ -1,0 +1,284 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..e46988ced
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,4 @@
++#!/bin/bash
++set -euo pipefail
++python3 test_reproduction.py
++echo "Wrote /testbed/test_status.json"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..ef858ec43
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,140 @@
++#!/usr/bin/env python3
++import json
++import multiprocessing as mp
++import traceback
++from pathlib import Path
++
++def worker(func, conn):
++    try:
++        res = func()
++        conn.send(("OK", res, type(res).__name__))
++    except Exception as e:
++        conn.send(("EXC", traceback.format_exc(), type(e).__name__))
++
++def run_with_timeout(func, timeout=10):
++    parent_conn, child_conn = mp.Pipe()
++    p = mp.Process(target=worker, args=(func, child_conn))
++    p.start()
++    p.join(timeout)
++    if p.is_alive():
++        p.terminate()
++        p.join()
++        return ("TIMEOUT", None, None)
++    if parent_conn.poll():
++        return parent_conn.recv()
++    return ("NORESULT", None, None)
++
++def make_tests():
++    tests = []
++    try:
++        from sympy import S
++        from sympy.stats import cdf
++        import sympy.stats as stats
++        # mapping name->callable
++        def safe(name, ctor, *args):
++            def f():
++                d = ctor("x", *args)
++                return cdf(d)(args[-1] if len(args)>0 else 1)
++            return name, f
++        # Some distributions use different constructors or parameter orders; attempt best-effort
++        tests_map = []
++        # Arcsin
++        if hasattr(stats, "Arcsin"):
++            tests_map.append(("tests/test_arcsin.py::test_cdf_arcsin",
++                              lambda: cdf(stats.Arcsin("x", 0, 3))(1)))
++        # Dagum
++        if hasattr(stats, "Dagum"):
++            tests_map.append(("tests/test_dagum.py::test_cdf_dagum",
++                              lambda: cdf(stats.Dagum("x", S(1)/3, S(1)/5, 2))(3)))
++        # Erlang
++        if hasattr(stats, "Erlang"):
++            tests_map.append(("tests/test_erlang.py::test_cdf_erlang",
++                              lambda: cdf(stats.Erlang("x", 1, 1))(1)))
++        # Frechet
++        if hasattr(stats, "Frechet"):
++            tests_map.append(("tests/test_frechet.py::test_cdf_frechet",
++                              lambda: cdf(stats.Frechet("x", S(4)/3, 1, 2))(3)))
++        # Gamma
++        if hasattr(stats, "Gamma"):
++            tests_map.append(("tests/test_gamma.py::test_cdf_gamma",
++                              lambda: cdf(stats.Gamma("x", S(1)/10, 2))(3)))
++        # GammaInverse
++        if hasattr(stats, "GammaInverse"):
++            tests_map.append(("tests/test_gammainverse.py::test_cdf_gammainverse",
++                              lambda: cdf(stats.GammaInverse("x", S(5)/7, 2))(3)))
++        # Kumaraswamy
++        if hasattr(stats, "Kumaraswamy"):
++            tests_map.append(("tests/test_kumaraswamy.py::test_cdf_kumaraswamy",
++                              lambda: cdf(stats.Kumaraswamy("x", S(1)/123, 5))(S(1)/3)))
++        # Laplace
++        if hasattr(stats, "Laplace"):
++            tests_map.append(("tests/test_laplace.py::test_cdf_laplace",
++                              lambda: cdf(stats.Laplace("x", 2, 3))(5)))
++        # Logistic
++        if hasattr(stats, "Logistic"):
++            tests_map.append(("tests/test_logistic.py::test_cdf_logistic",
++                              lambda: cdf(stats.Logistic("x", 1, S(1)/10))(2)))
++        # Nakagami
++        if hasattr(stats, "Nakagami"):
++            tests_map.append(("tests/test_nakagami.py::test_cdf_nakagami",
++                              lambda: cdf(stats.Nakagami("x", S(7)/3, 1))(2)))
++        # StudentT
++        if hasattr(stats, "StudentT"):
++            tests_map.append(("tests/test_studentt.py::test_cdf_studentt",
++                              lambda: cdf(stats.StudentT("x", 10))(2)))
++        # UniformSum
++        if hasattr(stats, "UniformSum"):
++            tests_map.append(("tests/test_uniformsum.py::test_cdf_uniformsum",
++                              lambda: cdf(stats.UniformSum("x", 5))(2)))
++        # Erlang (already added), Gamma (already added)
++        # Add the constructed tests into tests list, marking skipped ones not available
++        for name, func in tests_map:
++            tests.append((name, func))
++    except Exception as e:
++        # If import of sympy fails entirely, create a single failing test
++        tests.append(("tests/import_sympy", lambda: (_ for _ in ()).throw(e)))
++    return tests
++
++def analyze_result(code, status, payload, type_name):
++    # status: "OK", "EXC", "TIMEOUT", "NORESULT"
++    if status == "TIMEOUT":
++        return "FAILED", "timeout"
++    if status == "NORESULT":
++        return "ERROR", "no result"
++    if status == "EXC":
++        # If import error or attribute error, mark SKIPPED if it's about missing attr, else ERROR
++        if "AttributeError" in payload or "ImportError" in payload:
++            return "SKIPPED", payload.splitlines()[-1] if payload else "attribute/import error"
++        return "ERROR", payload.splitlines()[-1] if payload else "exception"
++    # OK
++    result = payload
++    try:
++        from sympy import Integral, Float
++        # Detect Integral in string form as well
++        s = str(result)
++        if "Integral" in s or "integrate" in s:
++            return "FAILED", "contains Integral"
++        # If result is a Float (numeric) but the inputs were symbolic/rational, mark as FAILED
++        if type_name == "Float":
++            return "FAILED", "returned Float"
++        # Otherwise mark PASSED
++        return "PASSED", s
++    except Exception as e:
++        return "ERROR", "analyze failure: " + str(e)
++
++def main():
++    Path("/testbed").mkdir(parents=True, exist_ok=True)
++    tests = make_tests()
++    results = []
++    for name, func in tests:
++        status, payload, type_name = run_with_timeout(func, timeout=10)
++        test_status, detail = analyze_result(name, status, payload, type_name or "")
++        results.append({"name": name, "status": test_status, "detail": detail})
++        print(f"{name}: {test_status} -- {detail}")
++    out = {"tests": [{"name": t["name"], "status": t["status"]} for t in results]}
++    Path("/testbed/test_status.json").write_text(json.dumps(out, indent=2))
++    # Also write verbose results for debugging
++    Path("/testbed/test_status_verbose.json").write_text(json.dumps(results, indent=2))
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..4cbc3b19d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,52 @@
++{
++  "tests": [
++    {
++      "name": "tests/test_arcsin.py::test_cdf_arcsin",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_dagum.py::test_cdf_dagum",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_erlang.py::test_cdf_erlang",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_frechet.py::test_cdf_frechet",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_gamma.py::test_cdf_gamma",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_gammainverse.py::test_cdf_gammainverse",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_kumaraswamy.py::test_cdf_kumaraswamy",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_laplace.py::test_cdf_laplace",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_logistic.py::test_cdf_logistic",
++      "status": "PASSED"
++    },
++    {
++      "name": "tests/test_nakagami.py::test_cdf_nakagami",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_studentt.py::test_cdf_studentt",
++      "status": "FAILED"
++    },
++    {
++      "name": "tests/test_uniformsum.py::test_cdf_uniformsum",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/test_status_verbose.json b/test_status_verbose.json
+new file mode 100644
+index 000000000..41d273532
+--- /dev/null
++++ b/test_status_verbose.json
+@@ -0,0 +1,62 @@
++[
++  {
++    "name": "tests/test_arcsin.py::test_cdf_arcsin",
++    "status": "FAILED",
++    "detail": "contains Integral"
++  },
++  {
++    "name": "tests/test_dagum.py::test_cdf_dagum",
++    "status": "FAILED",
++    "detail": "timeout"
++  },
++  {
++    "name": "tests/test_erlang.py::test_cdf_erlang",
++    "status": "FAILED",
++    "detail": "returned Float"
++  },
++  {
++    "name": "tests/test_frechet.py::test_cdf_frechet",
++    "status": "FAILED",
++    "detail": "timeout"
++  },
++  {
++    "name": "tests/test_gamma.py::test_cdf_gamma",
++    "status": "FAILED",
++    "detail": "timeout"
++  },
++  {
++    "name": "tests/test_gammainverse.py::test_cdf_gammainverse",
++    "status": "FAILED",
++    "detail": "timeout"
++  },
++  {
++    "name": "tests/test_kumaraswamy.py::test_cdf_kumaraswamy",
++    "status": "FAILED",
++    "detail": "timeout"
++  },
++  {
++    "name": "tests/test_laplace.py::test_cdf_laplace",
++    "status": "FAILED",
++    "detail": "contains Integral"
++  },
++  {
++    "name": "tests/test_logistic.py::test_cdf_logistic",
++    "status": "PASSED",
++    "detail": "1/(exp(-10) + 1)"
++  },
++  {
++    "name": "tests/test_nakagami.py::test_cdf_nakagami",
++    "status": "FAILED",
++    "detail": "timeout"
++  },
++  {
++    "name": "tests/test_studentt.py::test_cdf_studentt",
++    "status": "FAILED",
++    "detail": "timeout"
++  },
++  {
++    "name": "tests/test_uniformsum.py::test_cdf_uniformsum",
++    "status": "FAILED",
++    "detail": "timeout"
++  }
++]
+\ No newline at end of file

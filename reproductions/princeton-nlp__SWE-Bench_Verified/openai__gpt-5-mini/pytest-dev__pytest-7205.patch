@@ -1,0 +1,61 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..db29b6bd9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,29 @@
++#!/bin/bash
++set -euo pipefail
++
++cat > /testbed/test_bytes_warning.py <<'PY' 
++import pytest
++
++@pytest.mark.parametrize('data', [b'Hello World'])
++def test_data(data):
++    pass
++PY
++
++OUT="$(python3 -bb -m pytest --setup-show /testbed/test_bytes_warning.py 2>&1)" || true
++RC=$?
++printf "%s\n" "$OUT"
++
++python3 - <<'PY2' "$OUT" "$RC"
++import json,sys
++out=sys.argv[1]
++rc=int(sys.argv[2])
++if "BytesWarning" in out or "ERROR at setup" in out or rc!=0:
++    status="FAILED"
++else:
++    status="PASSED"
++tests=[{"name":"test_bytes_warning.py::test_data[Hello World]","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PY2
++
++exit $RC
+diff --git a/test_bytes_warning.py b/test_bytes_warning.py
+new file mode 100644
+index 000000000..167c60737
+--- /dev/null
++++ b/test_bytes_warning.py
+@@ -0,0 +1,5 @@
++import pytest
++
++@pytest.mark.parametrize('data', [b'Hello World'])
++def test_data(data):
++    pass
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..d1f9feb99
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_bytes_warning.py::test_data[Hello World]",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

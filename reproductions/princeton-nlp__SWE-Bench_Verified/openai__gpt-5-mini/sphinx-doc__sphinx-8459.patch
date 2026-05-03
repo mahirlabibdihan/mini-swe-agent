@@ -1,0 +1,226 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 000000000..4f97f1868
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,109 @@
++#!/bin/bash
++set -euo pipefail
++export PYTHONUNBUFFERED=1
++
++# Clean up
++rm -rf /testbed/with_desc /testbed/without_desc
++mkdir -p /testbed/with_desc/source /testbed/without_desc/source
++
++# Create module named to avoid stdlib conflict
++cat > /testbed/with_desc/types_local.py <<'PY'
++from __future__ import annotations
++from typing import Any, Dict
++
++JSONObject = Dict[str, Any]
++
++def sphinx_doc(data: JSONObject) -> JSONObject:
++    """Does it work.
++
++    Args:
++        data: Does it args.
++
++    Returns:
++        Does it work in return.
++    """
++    return {}
++PY
++cp /testbed/with_desc/types_local.py /testbed/without_desc/types_local.py
++
++# index.rst for both
++cat > /testbed/with_desc/source/index.rst <<'RST'
++Welcome
++=======
++
++.. automodule:: types_local
++    :members:
++    :undoc-members:
++    :show-inheritance:
++RST
++cp /testbed/with_desc/source/index.rst /testbed/without_desc/source/index.rst
++
++# conf.py with description typehints
++cat > /testbed/with_desc/source/conf.py <<'PY'
++import os, sys
++sys.path.insert(0, os.path.abspath('..'))
++extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon']
++autodoc_typehints = 'description'
++autodoc_type_aliases = {'JSONObject': 'types_local.JSONObject'}
++master_doc = 'index'
++project = 'testproj'
++PY
++
++# conf.py without description typehints (signatures)
++cat > /testbed/without_desc/source/conf.py <<'PY'
++import os, sys
++sys.path.insert(0, os.path.abspath('..'))
++extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon']
++autodoc_type_aliases = {'JSONObject': 'types_local.JSONObject'}
++master_doc = 'index'
++project = 'testproj'
++PY
++
++# Install Sphinx 3.3.1 if available, otherwise latest
++python -m pip install -q "sphinx==3.3.1" || python -m pip install -q sphinx
++
++# Build both docs
++python -m sphinx -Q -b html /testbed/with_desc/source /testbed/with_desc/build >/dev/null 2>&1 || true
++python -m sphinx -Q -b html /testbed/without_desc/source /testbed/without_desc/build >/dev/null 2>&1 || true
++
++WITH_FILE=/testbed/with_desc/build/index.html
++WITHOUT_FILE=/testbed/without_desc/build/index.html
++
++# Helper to check html content
++contains() {
++  local file="$1"; shift
++  local needle="$1"
++  if [ -f "$file" ] && grep -F -- "$needle" "$file" >/dev/null 2>&1; then
++    echo "true"
++  else
++    echo "false"
++  fi
++}
++
++WITH_HAS_DICT=$(contains "$WITH_FILE" "Dict[")
++WITH_HAS_JSON=$(contains "$WITH_FILE" "types_local.JSONObject")
++WITHOUT_HAS_DICT=$(contains "$WITHOUT_FILE" "Dict[")
++WITHOUT_HAS_JSON=$(contains "$WITHOUT_FILE" "types_local.JSONObject")
++
++# Decide pass/fail based on reproduction expectation:
++# - with_description: bug reproduced if it shows concrete Dict[...] and NOT types_local.JSONObject
++# - without_description: alias should appear in signature => types_local.JSONObject present
++WITH_STATUS="FAILED"
++WITHOUT_STATUS="FAILED"
++if [ "$WITH_HAS_DICT" = "true" ] && [ "$WITH_HAS_JSON" = "false" ]; then WITH_STATUS="PASSED"; fi
++if [ "$WITHOUT_HAS_JSON" = "true" ]; then WITHOUT_STATUS="PASSED"; fi
++
++# Write machine-readable results
++python - <<PY > /testbed/test_status.json
++import json
++tests = [
++  {"name": "with_description::sphinx_doc", "status": "$WITH_STATUS"},
++  {"name": "without_description::sphinx_doc", "status": "$WITHOUT_STATUS"},
++]
++print(json.dumps({"tests": tests}, indent=2))
++PY
++
++# Print a brief summary
++echo "with_description -> $WITH_STATUS (has Dict?=$WITH_HAS_DICT, has types_local.JSONObject?=$WITH_HAS_JSON)"
++echo "without_description -> $WITHOUT_STATUS (has Dict?=$WITHOUT_HAS_DICT, has types_local.JSONObject?=$WITHOUT_HAS_JSON)"
++echo "Wrote /testbed/test_status.json"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..fe2c9521b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "with_description::sphinx_doc",
++      "status": "PASSED"
++    },
++    {
++      "name": "without_description::sphinx_doc",
++      "status": "FAILED"
++    }
++  ]
++}
+diff --git a/with_desc/source/conf.py b/with_desc/source/conf.py
+new file mode 100644
+index 000000000..03bf1e5e2
+--- /dev/null
++++ b/with_desc/source/conf.py
+@@ -0,0 +1,7 @@
++import os, sys
++sys.path.insert(0, os.path.abspath('..'))
++extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon']
++autodoc_typehints = 'description'
++autodoc_type_aliases = {'JSONObject': 'types_local.JSONObject'}
++master_doc = 'index'
++project = 'testproj'
+diff --git a/with_desc/source/index.rst b/with_desc/source/index.rst
+new file mode 100644
+index 000000000..16bad0d9a
+--- /dev/null
++++ b/with_desc/source/index.rst
+@@ -0,0 +1,7 @@
++Welcome
++=======
++
++.. automodule:: types_local
++    :members:
++    :undoc-members:
++    :show-inheritance:
+diff --git a/with_desc/types_local.py b/with_desc/types_local.py
+new file mode 100644
+index 000000000..7ba06dacc
+--- /dev/null
++++ b/with_desc/types_local.py
+@@ -0,0 +1,15 @@
++from __future__ import annotations
++from typing import Any, Dict
++
++JSONObject = Dict[str, Any]
++
++def sphinx_doc(data: JSONObject) -> JSONObject:
++    """Does it work.
++
++    Args:
++        data: Does it args.
++
++    Returns:
++        Does it work in return.
++    """
++    return {}
+diff --git a/without_desc/source/conf.py b/without_desc/source/conf.py
+new file mode 100644
+index 000000000..7734ee6cb
+--- /dev/null
++++ b/without_desc/source/conf.py
+@@ -0,0 +1,6 @@
++import os, sys
++sys.path.insert(0, os.path.abspath('..'))
++extensions = ['sphinx.ext.autodoc', 'sphinx.ext.napoleon']
++autodoc_type_aliases = {'JSONObject': 'types_local.JSONObject'}
++master_doc = 'index'
++project = 'testproj'
+diff --git a/without_desc/source/index.rst b/without_desc/source/index.rst
+new file mode 100644
+index 000000000..16bad0d9a
+--- /dev/null
++++ b/without_desc/source/index.rst
+@@ -0,0 +1,7 @@
++Welcome
++=======
++
++.. automodule:: types_local
++    :members:
++    :undoc-members:
++    :show-inheritance:
+diff --git a/without_desc/types_local.py b/without_desc/types_local.py
+new file mode 100644
+index 000000000..7ba06dacc
+--- /dev/null
++++ b/without_desc/types_local.py
+@@ -0,0 +1,15 @@
++from __future__ import annotations
++from typing import Any, Dict
++
++JSONObject = Dict[str, Any]
++
++def sphinx_doc(data: JSONObject) -> JSONObject:
++    """Does it work.
++
++    Args:
++        data: Does it args.
++
++    Returns:
++        Does it work in return.
++    """
++    return {}

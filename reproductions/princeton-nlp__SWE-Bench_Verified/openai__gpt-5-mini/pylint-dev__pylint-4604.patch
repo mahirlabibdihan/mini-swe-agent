@@ -1,0 +1,62 @@
+diff --git a/a.py b/a.py
+new file mode 100644
+index 00000000..0df88193
+--- /dev/null
++++ b/a.py
+@@ -0,0 +1,7 @@
++"""Docstring."""
++
++import abc
++from abc import ABC
++
++X = ...  # type: abc.ABC
++Y = ...  # type: ABC
+diff --git a/pylint_output.txt b/pylint_output.txt
+new file mode 100644
+index 00000000..7bfa2a68
+--- /dev/null
++++ b/pylint_output.txt
+@@ -0,0 +1,5 @@
++************* Module a
++/testbed/a.py:3:0: W0611: Unused import abc (unused-import)
++
++------------------------------------------------------------------
++Your code has been rated at 7.50/10 (previous run: 7.50/10, +0.00)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..1d6a7f2c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++set -euo pipefail
++python -m pip install -q "pylint==2.8.3" || true
++cd /tmp
++pylint_output=$(python -m pylint /testbed/a.py 2>&1 || true)
++echo "$pylint_output" > /testbed/pylint_output.txt
++status="PASSED"
++if echo "$pylint_output" | grep -q "W0611"; then
++  status="FAILED"
++fi
++python - <<'PY2' "$status"
++import json,sys
++status=sys.argv[1]
++tests=[{"name":"/testbed/a.py","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++PY2
++echo "$pylint_output"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..c60944ae
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/a.py",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

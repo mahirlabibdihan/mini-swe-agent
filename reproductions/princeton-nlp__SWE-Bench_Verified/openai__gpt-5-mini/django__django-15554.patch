@@ -1,0 +1,145 @@
+diff --git a/app/__init__.py b/app/__init__.py
+new file mode 100644
+index 0000000000..b9d56a44ca
+--- /dev/null
++++ b/app/__init__.py
+@@ -0,0 +1 @@
++# app package
+diff --git a/app/apps.py b/app/apps.py
+new file mode 100644
+index 0000000000..7c9c1dc112
+--- /dev/null
++++ b/app/apps.py
+@@ -0,0 +1,4 @@
++from django.apps import AppConfig
++class AppConfig(AppConfig):
++    name = 'app'
++    verbose_name = "App"
+diff --git a/app/models.py b/app/models.py
+new file mode 100644
+index 0000000000..1bf3793cff
+--- /dev/null
++++ b/app/models.py
+@@ -0,0 +1,22 @@
++from django.db import models
++
++class Parent(models.Model):
++    zone = models.CharField(max_length=10, null=True, blank=True)
++
++    class Meta:
++        app_label = 'app'
++
++class MyRelation(models.Model):
++    parent = models.ForeignKey(Parent, related_name='myrelation', on_delete=models.CASCADE)
++
++    class Meta:
++        app_label = 'app'
++
++class Nested(models.Model):
++    myrelation = models.ForeignKey(MyRelation, related_name='nested', on_delete=models.CASCADE)
++    zone = models.CharField(max_length=10, null=True, blank=True)
++    is_all = models.BooleanField(default=False)
++    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
++
++    class Meta:
++        app_label = 'app'
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..0ead0a6b81
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,4 @@
++---- GENERATED SQL ----
++SELECT "app_parent"."id", "app_parent"."zone", CAST(CASE WHEN relation_zone."price" IS NULL THEN relation_zone."price" ELSE relation_zone."price" END AS NUMERIC) AS "price_final" FROM "app_parent" LEFT OUTER JOIN "app_myrelation" ON ("app_parent"."id" = "app_myrelation"."parent_id") LEFT OUTER JOIN "app_nested" relation_zone ON ("app_myrelation"."id" = relation_zone."myrelation_id" AND (relation_zone."zone" = ("app_parent"."zone")))
++---- END SQL ----
++COUNT_APP_NESTED_OCCURRENCES: 1
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..0b809bee0d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++python -m pip install "Django>=2.2,<4" -q
++python test_reproduction.py > run_output.txt 2>&1 || true
++cat run_output.txt
++count=$(grep -o "app_nested" run_output.txt | wc -l || true)
++status="PASSED"
++# If only one occurrence (single JOIN), that's the reported failing behavior -> mark FAILED
++if [[ "$count" -eq 1 ]]; then
++  status="FAILED"
++fi
++python - <<PY "$status" "$count"
++import json,sys,os
++status=sys.argv[1]
++count=int(sys.argv[2])
++out={"tests":[{"name":"test_reproduction.py::test_filteredrelation_multiple","status": status }]}
++with open("test_status.json","w") as f:
++    json.dump(out,f,indent=2)
++print("WROTE", os.path.abspath("test_status.json"))
++PY
++cat test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..b57c47f946
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,41 @@
++#!/usr/bin/env python3
++from django.conf import settings
++
++def main():
++    settings.configure(
++        INSTALLED_APPS=['app'],
++        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++        SECRET_KEY='x',
++        DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++    )
++    import django
++    django.setup()
++    from django.db.models import FilteredRelation, Q, F, Case, When
++    from app.models import Parent
++
++    qs = Parent.objects.alias(
++        relation_zone=FilteredRelation(
++            "myrelation__nested",
++            condition=Q(myrelation__nested__zone=F("zone"))
++        ),
++        relation_all=FilteredRelation(
++            "myrelation__nested",
++            condition=Q(myrelation__nested__is_all=True)
++        ),
++        price_zone=F("relation_zone__price")
++    ).annotate(
++        price_final=Case(
++            When(price_zone__isnull=True, then=F("relation_all__price")),
++            default=F("price_zone")
++        )
++    )
++
++    sql = str(qs.query)
++    print("---- GENERATED SQL ----")
++    print(sql)
++    print("---- END SQL ----")
++    count = sql.count("app_nested")
++    print("COUNT_APP_NESTED_OCCURRENCES:", count)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..b4ab31dc49
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_filteredrelation_multiple",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

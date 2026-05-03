@@ -1,0 +1,96 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..9c7d5f7763
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,72 @@
++#!/usr/bin/env bash
++set -uo pipefail
++TMPDIR="$(mktemp -d)"
++cleanup() { rm -rf "$TMPDIR"; }
++trap cleanup EXIT
++
++cd "$TMPDIR"
++# Try to download SQLite 3.8.7 autoconf tarball (released 2014)
++URL="https://www.sqlite.org/2014/sqlite-autoconf-3080700.tar.gz"
++if ! curl -fsSL "$URL" -o sqlite.tar.gz; then
++  echo "Failed to download $URL" >&2
++  # If download fails, fall back to using system sqlite3 (tests will reflect system capabilities)
++fi
++
++if [ -f sqlite.tar.gz ]; then
++  tar xzf sqlite.tar.gz
++  SRCDIR=$(ls -d sqlite-autoconf-* 2>/dev/null | head -n1 || true)
++  if [ -n "$SRCDIR" ]; then
++    cd "$SRCDIR"
++    ./configure --disable-shared --enable-static >/dev/null 2>&1 || true
++    make -j2 >/dev/null 2>&1 || true
++    # locate built sqlite3 binary
++    SQLITE_BIN=$(find . -type f -executable -name sqlite3 -print -quit || true)
++  fi
++fi
++
++# Fallback to system sqlite3 if build/download didn't produce a binary
++if [ -z "${SQLITE_BIN:-}" ]; then
++  SQLITE_BIN=$(which sqlite3 2>/dev/null || true)
++fi
++
++# Prepare default error statuses
++STAT1="ERROR"
++STAT2="ERROR"
++
++if [ -z "$SQLITE_BIN" ]; then
++  echo "No sqlite3 binary available; cannot run tests." >&2
++else
++  # Test JSON1 (json_extract)
++  JSON_OUT="$(
++    printf "select json_extract('{\"a\":1}','$.a');\n" | "$SQLITE_BIN" -noheader -batch 2>&1 || true
++  )"
++  JSON_RC=${PIPESTATUS[1]:-0}
++  # Consider FAILED if sqlite3 reports error or mentions no such function / Error
++  if [ $JSON_RC -ne 0 ] || echo "$JSON_OUT" | grep -Ei "no such function|Error:" >/dev/null 2>&1; then
++    STAT1="FAILED"
++  else
++    STAT1="PASSED"
++  fi
++
++  # Test expression index support
++  EXPR_OUT="$(
++    printf "create table t(a text);\ncreate index idx on t((lower(a)));\n" | "$SQLITE_BIN" -noheader -batch 2>&1 || true
++  )"
++  EXPR_RC=${PIPESTATUS[1]:-0}
++  if [ $EXPR_RC -ne 0 ] || echo "$EXPR_OUT" | grep -Ei "syntax error|near|error" >/dev/null 2>&1; then
++    STAT2="FAILED"
++  else
++    STAT2="PASSED"
++  fi
++fi
++
++# Write the required JSON output to /testbed/test_status.json
++python3 - <<PY > /testbed/test_status.json
++import json
++print(json.dumps({"tests":[{"name":"test_sqlite_json1","status":"$STAT1"},{"name":"test_sqlite_expression_index","status":"$STAT2"}]}, indent=2))
++PY
++
++# Print brief summary
++echo "sqlite_bin: ${SQLITE_BIN:-<none>}"
++echo "test_sqlite_json1: $STAT1"
++echo "test_sqlite_expression_index: $STAT2"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..d68882dab9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_sqlite_json1",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_sqlite_expression_index",
++      "status": "FAILED"
++    }
++  ]
++}

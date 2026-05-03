@@ -1,0 +1,60 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..c6dbf16c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++# ensure xarray is available (best-effort)
++python3 -m pip install -q xarray==0.16.1 || true
++
++OUTPUT=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$OUTPUT"
++
++# extract a1 value from the last line
++last_line=$(echo "$OUTPUT" | tail -n1)
++a1=$(echo "$last_line" | sed -n 's/.*a1: \([^,]*\).*/\1/p' || true)
++
++# If the bug is reproduced (a1 changed to 'd'), mark the test as FAILED.
++if [ "$a1" = "d" ]; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++
++python3 - <<PY
++import json, pathlib
++res = {"tests": [{"name": "/testbed/test_reproduction.py::test_merge_override_copies_attrs", "status": "$status"}]}
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps(res, indent=2))
++print("WROTE /testbed/test_status.json with status:", "$status")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..504bbea0
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,8 @@
++import xarray as xr
++xds1 = xr.Dataset(attrs={'a':'b'})
++xds2 = xr.Dataset(attrs={'a':'c'})
++print(f"initial: a1: {xds1.attrs['a']}, a2: {xds2.attrs['a']}")
++xds3 = xr.merge([xds1, xds2], combine_attrs='override')
++print(f"merged: a1: {xds1.attrs['a']}, a2: {xds2.attrs['a']}, a3: {xds3.attrs['a']}")
++xds3.attrs['a'] = 'd'
++print(f"after: a1: {xds1.attrs['a']}, a2: {xds2.attrs['a']}, a3: {xds3.attrs['a']}")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..442ba6d8
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::test_merge_override_copies_attrs",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,75 @@
+diff --git a/dummy.txt b/dummy.txt
+new file mode 100644
+index 0000000000..421376db9e
+--- /dev/null
++++ b/dummy.txt
+@@ -0,0 +1 @@
++dummy
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..2b14097b74
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,55 @@
++#!/bin/bash
++set -euo pipefail
++PY=$(command -v python3 || command -v python)
++mkdir -p /testbed
++echo "dummy" > /testbed/dummy.txt
++
++$PY -m pip install --quiet --disable-pip-version-check "django==3.2.4"
++
++write_status() {
++  name="$1"; status="$2"; observed="$3"; expected="$4"
++  echo "{\"name\":\"${name}\",\"status\":\"${status}\",\"observed\":\"${observed}\",\"expected\":\"${expected}\"}"
++}
++
++results=()
++
++# Test 1: DIRS contains empty string (the problematic case)
++OUT1=$($PY - <<'PY' 2>&1
++from pathlib import Path
++from django.conf import settings
++settings.configure(TEMPLATES=[{'BACKEND':'django.template.backends.django.DjangoTemplates','DIRS': [''], 'APP_DIRS': False, 'OPTIONS':{}}])
++import django
++django.setup()
++from django.template.autoreload import template_changed
++res = template_changed(None, Path('/testbed/dummy.txt'))
++print(res)
++PY
++)
++obs1=$(echo "$OUT1" | tr -d '\r\n')
++expected1="True"
++status1="FAILED"
++if [ "$obs1" = "$expected1" ]; then status1="PASSED"; fi
++results+=("$(write_status "testbed/repro::empty_DIRS_breaks_autoreload" "$status1" "$obs1" "$expected1")")
++
++# Test 2: DIRS filtered (no empty string) -> should not break autoreload
++OUT2=$($PY - <<'PY' 2>&1
++from pathlib import Path
++from django.conf import settings
++# simulate corrected configuration with empty entries removed
++settings.configure(TEMPLATES=[{'BACKEND':'django.template.backends.django.DjangoTemplates','DIRS': [], 'APP_DIRS': False, 'OPTIONS':{}}])
++import django
++django.setup()
++from django.template.autoreload import template_changed
++res = template_changed(None, Path('/testbed/dummy.txt'))
++print(res)
++PY
++)
++obs2=$(echo "$OUT2" | tr -d '\r\n')
++expected2="False"
++status2="FAILED"
++if [ "$obs2" = "$expected2" ]; then status2="PASSED"; fi
++results+=("$(write_status "testbed/repro::filtered_DIRS_no_break" "$status2" "$obs2" "$expected2")")
++
++# Write test_status.json
++printf '{ "tests": [%s] }\n' "$(IFS=,; echo "${results[*]}")" > /testbed/test_status.json
++cat /testbed/test_status.json
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..569ed2b473
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{ "tests": [{"name":"testbed/repro::empty_DIRS_breaks_autoreload","status":"PASSED","observed":"True","expected":"True"},{"name":"testbed/repro::filtered_DIRS_no_break","status":"FAILED","observed":"None","expected":"False"}] }

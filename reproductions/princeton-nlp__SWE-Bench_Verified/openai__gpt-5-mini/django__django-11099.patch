@@ -1,0 +1,73 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..0ac024163b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++json=$(printf '%s\n' "$output" | sed -n '/^__JSON_START__$/,/^__JSON_END__$/p' | sed '1d;$d')
++if [ -z "${json// /}" ]; then
++  python3 - <<PY - "$output"
++import json, sys
++data = {"tests": [{"name": "test_reproduction.py", "status": "ERROR"}]}
++open('/testbed/test_status.json','w').write(json.dumps(data, indent=2))
++PY
++  exit 0
++fi
++python3 - <<PY "$json"
++import sys, json
++j = json.loads(sys.argv[1])
++open('/testbed/test_status.json','w').write(json.dumps(j, indent=2))
++PY
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..c21bb5c87e
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,23 @@
++import re, json
++
++pattern_dollar = r'^[\w.@+-]+$'
++pattern_AZ = r'\A[\w.@+-]+\Z'
++s = 'user\n'
++
++# Expected behavior: usernames with trailing newline should be rejected (expected=False)
++expected_reject = False
++
++actual_dollar = bool(re.match(pattern_dollar, s))
++actual_AZ = bool(re.match(pattern_AZ, s))
++
++print('actual with ^...$ :', actual_dollar)
++print('actual with \A...\Z :', actual_AZ)
++
++# Determine pass/fail by comparing actual result to expected (should be False to pass)
++tests = []
++tests.append({'name':'validator_caret_dollar_should_reject_trailing_newline', 'status': 'PASSED' if actual_dollar == expected_reject else 'FAILED'})
++tests.append({'name':'validator_AZ_should_reject_trailing_newline', 'status': 'PASSED' if actual_AZ == expected_reject else 'FAILED'})
++
++print('__JSON_START__')
++print(json.dumps({'tests': tests}, indent=2))
++print('__JSON_END__')
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..75b6aa2c0e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "validator_caret_dollar_should_reject_trailing_newline",
++      "status": "FAILED"
++    },
++    {
++      "name": "validator_AZ_should_reject_trailing_newline",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,132 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..176af2b60
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,55 @@
++#!/bin/bash
++set -euo pipefail
++output="$(python3 /testbed/test_reproduction.py 2>&1 || true)"
++echo "$output"
++
++python3 - <<'PY' "$(printf "%s" "$output")"
++import json,sys,re
++out = sys.argv[1]
++
++def parse_bool(key):
++    m = re.search(rf'{key}:\s*(True|False)', out)
++    if not m:
++        return None
++    return m.group(1) == 'True'
++
++sig = parse_bool('SIGNATURE_HAS_WARM_START')
++cons = parse_bool('CONSTRUCTOR_ACCEPTS_WARM_START')
++inc = None
++m = re.search(r'WARM_START_AFTER_INIT_INCREMENTED:\s*(True|False)\s*(\d+)\s*(\d+)', out)
++if m:
++    inc = m.group(1) == 'True'
++
++# Expectations set to the PR-desired behavior (i.e., what the PR aims to add).
++# This will cause tests to FAIL with current code, reproducing the issue.
++expected = {
++    "signature": True,     # PR wants warm_start exposed in __init__
++    "constructor": True,   # PR wants constructor to accept warm_start kwarg
++    "increment": True      # warm_start-after-init should allow increment (this is already true)
++}
++
++tests = []
++
++def status_for(observed, expect):
++    if observed is None:
++        return "ERROR"
++    return "PASSED" if observed == expect else "FAILED"
++
++tests.append({
++    "name": "/testbed/test_reproduction.py::test_signature_warm_start_exposed",
++    "status": status_for(sig, expected["signature"])
++})
++tests.append({
++    "name": "/testbed/test_reproduction.py::test_constructor_accepts_warm_start_kwarg",
++    "status": status_for(cons, expected["constructor"])
++})
++tests.append({
++    "name": "/testbed/test_reproduction.py::test_warm_start_after_init_allows_increment",
++    "status": status_for(inc, expected["increment"])
++})
++
++path = "/testbed/test_status.json"
++with open(path, "w") as f:
++    json.dump({"tests": tests}, f, indent=2)
++print("Wrote", path)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..b6b13b66a
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,42 @@
++import inspect
++import sys
++import numpy as np
++from sklearn.ensemble import IsolationForest
++
++def main():
++    results = {}
++    # Test A: is 'warm_start' present in __init__ signature?
++    sig = inspect.signature(IsolationForest.__init__)
++    has_warm_in_sig = 'warm_start' in sig.parameters
++    print("SIGNATURE_HAS_WARM_START:", has_warm_in_sig)
++    results['signature_has_warm'] = has_warm_in_sig
++
++    # Test B: does the constructor accept warm_start kwarg?
++    try:
++        IsolationForest(warm_start=True)
++        constructor_accepts = True
++    except TypeError:
++        constructor_accepts = False
++    print("CONSTRUCTOR_ACCEPTS_WARM_START:", constructor_accepts)
++    results['constructor_accepts_warm'] = constructor_accepts
++
++    # Test C: can we enable warm_start after init and have incremental estimators?
++    rng = np.random.RandomState(0)
++    X = rng.randn(100, 2)
++    clf = IsolationForest(n_estimators=5, random_state=0)
++    clf.fit(X)
++    first = len(getattr(clf, "estimators_", []))
++    # enable warm_start after init and increase n_estimators
++    setattr(clf, "warm_start", True)
++    clf.n_estimators = 10
++    clf.fit(X)
++    second = len(getattr(clf, "estimators_", []))
++    incremented = (second > first)
++    print("WARM_START_AFTER_INIT_INCREMENTED:", incremented, first, second)
++    results['warm_after_init_incremented'] = incremented
++
++    # Print a summary line for parsing
++    print("SUMMARY_RESULTS:", results)
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..567b5f859
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::test_signature_warm_start_exposed",
++      "status": "FAILED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::test_constructor_accepts_warm_start_kwarg",
++      "status": "FAILED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::test_warm_start_after_init_allows_increment",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

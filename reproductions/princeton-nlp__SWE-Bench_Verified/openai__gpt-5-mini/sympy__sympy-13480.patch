@@ -1,0 +1,56 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..2e7635e40
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++# Run the reproduction and write /testbed/test_status.json reflecting actual outcome.
++mkdir -p /testbed
++outfile=$(mktemp)
++rc=0
++python3 test_reproduction.py >"$outfile" 2>&1 || rc=$?
++output=$(cat "$outfile")
++# Echo the execution output for visibility
++echo "=== TEST OUTPUT ==="
++echo "$output"
++echo "=== END OUTPUT ==="
++# Decide status based on exit code
++if [ "${rc:-0}" -ne 0 ]; then status="FAILED"; else status="PASSED"; fi
++# Write JSON test status file
++python3 - <<PY "$status"
++import json,sys
++status=sys.argv[1]
++tests=[{"name":"test_reproduction.py::test_subs_coth_log_tan","status": "PASSED" if status=="PASSED" else "FAILED"}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PY
++rm -f "$outfile"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..7364e5b95
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,7 @@
++from sympy import Symbol, coth, log, tan
++x = Symbol('x')
++e = coth(log(tan(x)))
++print("Expression:", e)
++print("Subs x=2 result:")
++# This should raise the NameError in the buggy SymPy, or produce a result if fixed.
++print(e.subs(x, 2))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..7328567e5
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_subs_coth_log_tan",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

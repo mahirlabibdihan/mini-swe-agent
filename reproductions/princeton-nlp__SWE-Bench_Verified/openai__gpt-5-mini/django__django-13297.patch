@@ -1,0 +1,121 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..329d0434b0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction script and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Derive test statuses from actual output
++status1="FAILED"
++status2="FAILED"
++if echo "$output" | grep -q "Retrieved:"; then status1="PASSED"; fi
++if echo "$output" | grep -q "Retrieved with str:"; then status2="PASSED"; fi
++
++python3 - <<PY2 "$output"
++import json,sys
++o=sys.argv[1]
++statuses=[]
++statuses.append({"name":"test_reproduction.py::get_object_or_404_with_lazy","status":"PASSED" if "Retrieved:" in o else "FAILED"})
++statuses.append({"name":"test_reproduction.py::get_object_or_404_with_str","status":"PASSED" if "Retrieved with str:" in o else "FAILED"})
++from pathlib import Path
++Path("test_status.json").write_text(json.dumps({"tests":statuses}, indent=2))
++print("WROTE test_status.json")
++PY2
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..77136f8e30
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,48 @@
++import sys, traceback
++from django.conf import settings
++
++settings.configure(
++    DEBUG=True,
++    SECRET_KEY='test',
++    DATABASES={'default': {'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++    INSTALLED_APPS=['testapp'],
++)
++import django
++django.setup()
++
++from django.db import connection
++from testapp.models import Account
++# Create the table for Account
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Account)
++
++# Create an instance to query
++Account.objects.create(slug='offer-1')
++
++from django.utils.functional import SimpleLazyObject
++from django.shortcuts import get_object_or_404
++
++lazy = SimpleLazyObject(lambda: 'offer-1')
++
++print("Type of lazy:", type(lazy))
++try:
++    print("Calling get_object_or_404 with lazy slug...")
++    obj = get_object_or_404(Account, slug=lazy)
++    print("Retrieved:", obj.slug)
++    outcome = "PASSED"
++except Exception as e:
++    print("Exception:", repr(e))
++    traceback.print_exc()
++    outcome = "FAILED"
++
++try:
++    print("Calling get_object_or_404 with str(lazy)...")
++    obj2 = get_object_or_404(Account, slug=str(lazy))
++    print("Retrieved with str:", obj2.slug)
++    outcome2 = "PASSED"
++except Exception as e:
++    print("Exception on str:", repr(e))
++    traceback.print_exc()
++    outcome2 = "FAILED"
++
++print("OUTCOME", outcome, outcome2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..f6a6dc3530
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::get_object_or_404_with_lazy",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::get_object_or_404_with_str",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..21908fcb41
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,7 @@
++from django.db import models
++
++class Account(models.Model):
++    slug = models.SlugField(max_length=255, unique=True)
++
++    def __str__(self):
++        return self.slug

@@ -1,0 +1,61 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..04c69195d6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++status="PASSED"
++if printf "%s" "$output" | grep -q '^RAISED_EXCEPTION'; then
++  status="FAILED"
++elif printf "%s" "$output" | grep -q '^NO_EXCEPTION'; then
++  status="PASSED"
++else
++  status="ERROR"
++fi
++python3 - <<PY
++import json
++tests = [{"name":"test_reproduction.py::test_ax_bar_all_nan","status": "$status"}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print("WROTE /testbed/test_status.json with status:", "$status")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..10298fe7ec
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,15 @@
++import numpy as np
++import matplotlib
++matplotlib.use("Agg")
++import matplotlib.pyplot as plt
++import traceback, sys
++
++try:
++    f, ax = plt.subplots()
++    col = ax.bar([np.nan], [np.nan])
++    # If no exception, report the collection type and size
++    print("NO_EXCEPTION:type={},count={}".format(type(col).__name__, len(col)))
++except Exception as e:
++    # Report that an exception was raised and its class
++    print("RAISED_EXCEPTION:{}".format(type(e).__name__))
++    traceback.print_exc()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..33cb5c3e10
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_ax_bar_all_nan",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

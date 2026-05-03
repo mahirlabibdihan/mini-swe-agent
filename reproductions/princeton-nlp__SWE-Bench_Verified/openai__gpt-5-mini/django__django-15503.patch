@@ -1,0 +1,188 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..d580dde2fd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,124 @@
++#!/usr/bin/env bash
++set -euo pipefail
++export PYTHONUNBUFFERED=1
++
++# Install the Django version from the report
++pip3 install "Django==4.0.3" --quiet
++
++WORKDIR=/tmp/django_repro
++rm -rf "$WORKDIR"
++mkdir -p "$WORKDIR"
++cd "$WORKDIR"
++
++# Create minimal project structure
++cat > manage.py <<'PY' 
++#!/usr/bin/env python3
++import os, sys
++if __name__ == "__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "proj.settings")
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
++PY
++chmod +x manage.py
++
++mkdir proj
++cat > proj/__init__.py <<'PY'
++PY
++
++cat > proj/settings.py <<'PY'
++SECRET_KEY = "repro-secret-key"
++DEBUG = True
++INSTALLED_APPS = [
++    "django.contrib.contenttypes",
++    "markers",
++]
++DATABASES = {
++    "default": {
++        "ENGINE": "django.db.backends.sqlite3",
++        "NAME": "db.sqlite3",
++    }
++}
++MIDDLEWARE = []
++ROOT_URLCONF = None
++TIME_ZONE = "UTC"
++USE_TZ = True
++DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
++# Disable migrations for the 'markers' app to let the test runner create the tables without migration files
++MIGRATION_MODULES = {"markers": None}
++PY
++
++# Create the app 'markers' with model and test from the PR description
++mkdir -p markers
++cat > markers/__init__.py <<'PY'
++PY
++
++cat > markers/models.py <<'PY'
++from django.db import models
++
++class JsonFieldHasKeyTest(models.Model):
++    data = models.JSONField()
++PY
++
++cat > markers/tests.py <<'PY'
++from django.test import TestCase
++from .models import JsonFieldHasKeyTest
++
++class JsonFieldHasKeyTestCase(TestCase):
++    def setUp(self) -> None:
++        test = JsonFieldHasKeyTest(data={'foo': 'bar'})
++        test2 = JsonFieldHasKeyTest(data={'1111': 'bar'})
++        test.save()
++        test2.save()
++
++    def test_json_field_has_key(self):
++        c1 = JsonFieldHasKeyTest.objects.filter(data__has_key='foo').count()
++        c2 = JsonFieldHasKeyTest.objects.filter(data__has_key='1111').count()
++        self.assertEqual(c1, 1, "Should have found 1 entry with key 'foo'")
++        self.assertEqual(c2, 1, "Should have found 1 entry with key '1111'")
++PY
++
++# Run the Django tests and capture output
++TEST_OUTPUT=$("$WORKDIR/manage.py" test markers --verbosity=2 2>&1) || true
++echo "$TEST_OUTPUT"
++
++# Parse the test output to determine pass/fail for each test
++python3 - <<'PY' "$(echo "$TEST_OUTPUT")"
++import sys, json
++out = sys.argv[1]
++
++# Default to ERROR if not found
++status_foo = "ERROR"
++status_num = "ERROR"
++
++# Look for standard unittest/Django test output markers
++# If the test run reports "OK", then all tests passed.
++if "\nOK\n" in out or out.strip().endswith("OK"):
++    status_foo = "PASSED"
++    status_num = "PASSED"
++else:
++    # Try to detect failure for specific assertion messages
++    if "Should have found 1 entry with key 'foo'" in out:
++        status_foo = "FAILED"
++    else:
++        # if test name passed, mark passed
++        if "test_json_field_has_key (" in out and "ok" in out:
++            status_foo = "PASSED"
++    if "Should have found 1 entry with key '1111'" in out:
++        status_num = "FAILED"
++    else:
++        if "test_json_field_has_key (" in out and "ok" in out:
++            status_num = "PASSED"
++
++# Compose statuses. Use deterministic test names.
++statuses = [
++    {"name": "markers/tests.py::JsonFieldHasKeyTestCase::test_json_field_has_key_string", "status": status_foo},
++    {"name": "markers/tests.py::JsonFieldHasKeyTestCase::test_json_field_has_key_numeric", "status": status_num},
++]
++
++open("/testbed/test_status.json","w").write(json.dumps({"tests": statuses}, indent=2))
++print("WROTE /testbed/test_status.json")
++PY
++
++# Print the status file for visibility
++echo "---- /testbed/test_status.json ----"
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..23a4be044d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,33 @@
++#!/usr/bin/env python3
++import sqlite3
++conn = sqlite3.connect(':memory:')
++c = conn.cursor()
++c.execute('CREATE TABLE t(id INTEGER PRIMARY KEY, data TEXT)')
++c.execute('INSERT INTO t(data) VALUES(?)', ('{"foo":"bar"}',))
++c.execute('INSERT INTO t(data) VALUES(?)', ('{"1111":"bar"}',))
++conn.commit()
++
++# Query using regular key (foo)
++try:
++    c.execute("SELECT json_extract(data, '$.foo') FROM t WHERE id=1")
++    vfoo = c.fetchone()[0]
++except Exception as e:
++    vfoo = f"ERROR: {e}"
++
++# Query using numeric-looking key without quotes
++try:
++    c.execute("SELECT json_extract(data, '$.1111') FROM t WHERE id=2")
++    vnum_unq = c.fetchone()[0]
++except Exception as e:
++    vnum_unq = f"ERROR: {e}"
++
++# Query using numeric-looking key with quotes
++try:
++    c.execute('SELECT json_extract(data, \'$."1111"\') FROM t WHERE id=2')
++    vnum_q = c.fetchone()[0]
++except Exception as e:
++    vnum_q = f"ERROR: {e}"
++
++print(f"V_FOO:{vfoo}")
++print(f"V_NUM_UNQUOTED:{vnum_unq}")
++print(f"V_NUM_QUOTED:{vnum_q}")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..a2dfc38803
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "markers/tests.py::JsonFieldHasKeyTestCase::test_json_field_has_key_string",
++      "status": "ERROR"
++    },
++    {
++      "name": "markers/tests.py::JsonFieldHasKeyTestCase::test_json_field_has_key_numeric",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

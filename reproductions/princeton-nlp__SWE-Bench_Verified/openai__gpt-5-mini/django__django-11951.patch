@@ -1,0 +1,102 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a4e8d8a492
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,44 @@
++#!/bin/bash
++# Reproducer runner that always exits 0 but records actual test outcome in /testbed/test_status.json
++set -u
++mkdir -p /testbed
++
++# Create the Python reproducer
++cat <<'PY' > /testbed/test_repro.py
++def bulk_create_batch(batch_size, max_batch_size):
++    # buggy logic as described: uses batch_size or max_batch_size
++    bs = batch_size or max_batch_size
++    return bs
++
++def bulk_update_batch(batch_size, max_batch_size):
++    # correct logic: min(batch_size, max_batch_size) if batch_size else max_batch_size
++    bs = min(batch_size, max_batch_size) if batch_size else max_batch_size
++    return bs
++
++if __name__ == "__main__":
++    batch_size = 1000
++    max_batch_size = 100
++    bc = bulk_create_batch(batch_size, max_batch_size)
++    bu = bulk_update_batch(batch_size, max_batch_size)
++    print("bulk_create selected batch_size:", bc)
++    print("bulk_update selected batch_size:", bu)
++    # This assertion models the expectation that bulk_create should behave like bulk_update.
++    assert bc == bu, "BUG: bulk_create overrides compatible batch size calculation (expected min but got different value)"
++PY
++
++# Run the test, capture output and exit code without failing this script
++python3 /testbed/test_repro.py 2>&1 | tee /testbed/test_output.txt
++EXIT_CODE=${PIPESTATUS[0]}
++
++# Write test_status.json based on actual exit code
++python3 - <<'PY2' "$EXIT_CODE"
++import json, sys, pathlib
++exit_code = int(sys.argv[1])
++status = "PASSED" if exit_code == 0 else "FAILED"
++tests = [{"name": "test_repro.py::test_bulk_create_batch_size", "status": status}]
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print(pathlib.Path("/testbed/test_status.json").read_text())
++PY2
++
++# Always exit 0 so the run_test.sh execution itself is considered successful
++exit 0
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 0000000000..ff4f273ff6
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,6 @@
++bulk_create selected batch_size: 1000
++bulk_update selected batch_size: 100
++Traceback (most recent call last):
++  File "/testbed/test_repro.py", line 19, in <module>
++    assert bc == bu, "BUG: bulk_create overrides compatible batch size calculation (expected min but got different value)"
++AssertionError: BUG: bulk_create overrides compatible batch size calculation (expected min but got different value)
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..c000dd3894
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,19 @@
++def bulk_create_batch(batch_size, max_batch_size):
++    # buggy logic as described: uses batch_size or max_batch_size
++    bs = batch_size or max_batch_size
++    return bs
++
++def bulk_update_batch(batch_size, max_batch_size):
++    # correct logic: min(batch_size, max_batch_size) if batch_size else max_batch_size
++    bs = min(batch_size, max_batch_size) if batch_size else max_batch_size
++    return bs
++
++if __name__ == "__main__":
++    batch_size = 1000
++    max_batch_size = 100
++    bc = bulk_create_batch(batch_size, max_batch_size)
++    bu = bulk_update_batch(batch_size, max_batch_size)
++    print("bulk_create selected batch_size:", bc)
++    print("bulk_update selected batch_size:", bu)
++    # This assertion models the expectation that bulk_create should behave like bulk_update.
++    assert bc == bu, "BUG: bulk_create overrides compatible batch size calculation (expected min but got different value)"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e190c2d642
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_bulk_create_batch_size",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

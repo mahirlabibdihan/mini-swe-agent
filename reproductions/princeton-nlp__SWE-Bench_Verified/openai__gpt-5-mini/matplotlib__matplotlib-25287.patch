@@ -1,0 +1,62 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8d0fbe0705
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,14 @@
++#!/bin/bash
++set -uo pipefail
++mkdir -p /testbed
++# Run the reproduction test (keep output visible)
++python3 test_reproduction.py
++rv=$?
++status="FAILED"
++if [ $rv -eq 0 ]; then status="PASSED"; fi
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_reproduction.py::test_offset_labelcolor", "status": "$status"}]}
++JSON
++echo "Wrote /testbed/test_status.json with status: $status"
++# Ensure the script itself exits successfully so the harness sees it executed
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..d6b7e16adf
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,29 @@
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++from matplotlib import colors
++import sys
++
++# Set distinct colors to detect incorrect inheritance
++plt.rcParams.update({'ytick.labelcolor': 'red', 'ytick.color': 'black'})
++
++fig = plt.figure()
++ax = fig.add_subplot(1,1,1)
++ax.plot([1.01e9, 1.02e9, 1.03e9])
++# Force draw so offset text is created/updated
++fig.canvas.draw()
++
++offset = ax.yaxis.get_offset_text()
++obs = colors.to_rgba(offset.get_color())
++exp = colors.to_rgba(plt.rcParams['ytick.labelcolor'])
++
++print("observed_rgba:", obs)
++print("expected_rgba:", exp)
++
++# Compare with tolerance
++if all(abs(a-b) < 1e-8 for a, b in zip(obs, exp)):
++    print("RESULT: PASS (offset text uses ytick.labelcolor)")
++    sys.exit(0)
++else:
++    print("RESULT: FAIL (offset text does NOT use ytick.labelcolor)")
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..605bf9008b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_reproduction.py::test_offset_labelcolor", "status": "FAILED"}]}

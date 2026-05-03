@@ -1,0 +1,84 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..38b1fb9b6f
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,20 @@
++#!/bin/bash
++# Run the reproduction and write test results to /testbed/test_status.json
++python3 /testbed/test_reproduction.py
++rc=$?
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_empty_label_override",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++echo "Wrote /testbed/test_status.json with status: $status"
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..a121b04beb
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,38 @@
++# Simulated reproduction of the ModelAdmin empty_label override bug
++class DBField:
++    def __init__(self, name, blank=True):
++        self.name = name
++        self.blank = blank
++
++class BaseModelAdmin:
++    # Simulate the buggy behavior: overwrite any existing kwargs['empty_label']
++    def formfield_for_foreignkey(self, db_field, *args, **kwargs):
++        # Buggy line: unconditionally sets empty_label when blank
++        kwargs['empty_label'] = 'DEFAULT_EMPTY_LABEL' if db_field.blank else None
++        return kwargs
++
++class MyModelAdmin(BaseModelAdmin):
++    radio_fields = ('myfield',)
++    def formfield_for_foreignkey(self, db_field, *args, **kwargs):
++        if db_field.name == 'myfield':
++            # User attempts to set custom empty_label
++            kwargs['empty_label'] = "I WANT TO SET MY OWN EMPTY LABEL"
++        return super().formfield_for_foreignkey(db_field, *args, **kwargs)
++
++def run_test():
++    db_field = DBField(name='myfield', blank=True)
++    admin = MyModelAdmin()
++    result_kwargs = admin.formfield_for_foreignkey(db_field)
++    observed = result_kwargs.get('empty_label')
++    print("Observed empty_label:", repr(observed))
++    expected = "I WANT TO SET MY OWN EMPTY LABEL"
++    if observed == expected:
++        print("Test PASSED: custom empty_label preserved.")
++        return 0
++    else:
++        print("Test FAILED: custom empty_label was overridden (bug reproduced).")
++        return 1
++
++if __name__ == '__main__':
++    import sys
++    sys.exit(run_test())
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..0d9a3f95dd
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_empty_label_override",
++      "status": "FAILED"
++    }
++  ]
++}

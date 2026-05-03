@@ -1,0 +1,109 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..fd52499cfa
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,44 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction script and capture output (always succeed)
++python3 /testbed/test_reproduction.py > /tmp/output.txt 2>&1 || true
++
++# Parse output to derive is_valid results
++python3 - <<'PY2'
++import json, sys
++lines = open('/tmp/output.txt').read().splitlines()
++valids = []
++for line in lines:
++    if line.startswith("IS_VALID:"):
++        val = line.split("IS_VALID:")[1].strip()
++        if val == 'True':
++            val_bool = True
++        elif val == 'False':
++            val_bool = False
++        else:
++            val_bool = None
++        valids.append(val_bool)
++
++test_names = [
++    "test_reproduction.py::test_empty_both",
++    "test_reproduction.py::test_one_nonempty"
++]
++
++statuses = []
++# If we didn't get any IS_VALID lines, mark tests as ERROR
++if len(valids) < len(test_names):
++    for name in test_names:
++        statuses.append({"name": name, "status": "ERROR"})
++else:
++    # Expected per PR: both should be False
++    expected = [False, False]
++    for name, observed, exp in zip(test_names, valids, expected):
++        status = "PASSED" if observed == exp else "FAILED"
++        statuses.append({"name": name, "status": status})
++
++open('/testbed/test_status.json', 'w').write(json.dumps({"tests": statuses}, indent=2))
++print("----- script output -----")
++print(open('/tmp/output.txt').read())
++print("----- test_status.json -----")
++print(open('/testbed/test_status.json').read())
++PY2
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..9e94a1dfc4
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,34 @@
++import django
++from django.conf import settings
++# Minimal settings so django.forms can be used outside a full project
++settings.configure(USE_I18N=False, SECRET_KEY='test-secret', INSTALLED_APPS=[])
++django.setup()
++
++from django import forms
++
++class MF(forms.MultiValueField):
++    widget = forms.MultiWidget
++    def __init__(self):
++        fields = [
++            forms.CharField(required=False),
++            forms.CharField(required=True),
++        ]
++        widget = self.widget(widgets=[f.widget for f in fields], attrs={})
++        super(MF, self).__init__(fields=fields, widget=widget, require_all_fields=False, required=False)
++    def compress(self, value):
++        return []
++
++class F(forms.Form):
++    mf = MF()
++
++def run_case(data, label):
++    f = F(data)
++    print("CASE_LABEL:", label)
++    print("DATA:", data)
++    print("IS_VALID:", f.is_valid())
++    print("ERRORS:", f.errors)
++    print("----")
++
++if __name__ == '__main__':
++    run_case({'mf_0': '', 'mf_1': ''}, 'empty_both')
++    run_case({'mf_0': 'xxx', 'mf_1': ''}, 'one_nonempty')
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..bb501f9bcc
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_empty_both",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_one_nonempty",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

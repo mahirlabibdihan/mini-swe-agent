@@ -1,0 +1,74 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..e2e0fd8d1
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,44 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Capture only the last 5 lines to avoid deprecation warnings preceding the repr outputs
++output=$(python3 test_repro.py 2>&1 | tail -n 5 || true)
++
++# PR-described buggy outputs: if actual equals these, the bug is present -> FAIL
++buggy_expected=(
++"Poly(x**2, x, domain='ZZ')"
++"x*Poly(x, x, domain='ZZ')"
++"Poly(-2*x, x, domain='ZZ')"
++"-2*Poly(x, x, domain='ZZ')"
++"Poly(-2*x, x, domain='ZZ')"
++)
++
++names=(
++"/testbed/test_repro.py::test_right_mul_Poly"
++"/testbed/test_repro.py::test_left_mul_Poly"
++"/testbed/test_repro.py::test_negint_right_mul"
++"/testbed/test_repro.py::test_Sneg_left_mul"
++"/testbed/test_repro.py::test_negint_left_mul"
++)
++
++IFS=$'\n' read -d '' -r -a lines <<< "$output" || true
++statuses=()
++for i in "${!names[@]}"; do
++  actual="${lines[i]:-}"
++  # If actual matches buggy_expected, mark FAILED (reproduction of the bug)
++  if [ "$actual" = "${buggy_expected[i]}" ]; then
++    status="FAILED"
++  else
++    status="PASSED"
++  fi
++  statuses+=("{\"name\":\"${names[i]}\",\"status\":\"${status}\"}")
++done
++
++printf '{"tests": [%s]}\n' "$(IFS=,; echo "${statuses[*]}")" > test_status.json
++
++# Print outputs for visibility
++echo "Filtered reproduction output:"
++echo "$output"
++echo
++echo "Wrote /testbed/test_status.json:"
++cat test_status.json
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..28e996868
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,11 @@
++from sympy import symbols, Poly, S
++x = symbols('x')
++cases = [
++    ('Poly(x)*x', Poly(x)*x),
++    ('x*Poly(x)', x*Poly(x)),
++    ('-2*Poly(x)', -2*Poly(x)),
++    ('S(-2)*Poly(x)', S(-2)*Poly(x)),
++    ('Poly(x)*S(-2)', Poly(x)*S(-2)),
++]
++for name, res in cases:
++    print(repr(res))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..d8ef30560
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name":"/testbed/test_repro.py::test_right_mul_Poly","status":"FAILED"},{"name":"/testbed/test_repro.py::test_left_mul_Poly","status":"FAILED"},{"name":"/testbed/test_repro.py::test_negint_right_mul","status":"FAILED"},{"name":"/testbed/test_repro.py::test_Sneg_left_mul","status":"FAILED"},{"name":"/testbed/test_repro.py::test_negint_left_mul","status":"FAILED"}]}

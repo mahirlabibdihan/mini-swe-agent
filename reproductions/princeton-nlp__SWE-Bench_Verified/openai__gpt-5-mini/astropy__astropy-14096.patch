@@ -1,0 +1,72 @@
+diff --git a/repro_output.txt b/repro_output.txt
+new file mode 100644
+index 000000000..40f8ff14f
+--- /dev/null
++++ b/repro_output.txt
+@@ -0,0 +1,6 @@
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 10, in <module>
++    c.prop
++  File "/testbed/astropy/coordinates/sky_coordinate.py", line 898, in __getattr__
++    raise AttributeError(
++AttributeError: 'custom_coord' object has no attribute 'prop'
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..e332d2708
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/bin/bash
++set -euo pipefail
++
++python3 test_reproduction.py > /testbed/repro_output.txt 2>&1 || true
++
++status="PASSED"
++if grep -q "has no attribute 'prop'" /testbed/repro_output.txt; then
++  status="FAILED"
++fi
++
++STATUS="$status" python3 - <<PY
++import json, os
++from pathlib import Path
++status = os.environ["STATUS"]
++tests = [{"name":"test_reproduction.py::test_subclass_skycoord","status":status}]
++Path("/testbed/test_status.json").write_text(json.dumps({"tests":tests}, indent=2))
++print(status)
++PY
++
++echo "----- SCRIPT OUTPUT (/testbed/repro_output.txt) -----"
++cat /testbed/repro_output.txt
++echo "----- WROTE /testbed/test_status.json -----"
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..66f1f235d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,10 @@
++import astropy.coordinates as coord
++
++class custom_coord(coord.SkyCoord):
++    @property
++    def prop(self):
++        return self.random_attr
++
++if __name__ == "__main__":
++    c = custom_coord('00h42m30s', '+41d12m00s', frame='icrs')
++    c.prop
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..a59762520
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_subclass_skycoord",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

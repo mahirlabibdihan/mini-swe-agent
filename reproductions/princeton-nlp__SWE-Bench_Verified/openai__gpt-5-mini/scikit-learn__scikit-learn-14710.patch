@@ -1,0 +1,119 @@
+diff --git a/output.txt b/output.txt
+new file mode 100644
+index 000000000..5c798a523
+--- /dev/null
++++ b/output.txt
+@@ -0,0 +1,24 @@
++Traceback (most recent call last):
++  File "test_repro.py", line 11, in <module>
++    gbrt.fit(X, y)
++  File "/testbed/sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py", line 254, in fit
++    X_binned_val, y_val,
++  File "/testbed/sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py", line 430, in _check_early_stopping_scorer
++    self.scorer_(self, X_binned_small_train, y_small_train)
++  File "/testbed/sklearn/metrics/scorer.py", line 241, in _passthrough_scorer
++    return estimator.score(*args, **kwargs)
++  File "/testbed/sklearn/base.py", line 368, in score
++    return accuracy_score(y, self.predict(X), sample_weight=sample_weight)
++  File "/testbed/sklearn/metrics/classification.py", line 176, in accuracy_score
++    y_type, y_true, y_pred = _check_targets(y_true, y_pred)
++  File "/testbed/sklearn/metrics/classification.py", line 94, in _check_targets
++    unique_values = np.union1d(y_true, y_pred)
++  File "<__array_function__ internals>", line 6, in union1d
++  File "/opt/miniconda3/envs/testbed/lib/python3.6/site-packages/numpy/lib/arraysetops.py", line 749, in union1d
++    return unique(np.concatenate((ar1, ar2), axis=None))
++  File "<__array_function__ internals>", line 6, in unique
++  File "/opt/miniconda3/envs/testbed/lib/python3.6/site-packages/numpy/lib/arraysetops.py", line 261, in unique
++    ret = _unique1d(ar, return_index, return_inverse, return_counts)
++  File "/opt/miniconda3/envs/testbed/lib/python3.6/site-packages/numpy/lib/arraysetops.py", line 322, in _unique1d
++    ar.sort()
++TypeError: '<' not supported between instances of 'str' and 'float'
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..04bc63127
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,51 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Create the reproduction Python script
++cat > test_repro.py <<'PY2'
++import numpy as np
++from sklearn.experimental import enable_hist_gradient_boosting  # noqa: F401
++from sklearn.ensemble import HistGradientBoostingClassifier
++
++# Reproduction of the issue described in the PR
++X = np.random.RandomState(0).randn(100, 10)
++y = np.array(['x'] * 50 + ['y'] * 50, dtype=object)
++
++gbrt = HistGradientBoostingClassifier(n_iter_no_change=10)
++# Let exceptions propagate so we capture them
++gbrt.fit(X, y)
++print("Model fitted successfully")
++PY2
++
++# Run the reproduction and capture output and exit code
++if python3 test_repro.py > output.txt 2>&1; then
++    rc=0
++else
++    rc=$?
++fi
++
++if [ "$rc" -eq 0 ]; then
++    status="PASSED"
++else
++    status="FAILED"
++fi
++
++# Write the test status JSON according to the required schema
++cat > test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_histgb_string_target",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++# Emit captured output for visibility and exit 0 so the runner itself succeeds
++echo "=== test output ==="
++cat output.txt || true
++echo "=== end output ==="
++echo "Wrote /testbed/test_status.json with status: $status"
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..2ac4d8bdc
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,12 @@
++import numpy as np
++from sklearn.experimental import enable_hist_gradient_boosting  # noqa: F401
++from sklearn.ensemble import HistGradientBoostingClassifier
++
++# Reproduction of the issue described in the PR
++X = np.random.RandomState(0).randn(100, 10)
++y = np.array(['x'] * 50 + ['y'] * 50, dtype=object)
++
++gbrt = HistGradientBoostingClassifier(n_iter_no_change=10)
++# Let exceptions propagate so we capture them
++gbrt.fit(X, y)
++print("Model fitted successfully")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..e7fddb1f4
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_histgb_string_target",
++      "status": "FAILED"
++    }
++  ]
++}

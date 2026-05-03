@@ -1,0 +1,161 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..0628332497
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,33 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd /testbed
++# Run the reproduction script and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++# Determine status based on the script's RESULT lines
++status="SKIPPED"
++test_name="test_reproduction.py::test_save_behavior"
++
++if echo "$output" | grep -q "NO_DJANGO"; then
++  status="SKIPPED"
++elif echo "$output" | grep -q "RESULT: INSERT_FAILED_INTEGRITY_ERROR"; then
++  # This matches the reported Django 3.0 behavior (two INSERTs, second fails)
++  status="FAILED"
++elif echo "$output" | grep -q "RESULT: UPDATED_EXISTING_OR_NO_DUPLICATE"; then
++  # This matches the older/backwards-compatible behavior (UPDATE performed)
++  status="PASSED"
++else
++  # Any other outcome treat as ERROR
++  status="ERROR"
++fi
++
++python3 - <<PYTHON > /testbed/test_status.json
++import json, sys
++print(json.dumps({"tests": [{"name": "$test_name", "status": "$status"}]}, indent=2))
++PYTHON
++
++# Also write the raw output for inspection
++printf "%s\n" "$output" > /testbed/test_output.log
++
++# Exit with success so the harness can inspect /testbed/test_status.json
++exit 0
+diff --git a/test_output.log b/test_output.log
+new file mode 100644
+index 0000000000..048ba92721
+--- /dev/null
++++ b/test_output.log
+@@ -0,0 +1,5 @@
++STARTING_TEST
++TABLE_CREATED
++CREATED_S0_PK d66c3630-7306-4625-a4dc-4c1390961bfd
++SECOND_SAVE_INTEGRITY_ERROR IntegrityError('UNIQUE constraint failed: testapp_sample.id',)
++RESULT: INSERT_FAILED_INTEGRITY_ERROR
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..6cc348e189
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,73 @@
++#!/usr/bin/env python3
++import sys, os
++print("STARTING_TEST")
++try:
++    import django
++except Exception as e:
++    print("NO_DJANGO", str(e))
++    sys.exit(0)
++
++from django.conf import settings
++DB_PATH = "/tmp/test_db.sqlite3"
++if os.path.exists(DB_PATH):
++    try:
++        os.remove(DB_PATH)
++    except Exception:
++        pass
++
++settings.configure(
++    INSTALLED_APPS=["testapp"],
++    DATABASES={
++        "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": DB_PATH}
++    },
++    SECRET_KEY="test-secret",
++    USE_TZ=True,
++)
++import django
++django.setup()
++
++from django.db import connection
++from testapp.models import Sample
++from django.db.utils import IntegrityError
++
++# Ensure table exists (create model table without migrations)
++with connection.schema_editor() as schema_editor:
++    try:
++        schema_editor.create_model(Sample)
++        print("TABLE_CREATED")
++    except Exception as e:
++        print("TABLE_CREATE_FAILED", repr(e))
++
++# Perform the sequence described in the PR description
++try:
++    s0 = Sample.objects.create()
++    print("CREATED_S0_PK", str(s0.pk))
++except Exception as e:
++    print("CREATE_S0_FAILED", repr(e))
++    sys.exit(1)
++
++# Create a new instance with the same pk and call save()
++s1 = Sample(pk=s0.pk, name="Test 1")
++try:
++    s1.save()
++    # If no exception, second save performed an UPDATE or a successful INSERT (rare)
++    print("SECOND_SAVE_COMPLETED_NO_EXCEPTION")
++    # Check whether object was updated or a duplicate row created by querying count
++    cnt = Sample.objects.filter(pk=s0.pk).count()
++    print("ROW_COUNT_FOR_PK", cnt)
++    if cnt == 1:
++        print("RESULT: UPDATED_EXISTING_OR_NO_DUPLICATE")
++    else:
++        print("RESULT: MULTIPLE_ROWS_AFTER_SAVE")
++except IntegrityError as ie:
++    print("SECOND_SAVE_INTEGRITY_ERROR", repr(ie))
++    print("RESULT: INSERT_FAILED_INTEGRITY_ERROR")
++    # exit non-zero to signal failure-like behavior
++    sys.exit(2)
++except Exception as e:
++    print("SECOND_SAVE_OTHER_EXCEPTION", repr(e))
++    print("RESULT: OTHER_EXCEPTION")
++    sys.exit(3)
++
++print("TEST_FINISHED_SUCCESS")
++sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..6f1d82cd13
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_save_behavior",
++      "status": "FAILED"
++    }
++  ]
++}
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..c9d7c6b1d7
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,9 @@
++from uuid import uuid4
++from django.db import models
++
++class Sample(models.Model):
++    id = models.UUIDField(primary_key=True, default=uuid4)
++    name = models.CharField(blank=True, max_length=100)
++
++    class Meta:
++        app_label = "testapp"

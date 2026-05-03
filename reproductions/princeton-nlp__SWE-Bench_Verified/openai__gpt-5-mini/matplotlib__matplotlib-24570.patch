@@ -1,0 +1,219 @@
+diff --git a/repro_output.txt b/repro_output.txt
+new file mode 100644
+index 0000000000..fea4521a9d
+--- /dev/null
++++ b/repro_output.txt
+@@ -0,0 +1 @@
++ALIGN_RESULT: reversed
+diff --git a/run_and_exec.sh b/run_and_exec.sh
+new file mode 100644
+index 0000000000..053f2c8f42
+--- /dev/null
++++ b/run_and_exec.sh
+@@ -0,0 +1,95 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Create the Python reproduction script
++cat > /testbed/test_repro.py <<'PY'
++import numpy as np
++import matplotlib
++matplotlib.use("Agg")
++import matplotlib.pyplot as plt
++from matplotlib.offsetbox import DrawingArea, HPacker, AnchoredOffsetbox
++from matplotlib.patches import Rectangle
++
++fig = plt.figure(figsize=(2,2), dpi=100)
++ax = fig.add_subplot(111)
++ax.set_xlim(0, 1)
++ax.set_ylim(0, 1)
++ax.axis('off')
++
++# Two drawing areas with distinct facecolors for easy raster detection
++da1 = DrawingArea(10, 20)
++rect1 = Rectangle((0, 0), 10, 20, facecolor=(1,0,0), edgecolor='none')
++da1.add_artist(rect1)
++
++da2 = DrawingArea(10, 30)
++rect2 = Rectangle((0, 0), 10, 30, facecolor=(0,1,0), edgecolor='none')
++da2.add_artist(rect2)
++
++# Use align="bottom" as in the issue report
++align = "bottom"
++pack = HPacker(children=[da1, da2], pad=0, sep=5, align=align)
++box = AnchoredOffsetbox(child=pack, loc="center")
++ax.add_artist(box)
++
++fig.canvas.draw()
++w, h = fig.canvas.get_width_height()
++buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(h, w, 3)
++
++# Detect red and green regions (allowing for potential minor anti-aliasing)
++red_mask = (buf[:,:,0] > 200) & (buf[:,:,1] < 80) & (buf[:,:,2] < 80)
++green_mask = (buf[:,:,1] > 200) & (buf[:,:,0] < 80) & (buf[:,:,2] < 80)
++
++def bbox_from_mask(mask):
++    ys, xs = np.where(mask)
++    if ys.size == 0:
++        return None
++    return ys.min(), ys.max(), xs.min(), xs.max()
++
++rb = bbox_from_mask(red_mask)
++gb = bbox_from_mask(green_mask)
++
++if rb is None or gb is None:
++    print("ALIGN_RESULT: ambiguous")
++else:
++    red_top, red_bottom, _, _ = rb
++    green_top, green_bottom, _, _ = gb
++    # image y=0 is top, larger y is lower on the image.
++    if abs(red_bottom - green_bottom) <= 2:
++        print("ALIGN_RESULT: normal")
++    elif abs(red_top - green_top) <= 2:
++        print("ALIGN_RESULT: reversed")
++    else:
++        print("ALIGN_RESULT: ambiguous")
++PY
++
++# Create the runner script that executes the Python script and writes test_status.json
++cat > /testbed/run_test.sh <<'SH'
++#!/bin/bash
++set -euo pipefail
++PY_OUTPUT=$(/usr/bin/env python3 /testbed/test_repro.py 2>&1 || true)
++echo "$PY_OUTPUT"
++RESULT_LINE=$(printf "%s\n" "$PY_OUTPUT" | grep -Eo "ALIGN_RESULT: (reversed|normal|ambiguous)" || true)
++STATUS="ERROR"
++if printf "%s\n" "$RESULT_LINE" | grep -q "reversed"; then
++  STATUS="PASSED"
++elif printf "%s\n" "$RESULT_LINE" | grep -q "normal"; then
++  STATUS="FAILED"
++elif printf "%s\n" "$RESULT_LINE" | grep -q "ambiguous"; then
++  STATUS="ERROR"
++else
++  STATUS="ERROR"
++fi
++
++python3 - <<PYTHON "$STATUS"
++import json, sys, pathlib
++status = sys.argv[1]
++tests = [{"name": "/testbed/test_repro.py::test_hpacker_align", "status": status}]
++path = pathlib.Path("/testbed/test_status.json")
++path.write_text(json.dumps({"tests": tests}, indent=2))
++print("WROTE", path)
++PYTHON
++SH
++
++chmod +x /testbed/run_test.sh
++/testbed/run_test.sh
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..54d6952969
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,38 @@
++#!/bin/bash
++set -euo pipefail
++
++PY_OUTPUT=$(/usr/bin/env python3 /testbed/test_repro.py 2>&1 || true)
++echo "$PY_OUTPUT"
++
++if printf "%s\n" "$PY_OUTPUT" | grep -q "ALIGN_RESULT: reversed"; then
++  observed="reversed"
++elif printf "%s\n" "$PY_OUTPUT" | grep -q "ALIGN_RESULT: normal"; then
++  observed="normal"
++elif printf "%s\n" "$PY_OUTPUT" | grep -q "ALIGN_RESULT: ambiguous"; then
++  observed="ambiguous"
++else
++  observed="missing"
++fi
++
++# Test 1: expected behavior is 'normal' -> FAIL if observed is 'reversed'
++if [ "$observed" = "normal" ]; then
++  t1="PASSED"
++elif [ "$observed" = "reversed" ]; then
++  t1="FAILED"
++else
++  t1="ERROR"
++fi
++
++# Test 2: observation recorded
++if [ "$observed" = "normal" ] || [ "$observed" = "reversed" ]; then
++  t2="PASSED"
++else
++  t2="ERROR"
++fi
++
++# Write the JSON results; expand variables here
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"/testbed/test_repro.py::test_hpacker_expected_alignment","status":"$t1"},{"name":"/testbed/test_repro.py::test_hpacker_observed_alignment","status":"$t2"}]}
++JSON
++
++echo "WROTE /testbed/test_status.json with observed=$observed t1=$t1 t2=$t2"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..bc73e03adf
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,54 @@
++import numpy as np
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++from matplotlib.offsetbox import DrawingArea, HPacker, AnchoredOffsetbox
++from matplotlib.patches import Rectangle
++
++fig = plt.figure(figsize=(2,2), dpi=100)
++ax = fig.add_subplot(111)
++ax.set_xlim(0, 1)
++ax.set_ylim(0, 1)
++ax.axis('off')
++
++da1 = DrawingArea(10, 20)
++rect1 = Rectangle((0, 0), 10, 20, facecolor=(1,0,0), edgecolor='none')
++da1.add_artist(rect1)
++
++da2 = DrawingArea(10, 30)
++rect2 = Rectangle((0, 0), 10, 30, facecolor=(0,1,0), edgecolor='none')
++da2.add_artist(rect2)
++
++align = 'bottom'
++pack = HPacker(children=[da1, da2], pad=0, sep=5, align=align)
++box = AnchoredOffsetbox(child=pack, loc='center')
++ax.add_artist(box)
++
++fig.canvas.draw()
++w, h = fig.canvas.get_width_height()
++buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8).reshape(h, w, 3)
++
++red_mask = (buf[:,:,0] > 200) & (buf[:,:,1] < 80) & (buf[:,:,2] < 80)
++green_mask = (buf[:,:,1] > 200) & (buf[:,:,0] < 80) & (buf[:,:,2] < 80)
++
++def bbox_from_mask(mask):
++    ys, xs = np.where(mask)
++    if ys.size == 0:
++        return None
++    return ys.min(), ys.max(), xs.min(), xs.max()
++
++rb = bbox_from_mask(red_mask)
++gb = bbox_from_mask(green_mask)
++
++if rb is None or gb is None:
++    print('ALIGN_RESULT: ambiguous')
++else:
++    red_top, red_bottom, _, _ = rb
++    green_top, green_bottom, _, _ = gb
++    # image y=0 is top, larger y is lower on the image
++    if abs(red_bottom - green_bottom) <= 2:
++        print('ALIGN_RESULT: normal')
++    elif abs(red_top - green_top) <= 2:
++        print('ALIGN_RESULT: reversed')
++    else:
++        print('ALIGN_RESULT: ambiguous')
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..b0d18efd1d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"/testbed/test_repro.py::test_hpacker_expected_alignment","status":"FAILED"},{"name":"/testbed/test_repro.py::test_hpacker_observed_alignment","status":"PASSED"}]}

@@ -1,0 +1,97 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..d7fcace36
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_posify.py 2>&1 || true)
++status="ERROR"
++if echo "$output" | grep -q '^TEST_RESULT: PASSED'; then status="PASSED"
++elif echo "$output" | grep -q '^TEST_RESULT: FAILED'; then status="FAILED"
++elif echo "$output" | grep -q '^TEST_RESULT: ERROR'; then status="ERROR"
++else status="ERROR"
++fi
++
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "/testbed/test_posify.py::test_posify_finite", "status": "$status"}]}
++JSON
++
++echo "---- TEST OUTPUT ----"
++echo "$output"
++echo "---- TEST STATUS JSON ----"
++cat /testbed/test_status.json
+diff --git a/test_posify.py b/test_posify.py
+new file mode 100644
+index 000000000..e5030e2eb
+--- /dev/null
++++ b/test_posify.py
+@@ -0,0 +1,60 @@
++import sys
++
++def find_posify():
++    try:
++        import sympy
++    except Exception:
++        return None
++    # try common locations
++    candidates = []
++    if hasattr(sympy, 'posify'):
++        return sympy.posify
++    # search submodules
++    for name in dir(sympy):
++        try:
++            obj = getattr(sympy, name)
++            if hasattr(obj, 'posify'):
++                return getattr(obj, 'posify')
++        except Exception:
++            continue
++    # fallback: try from sympy.utilities
++    try:
++        from sympy import posify
++        return posify
++    except Exception:
++        return None
++
++posify = find_posify()
++if posify is None:
++    print("IMPORT_POSIFY_FAILED")
++    print("TEST_RESULT: ERROR")
++    sys.exit(0)
++
++try:
++    from sympy import Symbol
++except Exception as e:
++    print("SYMPY_IMPORT_ERROR:", e)
++    print("TEST_RESULT: ERROR")
++    sys.exit(0)
++
++x = Symbol('x', finite=True)
++print("BEFORE_ASSUMPTIONS:", x._assumptions)
++print("BEFORE_is_finite:", x.is_finite)
++
++try:
++    res = posify(x)
++except Exception as e:
++    print("POSIFY_CALL_ERROR:", e)
++    print("TEST_RESULT: ERROR")
++    sys.exit(0)
++
++if isinstance(res, tuple) and len(res) >= 1:
++    xp = res[0]
++else:
++    xp = res
++
++print("AFTER_ASSUMPTIONS:", getattr(xp, "_assumptions", None))
++print("AFTER_is_finite:", getattr(xp, "is_finite", None))
++
++status = "PASSED" if getattr(xp, "is_finite", None) is True else "FAILED"
++print("TEST_RESULT:", status)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..47fd029eb
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "/testbed/test_posify.py::test_posify_finite", "status": "FAILED"}]}

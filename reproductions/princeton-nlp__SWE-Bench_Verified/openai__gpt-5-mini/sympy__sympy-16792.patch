@@ -1,0 +1,79 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..67151164c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,28 @@
++#!/bin/bash
++set -euo pipefail
++
++# Run the reproduction test and capture output
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++
++test_name="testbed/test_reproduction.py::test_autowrap_cython_missing_arg"
++status="ERROR"
++
++# Check for both possible phrasings of the TypeError
++if echo "$output" | grep -q -e "only length-1 arrays can be converted to Python scalars" -e "only size-1 arrays can be converted to Python scalars"; then
++  status="FAILED"
++elif echo "$output" | grep -q "RESULT_OK:"; then
++  status="PASSED"
++elif echo "$output" | grep -q "IMPORT_ERROR:"; then
++  status="SKIPPED"
++else
++  status="ERROR"
++fi
++
++# Write test_status.json with required schema
++python3 - <<PY > /testbed/test_status.json
++import json
++print(json.dumps({"tests":[{"name":"%s","status":"%s"}]}, indent=2) % ("$test_name","$status"))
++PY
++
++echo "WROTE /testbed/test_status.json with status: $status"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..d7658325b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,25 @@
++import traceback
++try:
++    import numpy as np
++    from sympy import MatrixSymbol
++    from sympy.utilities.autowrap import autowrap
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    traceback.print_exc()
++    raise
++
++print("Starting reproduction test for autowrap (cython backend)...")
++x = MatrixSymbol("x", 2, 1)
++expr = 1.0
++print("Calling autowrap with expr=1.0 and args=(x,) using backend=\"cython\"...")
++try:
++    f = autowrap(expr, args=(x,), backend="cython")
++    print("autowrap returned a callable f. Calling f with a numpy array...")
++    arr = np.array([[1.0, 2.0]])
++    res = f(arr)
++    print("RESULT_OK:", res)
++except Exception as e:
++    print("EXCEPTION_OCCURRED")
++    traceback.print_exc()
++    print("EXCEPTION_MESSAGE:", str(e))
++    raise
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..cccc11e69
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_reproduction.py::test_autowrap_cython_missing_arg",
++      "status": "FAILED"
++    }
++  ]
++}

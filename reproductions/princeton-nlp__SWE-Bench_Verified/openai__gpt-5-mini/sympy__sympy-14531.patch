@@ -1,0 +1,97 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..0cc2bb66b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,48 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Ensure sympy is available
++pip3 install sympy -q || pip install sympy -q
++
++# Run the test script and capture its stdout/stderr
++output=$(python3 /testbed/test_reproduction.py 2>&1) || true
++
++# Extract the JSON array from the output by finding the first '[' and last ']'
++first_idx=$(awk 'BEGIN{print index(ARGV[1],"[")}' "$output" 2>/dev/null) || true
++# Fallback to doing extraction in python below if awk approach isn't reliable
++
++python3 - "$output" <<'PY'
++import json, sys
++from pathlib import Path
++
++raw = sys.argv[1]
++outpath = Path("/testbed/test_status.json")
++
++# Find JSON array by locating first '[' and last ']'
++start = raw.find('[')
++end = raw.rfind(']')
++if start == -1 or end == -1 or end < start:
++    # Could not find JSON in output; write ERROR
++    outpath.write_text(json.dumps({"tests":[{"name": "/testbed/test_reproduction.py", "status": "ERROR"}]}, indent=2))
++    print("WROTE ERROR status to", outpath)
++    sys.exit(0)
++
++json_text = raw[start:end+1]
++try:
++    tests = json.loads(json_text)
++except Exception as e:
++    outpath.write_text(json.dumps({"tests":[{"name": "/testbed/test_reproduction.py", "status": "ERROR"}]}, indent=2))
++    print("Failed to parse JSON:", e)
++    sys.exit(0)
++
++statuses = []
++for t in tests:
++    name = t.get("name", "unknown")
++    observed = t.get("observed")
++    expected = t.get("expected")
++    status = "PASSED" if observed == expected else "FAILED"
++    statuses.append({"name": name, "status": status})
++
++outpath.write_text(json.dumps({"tests": statuses}, indent=2))
++print(outpath.read_text())
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..f09ab1f8b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,14 @@
++#!/usr/bin/env python3
++import json
++from sympy import sstr, symbols, S, Eq, Limit
++
++x, y = symbols('x y')
++
++tests = []
++t1 = sstr(x + S(1)/2, sympy_integers=True)
++tests.append({"name": "test_sstr_add", "observed": t1, "expected": "x + S(1)/2"})
++t2 = sstr(Eq(x, S(1)/2), sympy_integers=True)
++tests.append({"name": "test_sstr_eq", "observed": t2, "expected": "Eq(x, S(1)/2)"})
++t3 = sstr(Limit(x, x, S(1)/2), sympy_integers=True)
++tests.append({"name": "test_sstr_limit", "observed": t3, "expected": "Limit(x, x, S(1)/2)"})
++print(json.dumps(tests))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..ba03d3a1e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test_sstr_add",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_sstr_eq",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_sstr_limit",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

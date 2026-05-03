@@ -1,0 +1,118 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..e1d90295
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,61 @@
++#!/bin/bash
++set -euo pipefail
++python_output=$(python - <<'PY' 2>&1 || true
++import json, numpy as np, xarray as xr
++da = xr.DataArray(np.ones([10,10], dtype=np.int8))
++da.attrs["attr_1"] = "test1"
++da.attrs["attr_2"] = "test2"
++print("BEFORE_ATTRS: " + json.dumps(da.attrs))
++print("BEFORE_DTYPE: " + str(da.dtype))
++da2 = xr.where(da == 1, 5, 0)
++print("AFTER_ATTRS: " + json.dumps(da2.attrs))
++print("AFTER_DTYPE: " + str(da2.dtype))
++da_s = xr.DataArray(1)
++da_s.attrs['foo'] = 'bar'
++print("BEFORE_ATTRS_SCALAR: " + json.dumps(da_s.attrs))
++print("BEFORE_DTYPE_SCALAR: " + str(da_s.dtype))
++out = xr.where(da_s == 0, -1, da_s)
++print("AFTER_ATTRS_SCALAR: " + json.dumps(out.attrs))
++print("AFTER_DTYPE_SCALAR: " + str(out.dtype))
++PY
++)
++echo "$python_output"
++python - <<'PY' "$python_output"
++import json,sys
++out = sys.argv[1]
++def extract(prefix):
++  for line in out.splitlines():
++    if line.startswith(prefix):
++      return line.split(":",1)[1].strip()
++  return None
++before_attrs = extract("BEFORE_ATTRS")
++after_attrs = extract("AFTER_ATTRS")
++before_dtype = extract("BEFORE_DTYPE")
++after_dtype = extract("AFTER_DTYPE")
++before_attrs_scalar = extract("BEFORE_ATTRS_SCALAR")
++after_attrs_scalar = extract("AFTER_ATTRS_SCALAR")
++status = "PASSED"
++reasons = []
++if None in (before_attrs, after_attrs, before_dtype, after_dtype):
++  status = "FAILED"
++  reasons.append("Missing markers for 2D test")
++else:
++  if before_attrs != after_attrs:
++    status = "FAILED"
++    reasons.append("Attributes changed for 2D array")
++  if before_dtype != after_dtype:
++    status = "FAILED"
++    reasons.append("Dtype changed for 2D array")
++if None in (before_attrs_scalar, after_attrs_scalar):
++  status = "FAILED"
++  reasons.append("Missing markers for scalar test")
++else:
++  if before_attrs_scalar != after_attrs_scalar:
++    status = "FAILED"
++    reasons.append("Attributes changed for scalar")
++tests = [{"name":"testbed/test_reproduction.py::test_xr_where_preserve_attrs_dtype","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++if reasons:
++  print("REASONS:", reasons)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..9bedbdee
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,30 @@
++import json
++import numpy as np
++import xarray as xr
++
++def main():
++    # Reproduction 1: 2D array with int8 dtype and attributes
++    da = xr.DataArray(np.ones([10,10], dtype=np.int8))
++    da.attrs["attr_1"] = "test1"
++    da.attrs["attr_2"] = "test2"
++    print("BEFORE_ATTRS: " + json.dumps(da.attrs))
++    print("BEFORE_DTYPE: " + str(da.dtype))
++    da2 = xr.where(da == 1, 5, 0)
++    print("AFTER_ATTRS: " + json.dumps(da2.attrs))
++    print("AFTER_DTYPE: " + str(da2.dtype))
++
++    # Reproduction 2: scalar example from PR description
++    da_s = xr.DataArray(1)
++    da_s.attrs['foo'] = 'bar'
++    print("BEFORE_ATTRS_SCALAR: " + json.dumps(da_s.attrs))
++    print("BEFORE_DTYPE_SCALAR: " + str(da_s.dtype))
++    out = xr.where(da_s==0, -1, da_s)
++    print("AFTER_ATTRS_SCALAR: " + json.dumps(out.attrs))
++    print("AFTER_DTYPE_SCALAR: " + str(out.dtype))
++
++if __name__ == '__main__':
++    try:
++        main()
++    except Exception as e:
++        print("EXCEPTION_RAISED: " + repr(e))
++        raise
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..415aa8c3
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_reproduction.py::test_xr_where_preserve_attrs_dtype",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

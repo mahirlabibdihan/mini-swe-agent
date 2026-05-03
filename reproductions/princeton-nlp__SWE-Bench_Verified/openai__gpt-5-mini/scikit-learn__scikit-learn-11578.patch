@@ -1,0 +1,131 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..aa18aae86
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,20 @@
++#!/bin/bash
++set -euo pipefail
++PYTHON_OUTPUT=$(python test_repro.py 2>&1 || true)
++echo "$PYTHON_OUTPUT"
++STATUS="ERROR"
++if echo "$PYTHON_OUTPUT" | grep -q "^BUG_PRESENT$"; then
++  STATUS="FAILED"
++elif echo "$PYTHON_OUTPUT" | grep -q "^NO_BUG$"; then
++  STATUS="PASSED"
++else
++  STATUS="ERROR"
++fi
++export STATUS
++python - <<PYCODE
++import json, os
++status = os.environ.get("STATUS", "ERROR")
++out = {"tests": [{"name": "test_repro.py::reproduce_log_reg_scoring_path", "status": status}]}
++open('/testbed/test_status.json', 'w').write(json.dumps(out, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PYCODE
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..ed389c03f
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,84 @@
++from __future__ import print_function
++import numpy as np
++import sys
++from sklearn import preprocessing, linear_model, utils
++
++def ovr_approach(decision_function):
++    probs = 1. / (1. + np.exp(-decision_function))
++    probs = probs / probs.sum(axis=1).reshape((probs.shape[0], -1))
++    return probs
++
++def softmax(z):
++    z = z - z.max(axis=1, keepdims=True)
++    exp = np.exp(z)
++    return exp / exp.sum(axis=1, keepdims=True)
++
++def score_from_probs(probs, y_bin):
++    # mean negative log loss across samples
++    return (y_bin * np.log(probs)).sum(axis=1).mean()
++
++np.random.seed(1234)
++samples, features, folds = 200, 5, 10
++scorer = 'neg_log_loss'
++
++x = np.random.random(size=(samples, features))
++y = np.random.choice(['a', 'b', 'c'], size=samples)
++
++test  = np.random.choice(range(samples), size=int(samples/float(folds)), replace=False)
++train = [idx for idx in range(samples) if idx not in test]
++
++lb = preprocessing.label.LabelBinarizer()
++lb.fit(y[test])
++y_bin = lb.transform(y[test])
++
++try:
++    coefs, _, scores, _ = linear_model.logistic._log_reg_scoring_path(
++        x, y, train, test, fit_intercept=True, scoring=scorer, multi_class='multinomial'
++    )
++except Exception as e:
++    print("ERROR_CALLING_PATH", e)
++    sys.exit(2)
++
++# choose first C
++c_index = 0
++coefs_c = coefs[c_index]
++# build a LogisticRegression instance like the path does
++existing_log_reg = linear_model.LogisticRegression(fit_intercept=True)
++# set parameters as done in the PR example
++existing_log_reg.coef_ = coefs_c[:, :-1]
++existing_log_reg.intercept_ = coefs_c[:, -1]
++
++dec_fn = existing_log_reg.decision_function(x[test])
++
++# Builtin predict_proba from this constructed estimator
++try:
++    existing_probs_builtin = existing_log_reg.predict_proba(x[test])
++except Exception as e:
++    # Some sklearn versions may require additional attributes; fail gracefully
++    print("ERROR_PREDICT_PROBA", e)
++    sys.exit(2)
++
++# OvR approach
++existing_probs_ovr = ovr_approach(dec_fn)
++# multinomial approach
++existing_probs_multi = softmax(dec_fn)
++
++score_path = scores[c_index]
++score_ovr = score_from_probs(existing_probs_ovr, y_bin)
++score_multi = score_from_probs(existing_probs_multi, y_bin)
++
++# Compare with tolerance
++tol = 1e-12
++is_ovr_equal = abs(score_path - score_ovr) <= tol
++is_multi_equal = abs(score_path - score_multi) <= tol
++
++print("score_path:", score_path)
++print("score_ovr :", score_ovr)
++print("score_multi:", score_multi)
++
++if is_ovr_equal and not is_multi_equal:
++    print("BUG_PRESENT")
++elif is_multi_equal and not is_ovr_equal:
++    print("NO_BUG")
++else:
++    print("UNKNOWN")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..ea2805961
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::reproduce_log_reg_scoring_path",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

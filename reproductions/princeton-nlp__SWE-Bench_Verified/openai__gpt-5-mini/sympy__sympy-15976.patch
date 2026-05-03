@@ -1,0 +1,83 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..127370b3a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++set -euo pipefail
++# Install sympy (try to match environment; fallback to latest)
++python3 -m pip install sympy==1.3 -q || python3 -m pip install sympy -q
++
++# Run the reproduction script and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Derive statuses from actual output:
++# Mark x2 test as FAILED if the MathML uses <msub> (i.e., symbol split into base and digit subscript),
++# otherwise mark PASSED. This derives status from the real output.
++status_x2="PASSED"
++status_x="PASSED"
++
++if echo "$output" | grep -q "<msub>"; then
++  status_x2="FAILED"
++fi
++
++# For the plain x case, expect "<mi>x</mi>"
++if ! echo "$output" | grep -q "<mi>x</mi>"; then
++  status_x="FAILED"
++fi
++
++# Write test results to /testbed/test_status.json
++python3 - <<PYCODE
++import json
++tests = [
++  {"name": "test_reproduction.py::test_mathml_x2", "status": "$status_x2"},
++  {"name": "test_reproduction.py::test_mathml_x", "status": "$status_x"}
++]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("/testbed/test_status.json written with:", tests)
++PYCODE
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..1e1c2fb09
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,18 @@
++import sympy
++from sympy.printing.mathml import mathml
++# MathML for symbol with trailing digit
++x2, y, z = sympy.symbols('x2 y z')
++expr_with_digit = x2*z + x2**3
++mml_with_digit = sympy.mathml(expr_with_digit, printer='presentation')
++
++# MathML for normal symbol
++x, y2, z2 = sympy.symbols('x y z')
++expr_plain = x*z2 + x**3
++mml_plain = sympy.mathml(expr_plain, printer='presentation')
++
++print("===MATHML_X2_START===")
++print(mml_with_digit)
++print("===MATHML_X2_END===")
++print("===MATHML_X_START===")
++print(mml_plain)
++print("===MATHML_X_END===")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..f8882f86b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_mathml_x2",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_mathml_x",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,120 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5c720d4010
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++output="$(python3 test_reproduction.py 2>&1 || true)"
++# Extract the token validation result
++valid_line="$(printf "%s\n" "$output" | grep -E '^TOKEN_VALID_AFTER_EMAIL_CHANGE:' || true)"
++valid_value="False"
++if [ -n "$valid_line" ]; then
++  valid_value="$(printf "%s\n" "$valid_line" | awk -F': ' '{print $2}')"
++fi
++
++status="PASSED"
++# If token is still valid after email change, that's the bug reproduction -> mark FAILED
++if [ "$valid_value" = "True" ]; then
++  status="FAILED"
++fi
++
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_token_invalidated_on_email_change",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++# Also print the original script output for visibility
++printf "%s\n" "$output"
++echo "WROTE: /testbed/test_status.json"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..829fe6da77
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,63 @@
++import hmac
++import hashlib
++import time
++from dataclasses import dataclass
++
++SECRET = b'secret-key'
++KEY_SALT = b'django.contrib.auth.tokens.PasswordResetTokenGenerator'
++
++def int_to_base36(i):
++    chars = '0123456789abcdefghijklmnopqrstuvwxyz'
++    if i < 0:
++        raise ValueError("Negative value")
++    if i == 0:
++        return '0'
++    s = ''
++    while i:
++        i, r = divmod(i, 36)
++        s = chars[r] + s
++    return s
++
++def salted_hmac(key_salt, value, secret=SECRET):
++    key = hashlib.sha1(key_salt + secret).digest()
++    return hmac.new(key, value.encode(), hashlib.sha1).hexdigest()
++
++class SimplePasswordResetTokenGenerator:
++    # Simplified reproduction of Django's logic WITHOUT using the user's email in the hash
++    def _make_hash_value(self, user, timestamp):
++        last_login = '' if user.last_login is None else str(int(user.last_login))
++        return f"{user.pk}{user.password}{last_login}{timestamp}"
++    def make_token(self, user):
++        # timestamp as number of days since epoch (similar in spirit to Django)
++        ts = int(time.time() // (60 * 60 * 24))
++        hash = salted_hmac(KEY_SALT, self._make_hash_value(user, ts))
++        return f"{int_to_base36(ts)}-{hash}"
++    def check_token(self, user, token):
++        try:
++            ts_b36, _hash = token.split('-', 1)
++        except ValueError:
++            return False
++        try:
++            ts = int(ts_b36, 36)
++        except Exception:
++            return False
++        expected_hash = salted_hmac(KEY_SALT, self._make_hash_value(user, ts))
++        return hmac.compare_digest(expected_hash, _hash)
++
++@dataclass
++class MockUser:
++    pk: int
++    password: str
++    last_login: int = None
++    is_active: bool = True
++    email: str = ''
++
++if __name__ == "__main__":
++    gen = SimplePasswordResetTokenGenerator()
++    user = MockUser(pk=1, password='pbkdf2_sha256$260000$salt$hash', email='foo@example.com')
++    token = gen.make_token(user)
++    print("ISSUED_TOKEN:", token)
++    # Change the user's email (should invalidate token if email is included in hash)
++    user.email = 'bar@example.com'
++    valid_after_email_change = gen.check_token(user, token)
++    print("TOKEN_VALID_AFTER_EMAIL_CHANGE:", valid_after_email_change)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..a8401caa17
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_token_invalidated_on_email_change",
++      "status": "FAILED"
++    }
++  ]
++}

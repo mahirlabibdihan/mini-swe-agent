@@ -1,0 +1,69 @@
+diff --git a/pytest_output.txt b/pytest_output.txt
+new file mode 100644
+index 000000000..80957ba93
+--- /dev/null
++++ b/pytest_output.txt
+@@ -0,0 +1,18 @@
++F                                                                        [100%]
++=================================== FAILURES ===================================
++______________________ test_cafd_includes_carriage_return ______________________
++
++capfd = <_pytest.capture.CaptureFixture object at 0x7ffff6de8d90>
++
++    def test_cafd_includes_carriage_return(capfd):
++        print('Greetings from DOS', end='\r')
++        out, err = capfd.readouterr()
++>       assert out.endswith('\r')
++E       AssertionError: assert False
++E        +  where False = <built-in method endswith of str object at 0x7ffff6deee40>('\r')
++E        +    where <built-in method endswith of str object at 0x7ffff6deee40> = 'Greetings from DOS\n'.endswith
++
++test_capfd.py:4: AssertionError
++=========================== short test summary info ============================
++FAILED test_capfd.py::test_cafd_includes_carriage_return - AssertionError: as...
++1 failed in 0.02s
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..246d85827
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# ensure pytest is available
++command -v pytest >/dev/null 2>&1 || pip install -q pytest
++# run the single test and capture exit code without failing the script
++set +e
++pytest -q test_capfd.py::test_cafd_includes_carriage_return > pytest_output.txt 2>&1
++rc=$?
++set -e
++status="PASSED"
++if [ $rc -ne 0 ]; then status="FAILED"; fi
++# write machine-readable test status
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_capfd.py::test_cafd_includes_carriage_return", "status": "$status"}]}
++JSON
++echo "WROTE: /testbed/test_status.json (status: $status)"
++echo "---- pytest output ----"
++cat pytest_output.txt || true
++echo "---- end pytest output ----"
++# exit zero so the harness sees the script executed successfully
++exit 0
+diff --git a/test_capfd.py b/test_capfd.py
+new file mode 100644
+index 000000000..5ee6f8f4c
+--- /dev/null
++++ b/test_capfd.py
+@@ -0,0 +1,4 @@
++def test_cafd_includes_carriage_return(capfd):
++    print('Greetings from DOS', end='\r')
++    out, err = capfd.readouterr()
++    assert out.endswith('\r')
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..cc7cde9e2
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_capfd.py::test_cafd_includes_carriage_return", "status": "FAILED"}]}

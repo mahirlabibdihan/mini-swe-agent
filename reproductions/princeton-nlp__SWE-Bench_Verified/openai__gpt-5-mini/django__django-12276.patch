@@ -1,0 +1,106 @@
+diff --git a/reproduction_output.txt b/reproduction_output.txt
+new file mode 100644
+index 0000000000..8f98f82294
+--- /dev/null
++++ b/reproduction_output.txt
+@@ -0,0 +1,4 @@
++TEST:test_clearablefileinput_no_required:PASSED
++OUTPUT_CLEARABLE:<input type="file" name="f" id="id_f">
++TEST:test_fileinput_no_required_expected:FAILED
++OUTPUT_FILEINPUT:<input type="file" name="f" required id="id_f">
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5d7819ca50
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 test_reproduction.py 2>&1 || true)
++mkdir -p /testbed
++echo "$output" > /testbed/reproduction_output.txt
++
++python3 - <<'PY' "$output"
++import json,sys
++raw=sys.argv[1]
++tests=[]
++for line in raw.splitlines():
++    if line.startswith("TEST:"):
++        parts=line.split(":",2)
++        if len(parts)>=3:
++            name=parts[1]
++            status=parts[2].strip()
++            if status not in ("PASSED","FAILED","SKIPPED","ERROR"):
++                status="ERROR"
++            tests.append({"name":"test_reproduction.py::"+name,"status":status})
++if not tests:
++    tests=[{"name":"test_reproduction.py::no_tests_detected","status":"ERROR"}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++print(json.dumps({"tests":tests},indent=2))
++PY
++echo "Wrote /testbed/test_status.json"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..e690fd113d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,40 @@
++import sys
++from django import forms
++from django.forms.widgets import ClearableFileInput, FileInput
++from django.conf import settings
++
++# Minimal settings for Django forms rendering
++if not settings.configured:
++    settings.configure(DEBUG=True, SECRET_KEY='testkey')
++import django
++django.setup()
++
++def run_tests():
++    # Test 1: ClearableFileInput with initial data should NOT include 'required'
++    class ClearForm(forms.Form):
++        f = forms.FileField(widget=ClearableFileInput, required=True)
++    form_c = ClearForm(initial={'f': 'existing.jpg'})
++    html_c = str(form_c['f'])
++    has_required_c = 'required' in html_c
++    status_c = "PASSED" if not has_required_c else "FAILED"
++    print(f"TEST:test_clearablefileinput_no_required:{status_c}")
++    print("OUTPUT_CLEARABLE:" + html_c)
++
++    # Test 2: FileInput with initial data SHOULD NOT include 'required' (this is the expected correct behavior)
++    class FileForm(forms.Form):
++        f = forms.FileField(widget=FileInput, required=True)
++    form_f = FileForm(initial={'f': 'existing.jpg'})
++    html_f = str(form_f['f'])
++    has_required_f = 'required' in html_f
++    # Expectation changed: required should NOT be present; current behavior likely includes it -> FAIL
++    status_f = "PASSED" if not has_required_f else "FAILED"
++    print(f"TEST:test_fileinput_no_required_expected:{status_f}")
++    print("OUTPUT_FILEINPUT:" + html_f)
++
++if __name__ == '__main__':
++    try:
++        run_tests()
++    except Exception as e:
++        print("TEST:test_run_exception:ERROR")
++        print("ERROR_DETAILS:" + str(e))
++        sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..1d71c81c06
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_clearablefileinput_no_required",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_fileinput_no_required_expected",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,67 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..171cd4f6b1
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,42 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Run a Python snippet that performs the two checks and writes /testbed/test_status.json
++python3 - <<'PY'
++import subprocess, json, sys
++tests = []
++
++expected = "secret"
++# Test 1: "old" behavior - subprocess.Popen with an empty env (simulating not passing PGPASSWORD)
++try:
++    p = subprocess.Popen(['bash', '-lc', 'echo "$PGPASSWORD"'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={})
++    out, err = p.communicate(timeout=5)
++    out = out.decode().strip()
++    status = "PASSED" if out == expected else "FAILED"
++    tests.append({"name": "test_old_client::pgpassword_missing_with_empty_env", "status": status})
++    print("OLD client output:", repr(out), "status:", status)
++except Exception as e:
++    tests.append({"name": "test_old_client::pgpassword_missing_with_empty_env", "status": "ERROR"})
++    print("OLD client error:", e)
++
++# Test 2: "new" behavior - subprocess.run with env containing PGPASSWORD
++try:
++    completed = subprocess.run(['bash', '-lc', 'echo "$PGPASSWORD"'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={"PGPASSWORD": expected}, check=True, timeout=5)
++    out2 = completed.stdout.decode().strip()
++    status2 = "PASSED" if out2 == expected else "FAILED"
++    tests.append({"name": "test_new_client::pgpassword_set_with_subprocess_run", "status": status2})
++    print("NEW client output:", repr(out2), "status:", status2)
++except subprocess.CalledProcessError as e:
++    tests.append({"name": "test_new_client::pgpassword_set_with_subprocess_run", "status": "ERROR"})
++    print("NEW client CalledProcessError:", e)
++except Exception as e:
++    tests.append({"name": "test_new_client::pgpassword_set_with_subprocess_run", "status": "ERROR"})
++    print("NEW client error:", e)
++
++# Write results to /testbed/test_status.json
++with open("/testbed/test_status.json", "w") as f:
++    json.dump({"tests": tests}, f, indent=2)
++
++# Exit with 0 so the harness continues; the JSON records actual pass/fail statuses.
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..34197c709c
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_old_client::pgpassword_missing_with_empty_env",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_new_client::pgpassword_set_with_subprocess_run",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

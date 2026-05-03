@@ -1,0 +1,103 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..6e77257b4
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed || exit 1
++
++# Create the reproduction Python script
++cat > test_reproduction.py <<'PY'
++import sklearn
++from sklearn.datasets import make_classification
++from sklearn.feature_selection import SequentialFeatureSelector
++from sklearn.neighbors import KNeighborsClassifier
++from sklearn.model_selection import LeaveOneGroupOut
++import numpy as np
++
++print("sklearn_version:", sklearn.__version__)
++
++# Reproduction of the reported issue
++X, y = make_classification()
++groups = np.zeros_like(y, dtype=int)
++groups[y.size//2:] = 1
++
++cv = LeaveOneGroupOut()
++splits = cv.split(X, y, groups=groups)
++
++clf = KNeighborsClassifier(n_neighbors=5)
++
++seq = SequentialFeatureSelector(clf, n_features_to_select=5, scoring='accuracy', cv=splits)
++print("Calling fit() to reproduce issue...")
++seq.fit(X, y)
++print("fit() completed without raising an exception")
++PY
++
++# Run the reproduction and capture output
++output=$(python test_reproduction.py 2>&1 || true)
++echo "=== SCRIPT OUTPUT ==="
++echo "$output"
++
++# Determine test status based on observed output
++status="ERROR"
++if echo "$output" | grep -q "IndexError" && echo "$output" | grep -q "list index out of range"; then
++  status="FAILED"
++elif echo "$output" | grep -q "Traceback" || echo "$output" | grep -q "Error"; then
++  status="ERROR"
++else
++  status="PASSED"
++fi
++
++# Write the required test_status.json
++python - <<PY2
++import json
++statuses = [{"name": "/testbed/test_reproduction.py::test_sequential_feature_selector_cv_iterable", "status": "$status"}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": statuses}, indent=2))
++print("Wrote /testbed/test_status.json with status:", "$status")
++PY2
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..ea2dba6e4
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,23 @@
++import sklearn
++from sklearn.datasets import make_classification
++from sklearn.feature_selection import SequentialFeatureSelector
++from sklearn.neighbors import KNeighborsClassifier
++from sklearn.model_selection import LeaveOneGroupOut
++import numpy as np
++
++print("sklearn_version:", sklearn.__version__)
++
++# Reproduction of the reported issue
++X, y = make_classification()
++groups = np.zeros_like(y, dtype=int)
++groups[y.size//2:] = 1
++
++cv = LeaveOneGroupOut()
++splits = cv.split(X, y, groups=groups)
++
++clf = KNeighborsClassifier(n_neighbors=5)
++
++seq = SequentialFeatureSelector(clf, n_features_to_select=5, scoring='accuracy', cv=splits)
++print("Calling fit() to reproduce issue...")
++seq.fit(X, y)
++print("fit() completed without raising an exception")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..5c62df4e0
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::test_sequential_feature_selector_cv_iterable",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,142 @@
+diff --git a/bad_inherit.py b/bad_inherit.py
+new file mode 100644
+index 000000000..ad02238df
+--- /dev/null
++++ b/bad_inherit.py
+@@ -0,0 +1,11 @@
++import inspect
++class InheritDocstrings(type):
++    def __new__(mcls, name, bases, attrs):
++        for base in bases:
++            for k, v in base.__dict__.items():
++                if k in attrs:
++                    # BUG: uses inspect.isfunction which returns False for properties
++                    if inspect.isfunction(v):
++                        if attrs[k].__doc__ is None:
++                            attrs[k].__doc__ = v.__doc__
++        return super().__new__(mcls, name, bases, attrs)
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 000000000..ff276a883
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,37 @@
++import importlib.util, os, json, traceback
++fp = os.path.abspath("/testbed/bad_inherit.py")
++try:
++    spec = importlib.util.spec_from_file_location("mod", fp)
++    mod = importlib.util.module_from_spec(spec)
++    if spec.loader is None:
++        raise ImportError("No loader for spec")
++    spec.loader.exec_module(mod)
++    Inherit = getattr(mod, "InheritDocstrings", None)
++    if Inherit is None:
++        raise ImportError("InheritDocstrings not found")
++    ns = {"InheritDocstrings": Inherit}
++    source = '''
++class Base:
++    @property
++    def info(self):
++        "base docstring"
++        return 1
++
++class Sub(Base, metaclass=InheritDocstrings):
++    @property
++    def info(self):
++        return super().info
++'''
++    exec(source, ns)
++    Sub = ns["Sub"]
++    doc = getattr(Sub, "info").__doc__
++    status = "PASSED" if doc and "base docstring" in doc else "FAILED"
++    with open("/testbed/test_status.json", "w") as f:
++        json.dump({"tests":[{"name":"test_reproduction.py::test_property_docstring_inheritance","status":status}]}, f, indent=2)
++    print("Sub.info.__doc__:", repr(doc))
++    print("Wrote /testbed/test_status.json with status:", status)
++except Exception:
++    with open("/testbed/test_status.json", "w") as f:
++        json.dump({"tests":[{"name":"test_reproduction.py::test_property_docstring_inheritance","status":"ERROR"}]}, f, indent=2)
++    print("ERROR during reproduction:")
++    traceback.print_exc()
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..59bc29fff
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,61 @@
++#!/usr/bin/env bash
++set -euo pipefail
++mkdir -p /testbed
++# Create the faulty InheritDocstrings that uses inspect.isfunction (so it won't handle properties)
++cat > /testbed/bad_inherit.py <<'PY'
++import inspect
++class InheritDocstrings(type):
++    def __new__(mcls, name, bases, attrs):
++        for base in bases:
++            for k, v in base.__dict__.items():
++                if k in attrs:
++                    # BUG: uses inspect.isfunction which returns False for properties
++                    if inspect.isfunction(v):
++                        if attrs[k].__doc__ is None:
++                            attrs[k].__doc__ = v.__doc__
++        return super().__new__(mcls, name, bases, attrs)
++PY
++
++# Create the reproduction script
++cat > /testbed/repro.py <<'PY'
++import importlib.util, os, json, traceback
++fp = os.path.abspath("/testbed/bad_inherit.py")
++try:
++    spec = importlib.util.spec_from_file_location("mod", fp)
++    mod = importlib.util.module_from_spec(spec)
++    if spec.loader is None:
++        raise ImportError("No loader for spec")
++    spec.loader.exec_module(mod)
++    Inherit = getattr(mod, "InheritDocstrings", None)
++    if Inherit is None:
++        raise ImportError("InheritDocstrings not found")
++    ns = {"InheritDocstrings": Inherit}
++    source = '''
++class Base:
++    @property
++    def info(self):
++        "base docstring"
++        return 1
++
++class Sub(Base, metaclass=InheritDocstrings):
++    @property
++    def info(self):
++        return super().info
++'''
++    exec(source, ns)
++    Sub = ns["Sub"]
++    doc = getattr(Sub, "info").__doc__
++    status = "PASSED" if doc and "base docstring" in doc else "FAILED"
++    with open("/testbed/test_status.json", "w") as f:
++        json.dump({"tests":[{"name":"test_reproduction.py::test_property_docstring_inheritance","status":status}]}, f, indent=2)
++    print("Sub.info.__doc__:", repr(doc))
++    print("Wrote /testbed/test_status.json with status:", status)
++except Exception:
++    with open("/testbed/test_status.json", "w") as f:
++        json.dump({"tests":[{"name":"test_reproduction.py::test_property_docstring_inheritance","status":"ERROR"}]}, f, indent=2)
++    print("ERROR during reproduction:")
++    traceback.print_exc()
++PY
++
++# Run the reproduction
++python3 /testbed/repro.py
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..1549d63a9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_property_docstring_inheritance",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

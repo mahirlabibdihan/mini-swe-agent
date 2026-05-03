@@ -1,0 +1,78 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..214465ecf
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,27 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++# Ensure astropy is importable; install if needed
++python3 - <<'PY' 2>/dev/null || pip3 install -q astropy==5.2.1
++try:
++    import astropy  # noqa
++except Exception:
++    pass
++PY
++
++output=$(python3 test_reproduction.py 2>&1 || true)
++
++python3 - <<PYTHON "$output"
++import json,sys
++out=sys.argv[1] if len(sys.argv)>1 else ""
++lines=out.splitlines()
++d={}
++for line in lines:
++    if line.startswith("new_str_contains_expanded_value:"):
++        d['expanded']=line.split(":",1)[1].strip()=="True"
++    if line.startswith("warning_found:"):
++        d['warning']=line.split(":",1)[1].strip()=="True"
++status = "PASSED" if d.get('expanded') and d.get('warning') else "FAILED"
++open("/testbed/test_status.json","w").write(json.dumps({"tests":[{"name":"test_reproduction.py::test_card_format","status":status}]}, indent=2))
++print(out)
++PYTHON
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..74bdbacd4
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,24 @@
++import warnings, sys
++try:
++    from astropy.io import fits
++except Exception as e:
++    print("IMPORT_ERROR", e)
++    sys.exit(2)
++
++original_card_str = 'HIERARCH ESO IFM CL RADIUS = 0.009125 / [m] radius arround actuator to avoid'
++c = fits.Card.fromstring(original_card_str)
++print("orig_repr:", repr(c))
++
++with warnings.catch_warnings(record=True) as w:
++    warnings.simplefilter("always")
++    new_c = fits.Card(f'HIERARCH {c.keyword}', c.value, c.comment)
++    warn_msgs = [str(x.message) for x in w]
++
++print("new_repr:", repr(new_c))
++new_str = str(new_c)
++print("new_str:", new_str)
++expanded_present = '0.009124999999999999' in new_str
++print("new_str_contains_expanded_value:", expanded_present)
++warning_found = any('Card is too long' in m or 'too long' in m for m in warn_msgs)
++print("warning_found:", warning_found)
++print("warnings:", warn_msgs)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..b3d0dc121
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_card_format",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,158 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..07318c83ae
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,5 @@
++
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++python3 test_repro.py || true
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..994fde1d81
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,82 @@
++
++import json
++from pathlib import Path
++
++class Item:
++    def __init__(self, id, label, notes):
++        self.id = id
++        self._label = label
++        self.notes = notes
++    def __str__(self):
++        return self._label
++
++class AutocompleteJsonView:
++    def get(self):
++        to_field_name = 'id'
++        object_list = [
++            Item(1, 'One', 'note-one'),
++            Item(2, 'Two', 'note-two'),
++        ]
++        results = [
++            {'id': str(getattr(obj, to_field_name)), 'text': str(obj)}
++            for obj in object_list
++        ]
++        return {'results': results, 'pagination': {'more': False}}
++
++class CustomSerializeOnly(AutocompleteJsonView):
++    def serialize_result(self, obj, to_field_name):
++        return {'id': str(getattr(obj, to_field_name)), 'text': str(obj), 'notes': obj.notes}
++
++class CustomOverrideGet(AutocompleteJsonView):
++    def serialize_result(self, obj, to_field_name):
++        return {'id': str(getattr(obj, to_field_name)), 'text': str(obj), 'notes': obj.notes}
++    def get(self):
++        to_field_name = 'id'
++        object_list = [
++            Item(1, 'One', 'note-one'),
++            Item(2, 'Two', 'note-two'),
++        ]
++        results = [self.serialize_result(obj, to_field_name) for obj in object_list]
++        return {'results': results, 'pagination': {'more': False}}
++
++base = AutocompleteJsonView().get()
++custom_serialize = CustomSerializeOnly().get()
++custom_get = CustomOverrideGet().get()
++
++def has_notes(resp):
++    return all('notes' in item for item in resp['results'])
++
++tests = []
++
++# We EXPECT that overriding serialize_result should add notes (this will FAIL with current implementation)
++expected_custom_serialize = True
++actual_custom_serialize = has_notes(custom_serialize)
++status1 = 'PASSED' if actual_custom_serialize == expected_custom_serialize else 'FAILED'
++tests.append({
++    'name': 'test_reproduce/serialize_override_should_add_notes',
++    'status': status1,
++    'details': {
++        'expected': expected_custom_serialize,
++        'actual': actual_custom_serialize,
++        'results': custom_serialize['results'],
++    }
++})
++
++# Overriding get should include notes (workaround) -> should PASS
++expected_custom_get = True
++actual_custom_get = has_notes(custom_get)
++status2 = 'PASSED' if actual_custom_get == expected_custom_get else 'FAILED'
++tests.append({
++    'name': 'test_reproduce/override_get_includes_notes',
++    'status': status2,
++    'details': {
++        'expected': expected_custom_get,
++        'actual': actual_custom_get,
++        'results': custom_get['results'],
++    }
++})
++
++output = {'tests': [{'name': t['name'], 'status': t['status']} for t in tests], 'details': tests}
++Path('/testbed/test_status.json').write_text(json.dumps(output, indent=2))
++# Print the output for visibility; exit 0 regardless
++print(json.dumps(output, indent=2))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..32e2d5ee88
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,52 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduce/serialize_override_should_add_notes",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduce/override_get_includes_notes",
++      "status": "PASSED"
++    }
++  ],
++  "details": [
++    {
++      "name": "test_reproduce/serialize_override_should_add_notes",
++      "status": "FAILED",
++      "details": {
++        "expected": true,
++        "actual": false,
++        "results": [
++          {
++            "id": "1",
++            "text": "One"
++          },
++          {
++            "id": "2",
++            "text": "Two"
++          }
++        ]
++      }
++    },
++    {
++      "name": "test_reproduce/override_get_includes_notes",
++      "status": "PASSED",
++      "details": {
++        "expected": true,
++        "actual": true,
++        "results": [
++          {
++            "id": "1",
++            "text": "One",
++            "notes": "note-one"
++          },
++          {
++            "id": "2",
++            "text": "Two",
++            "notes": "note-two"
++          }
++        ]
++      }
++    }
++  ]
++}
+\ No newline at end of file

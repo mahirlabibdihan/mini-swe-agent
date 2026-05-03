@@ -1,0 +1,85 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..f69c520bb8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++# Try to install sympy if missing; don't fail the script if install prints warnings
++pip install -q sympy || true
++
++# Run the reproduction and capture output
++output=$(python3 test_repro.py 2>&1) || true
++echo "$output"
++
++# Robustly extract ARGS_EQ and KWARGS_EQ values
++args_eq=$(printf "%s" "$output" | awk -F'ARGS_EQ: ' '/ARGS_EQ:/ {print $2; exit}' | tr -d '\r\n' || true)
++kwargs_eq=$(printf "%s" "$output" | awk -F'KWARGS_EQ: ' '/KWARGS_EQ:/ {print $2; exit}' | tr -d '\r\n' || true)
++
++status="ERROR"
++if [[ "$args_eq" == "False" && "$kwargs_eq" == "True" ]]; then
++  # Matches the reported bug: arg-based invariance fails but kwargs-based invariant holds
++  status="FAILED"
++elif [[ "$args_eq" == "True" && "$kwargs_eq" == "True" ]]; then
++  status="PASSED"
++else
++  status="ERROR"
++fi
++
++python3 - <<PY "$status"
++import sys, json
++status = sys.argv[1]
++tests = [{"name":"test_repro.py::test_string_arg_invariance","status": status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..51028de783
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,27 @@
++import sys
++try:
++    from sympy.codegen.ast import String
++except Exception as e:
++    print("IMPORT_ERROR", e)
++    sys.exit(2)
++
++def main():
++    s = String('hello')
++    try:
++        a = s.func(*s.args)
++    except Exception as e:
++        print("ARGS_EXCEPTION", e)
++        a = None
++    try:
++        b = s.func(**s.kwargs())
++    except Exception as e:
++        print("KWARGS_EXCEPTION", e)
++        b = None
++    print("ARGS_EQ:", s == a)
++    print("KWARGS_EQ:", s == b)
++    print("S_REPR:", repr(s))
++    print("A_REPR:", repr(a))
++    print("B_REPR:", repr(b))
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..6da5161bca
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_string_arg_invariance",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

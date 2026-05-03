@@ -1,0 +1,151 @@
+diff --git a/hist_compare.png b/hist_compare.png
+new file mode 100644
+index 0000000000..962fe1527f
+Binary files /dev/null and b/hist_compare.png differ
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..dda1091cf8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,78 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Write the Python reproduction script
++cat > /testbed/test_repro.py <<'PY2'
++import numpy as np
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++import sys, traceback, os
++
++def run(scale=1.2):
++    test_random = np.random.RandomState(0).randn(100000) * scale
++    fig, ax = plt.subplots(1, 2, figsize=(8, 4))
++    n_bar, bins_bar, patches_bar = ax[0].hist(test_random, bins=100, density=True, histtype="bar")
++    n_step, bins_step, patches_step = ax[1].hist(test_random, bins=100, density=True, histtype="step")
++    actual_max = float(n_bar.max())
++    bar_ylim = ax[0].get_ylim()
++    step_ylim = ax[1].get_ylim()
++    print("actual_max_density:", actual_max)
++    print("bar_ylim:", bar_ylim)
++    print("step_ylim:", step_ylim)
++    # Consider it a failure if the step plot's top ylim is strictly below the computed max density (with small tol)
++    tol = 1e-12
++    status = "PASSED"
++    if step_ylim[1] + tol < actual_max - 1e-12:
++        status = "FAILED"
++    if step_ylim[1] + tol < bar_ylim[1] - 1e-12:
++        status = "FAILED"
++    # Save image for offline inspection
++    out_png = "/testbed/hist_compare.png"
++    fig.tight_layout()
++    fig.savefig(out_png)
++    print("SAVED_PNG:", out_png)
++    print("TEST_STATUS: " + status)
++
++if __name__ == "__main__":
++    try:
++        run()
++    except Exception as e:
++        print("ERROR:", e)
++        traceback.print_exc()
++        print("TEST_STATUS: ERROR")
++        sys.exit(1)
++PY2
++
++# Try to ensure required packages are available; attempt pip install if not.
++python3 - <<'PY3' || true
++import importlib, sys, subprocess
++try:
++    importlib.import_module('matplotlib')
++    importlib.import_module('numpy')
++except Exception:
++    try:
++        subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "matplotlib", "numpy"])
++    except Exception as e:
++        print("PIP_INSTALL_FAILED", e)
++PY3
++
++# Run the test and capture output
++out_file="/testbed/test_run_output.txt"
++python3 /testbed/test_repro.py 2>&1 | tee "$out_file" || true
++
++# Parse the TEST_STATUS line and write the JSON results
++status_line=$(grep -Eo "TEST_STATUS: (PASSED|FAILED|ERROR)" "$out_file" | head -n1 || true)
++status="ERROR"
++if [ -n "$status_line" ]; then
++  status=$(echo "$status_line" | awk '{print $2}')
++fi
++
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "testbed/test_repro.py::test_ax_hist_step_density_autoscale", "status": "$status"}]}
++JSON
++
++echo "WROTE /testbed/test_status.json with status: $status"
++echo "-------FULL RUN OUTPUT-------"
++sed -n '1,200p' "$out_file" || true
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..2f47327f0d
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,39 @@
++import numpy as np
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++import sys, traceback, os
++
++def run(scale=1.2):
++    test_random = np.random.RandomState(0).randn(100000) * scale
++    fig, ax = plt.subplots(1, 2, figsize=(8, 4))
++    n_bar, bins_bar, patches_bar = ax[0].hist(test_random, bins=100, density=True, histtype="bar")
++    n_step, bins_step, patches_step = ax[1].hist(test_random, bins=100, density=True, histtype="step")
++    actual_max = float(n_bar.max())
++    bar_ylim = ax[0].get_ylim()
++    step_ylim = ax[1].get_ylim()
++    print("actual_max_density:", actual_max)
++    print("bar_ylim:", bar_ylim)
++    print("step_ylim:", step_ylim)
++    # Consider it a failure if the step plot's top ylim is strictly below the computed max density (with small tol)
++    tol = 1e-12
++    status = "PASSED"
++    if step_ylim[1] + tol < actual_max - 1e-12:
++        status = "FAILED"
++    if step_ylim[1] + tol < bar_ylim[1] - 1e-12:
++        status = "FAILED"
++    # Save image for offline inspection
++    out_png = "/testbed/hist_compare.png"
++    fig.tight_layout()
++    fig.savefig(out_png)
++    print("SAVED_PNG:", out_png)
++    print("TEST_STATUS: " + status)
++
++if __name__ == "__main__":
++    try:
++        run()
++    except Exception as e:
++        print("ERROR:", e)
++        traceback.print_exc()
++        print("TEST_STATUS: ERROR")
++        sys.exit(1)
+diff --git a/test_run_output.txt b/test_run_output.txt
+new file mode 100644
+index 0000000000..ff3587904f
+--- /dev/null
++++ b/test_run_output.txt
+@@ -0,0 +1,5 @@
++actual_max_density: 0.3365813177178774
++bar_ylim: (0.0, 0.3534103836037713)
++step_ylim: (0.0, 0.2798032658643525)
++SAVED_PNG: /testbed/hist_compare.png
++TEST_STATUS: FAILED
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..5279009669
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "testbed/test_repro.py::test_ax_hist_step_density_autoscale", "status": "FAILED"}]}

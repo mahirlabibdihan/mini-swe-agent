@@ -1,0 +1,112 @@
+diff --git a/docs/_build/linkcheck/.doctrees/environment.pickle b/docs/_build/linkcheck/.doctrees/environment.pickle
+new file mode 100644
+index 000000000..88bb27f99
+Binary files /dev/null and b/docs/_build/linkcheck/.doctrees/environment.pickle differ
+diff --git a/docs/_build/linkcheck/.doctrees/index.doctree b/docs/_build/linkcheck/.doctrees/index.doctree
+new file mode 100644
+index 000000000..383c753be
+Binary files /dev/null and b/docs/_build/linkcheck/.doctrees/index.doctree differ
+diff --git a/docs/_build/linkcheck/output.txt b/docs/_build/linkcheck/output.txt
+new file mode 100644
+index 000000000..b21c28baf
+--- /dev/null
++++ b/docs/_build/linkcheck/output.txt
+@@ -0,0 +1,2 @@
++index.rst:4: [local] doesntexist
++index.rst:4: [broken] https://lkfqhlkghflkhs: HTTPSConnectionPool(host='lkfqhlkghflkhs', port=443): Max retries exceeded with url: / (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x7ffff450de20>: Failed to resolve 'lkfqhlkghflkhs' ([Errno -3] Temporary failure in name resolution)"))
+diff --git a/docs/linkcheck_output.txt b/docs/linkcheck_output.txt
+new file mode 100644
+index 000000000..a32094ab5
+--- /dev/null
++++ b/docs/linkcheck_output.txt
+@@ -0,0 +1,13 @@
++Running Sphinx v1.7.6
++loading pickled environment... done
++building [mo]: targets for 0 po files that are out of date
++building [linkcheck]: targets for 1 source files that are out of date
++updating environment: 0 added, 0 changed, 0 removed
++looking for now-outdated files... none found
++preparing documents... done
++writing output... [100%] index
++
++(line    4) -local-   doesntexist
++(line    4) broken    https://lkfqhlkghflkhs - HTTPSConnectionPool(host='lkfqhlkghflkhs', port=443): Max retries exceeded with url: / (Caused by NameResolutionError("<urllib3.connection.HTTPSConnection object at 0x7ffff450de20>: Failed to resolve 'lkfqhlkghflkhs' ([Errno -3] Temporary failure in name resolution)"))
++
++build finished with problems.
+diff --git a/docs/source/conf.py b/docs/source/conf.py
+new file mode 100644
+index 000000000..fb947cee0
+--- /dev/null
++++ b/docs/source/conf.py
+@@ -0,0 +1,4 @@
++# Minimal Sphinx conf
++project = 'linkcheck-repro'
++master_doc = 'index'
++extensions = []
+diff --git a/docs/source/index.rst b/docs/source/index.rst
+new file mode 100644
+index 000000000..cbed444a3
+--- /dev/null
++++ b/docs/source/index.rst
+@@ -0,0 +1,8 @@
++Welcome to test documentation
++=============================
++
++broken external-link_
++broken local-link_
++
++.. _external-link: https://lkfqhlkghflkhs
++.. _local-link: doesntexist
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..383341feb
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -euo pipefail
++PYTHON=python3
++# ensure sphinx is available (best-effort)
++$PYTHON -m pip install -q sphinx==1.7.6 || $PYTHON -m pip install -q sphinx || true
++DOCS_DIR=/testbed/docs
++SRC=$DOCS_DIR/source
++BUILD=$DOCS_DIR/_build/linkcheck
++mkdir -p "$BUILD"
++OUTPUT=$DOCS_DIR/linkcheck_output.txt
++# run linkcheck (don't fail the script on non-zero exit)
++sphinx-build -b linkcheck "$SRC" "$BUILD" >"$OUTPUT" 2>&1 || true
++cat "$OUTPUT"
++OUT=$(cat "$OUTPUT")
++# If the local link appears but is NOT marked as broken, that demonstrates the bug -> FAIL the test.
++if echo "$OUT" | grep -q "doesntexist"; then
++  if echo "$OUT" | grep -E "broken.*doesntexist" >/dev/null; then
++    STATUS="PASSED"
++  else
++    STATUS="FAILED"
++  fi
++else
++  STATUS="ERROR"
++fi
++python3 - <<PY "$STATUS"
++import json,sys
++status=sys.argv[1]
++tests=[{"name":"testbed/linkcheck_repro::local_link_unchecked","status": status if status in ("PASSED","FAILED","SKIPPED","ERROR") else "FAILED"}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++PY
++echo "Wrote /testbed/test_status.json with status: $STATUS"
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..983ec712c
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/linkcheck_repro::local_link_unchecked",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

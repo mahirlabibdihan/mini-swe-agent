@@ -1,0 +1,120 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..8ff864286
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,75 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the Python reproduction script
++cat <<'PY' > /testbed/test_repro.py
++import json
++try:
++    from sympy.combinatorics.permutations import Permutation
++except Exception as e:
++    print(json.dumps({"exception": True, "exc": str(e)}))
++    raise SystemExit(1)
++
++class MyPerm(Permutation):
++    pass
++
++try:
++    # Attempt to construct using common Permutation constructor usage
++    p = MyPerm(1, 0)
++except Exception as e:
++    result = {"exception": True, "exc": str(e)}
++else:
++    result = {"isinstance_subclass": isinstance(p, MyPerm), "type_name": type(p).__name__}
++print(json.dumps(result))
++PY
++
++# Ensure sympy is available
++if ! python3 - <<PY >/dev/null 2>&1
++import importlib, sys
++try:
++    importlib.import_module('sympy.combinatorics.permutations')
++    sys.exit(0)
++except Exception:
++    sys.exit(1)
++PY
++then
++    pip3 install -q sympy
++fi
++
++# Run the reproduction script and capture output
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++echo "$output"
++
++# Extract last non-empty line as JSON candidate
++json_line=$(echo "$output" | sed '/^\s*$/d' | tail -n 1)
++
++# Build test_status.json based on observed behavior
++python3 - <<PY "$json_line"
++import sys, json
++from pathlib import Path
++tests = []
++status = "ERROR"
++arg = sys.argv[1] if len(sys.argv) > 1 else ""
++try:
++    data = json.loads(arg)
++    if data.get("exception"):
++        status = "ERROR"
++    else:
++        is_subclass = data.get("isinstance_subclass")
++        # For reproduction, the expected (correct) behavior is that the constructed object
++        # SHOULD be an instance of the subclass. If that's not the case, report FAILED.
++        if is_subclass is False:
++            status = "FAILED"
++        elif is_subclass is True:
++            status = "PASSED"
++        else:
++            status = "ERROR"
++except Exception as e:
++    status = "ERROR"
++
++tests.append({"name":"test_reproduction.py::test_subclassing_should_return_subclass_instance","status":status})
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print("WROTE /testbed/test_status.json with status", status)
++PY
++
++echo "Completed run_test.sh"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..932c67a8c
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,18 @@
++import json
++try:
++    from sympy.combinatorics.permutations import Permutation
++except Exception as e:
++    print(json.dumps({"exception": True, "exc": str(e)}))
++    raise SystemExit(1)
++
++class MyPerm(Permutation):
++    pass
++
++try:
++    # Attempt to construct using common Permutation constructor usage
++    p = MyPerm(1, 0)
++except Exception as e:
++    result = {"exception": True, "exc": str(e)}
++else:
++    result = {"isinstance_subclass": isinstance(p, MyPerm), "type_name": type(p).__name__}
++print(json.dumps(result))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..fc402797e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_subclassing_should_return_subclass_instance",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

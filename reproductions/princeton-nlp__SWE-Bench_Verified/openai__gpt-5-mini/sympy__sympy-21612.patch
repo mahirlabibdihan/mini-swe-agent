@@ -1,0 +1,54 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5525a5f7f6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++# Force reinstall sympy 1.8 and the antlr runtime version expected by sympy 1.8
++python3 -m pip install --quiet --force-reinstall sympy==1.8 antlr4-python3-runtime==4.7.2
++# Run the reproduction script and capture output (allow errors)
++output=$(python3 test_repro.py 2>&1 || true)
++# Determine test status and write JSON
++python3 - <<'PY' "$output"
++import json, sys
++out = sys.argv[1].strip()
++expected_correct = "((a**3 + b)/c)/(1/(c**2))"
++problematic = "((a**3 + b)/c)/1/(c**2)"
++if out == problematic:
++    status = "FAILED"
++elif out == expected_correct:
++    status = "PASSED"
++else:
++    status = "ERROR"
++tests = [{"name":"/testbed/test_repro.py::reproduce_fraction_parse","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print(out)
++PY
++echo "Wrote /testbed/test_status.json"
++nl -ba /testbed/test_status.json || true
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..7214bb6ba0
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,2 @@
++from sympy.parsing.latex import parse_latex
++print(parse_latex("\\frac{\\frac{a^3+b}{c}}{\\frac{1}{c^2}}"))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..6a9bd4d0f8
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_repro.py::reproduce_fraction_parse",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

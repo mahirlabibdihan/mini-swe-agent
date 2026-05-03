@@ -1,0 +1,147 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..3ca056b8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,66 @@
++#!/usr/bin/env bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Ensure requests is available
++python3 - <<'PY' || true
++try:
++    import requests
++except Exception:
++    import sys, subprocess
++    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "requests"])
++PY
++
++# Start proxy server
++python3 /testbed/server.py &
++SERVER_PID=$!
++trap "kill ${SERVER_PID} 2>/dev/null || true" EXIT
++
++# wait for server to be ready
++READY=0
++for i in {1..10}; do
++  if python3 - <<'PY' 2>/dev/null
++import socket
++s=socket.socket()
++try:
++    s.settimeout(1)
++    s.connect(("127.0.0.1", 8888))
++    print("1")
++except Exception:
++    raise SystemExit(1)
++finally:
++    try: s.close()
++    except: pass
++PY
++  then READY=1; break
++  else sleep 0.2
++  fi
++done
++
++if [ "$READY" -ne 1 ]; then
++  echo "Server did not start" >&2
++  echo '{"tests":[{"name":"testbed/test_reproduction.py::test_proxy_407_expected_200","status":"ERROR"}]}' > /testbed/test_status.json
++  exit 1
++fi
++
++OUTPUT=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$OUTPUT"
++
++# Now interpret result: EXPECT 200. If 407 -> mark FAILED to reflect the bug.
++STATUS="FAILED"
++if echo "$OUTPUT" | grep -q "STATUS_CODE: 200"; then
++  STATUS="PASSED"
++elif echo "$OUTPUT" | grep -q "STATUS_CODE: 407"; then
++  STATUS="FAILED"
++elif echo "$OUTPUT" | grep -q "EXCEPTION:"; then
++  STATUS="ERROR"
++else
++  STATUS="FAILED"
++fi
++
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"testbed/test_reproduction.py::test_proxy_407_expected_200","status":"$STATUS"}]}
++JSON
++
++kill ${SERVER_PID} 2>/dev/null || true
++exit 0
+diff --git a/server.py b/server.py
+new file mode 100755
+index 00000000..6bb902f4
+--- /dev/null
++++ b/server.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python3
++from http.server import BaseHTTPRequestHandler, HTTPServer
++import threading
++import sys
++
++class ProxyHandler(BaseHTTPRequestHandler):
++    protocol_version = "HTTP/1.1"
++    def _respond_407(self):
++        self.send_response(407, "Proxy Authentication Required")
++        self.send_header('Proxy-Authenticate', 'Basic realm="Proxy"')
++        body = b'Proxy Authentication Required'
++        self.send_header('Content-Length', str(len(body)))
++        self.end_headers()
++        self.wfile.write(body)
++
++    def do_GET(self):
++        self._respond_407()
++
++    def do_POST(self):
++        self._respond_407()
++
++    def do_CONNECT(self):
++        # For CONNECT (HTTPS) return 407 as well
++        self._respond_407()
++
++    def log_message(self, format, *args):
++        # Suppress logging to keep output clean
++        return
++
++def run(server_class=HTTPServer, handler_class=ProxyHandler, port=8888):
++    server_address = ('127.0.0.1', port)
++    httpd = server_class(server_address, handler_class)
++    try:
++        httpd.serve_forever()
++    except KeyboardInterrupt:
++        pass
++    httpd.server_close()
++
++if __name__ == '__main__':
++    run()
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100755
+index 00000000..b01bf902
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,16 @@
++#!/usr/bin/env python3
++import requests
++import sys
++proxies = {
++    "http": "http://127.0.0.1:8888",
++    "https": "http://127.0.0.1:8888"
++}
++try:
++    r = requests.get("http://example.org/", proxies=proxies, timeout=5)
++    print("STATUS_CODE:", r.status_code)
++    # Also print a header to help parsing
++    print("PROXY_AUTH_HEADER:", r.headers.get("Proxy-Authenticate"))
++    sys.exit(0)
++except Exception as e:
++    print("EXCEPTION:", repr(e))
++    sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..b8b82947
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"testbed/test_reproduction.py::test_proxy_407_expected_200","status":"FAILED"}]}

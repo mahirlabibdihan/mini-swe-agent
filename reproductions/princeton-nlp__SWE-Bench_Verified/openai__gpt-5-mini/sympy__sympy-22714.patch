@@ -1,0 +1,93 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 0000000000..de4ab9cd76
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++
++# Run the reproduction script and capture output
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Parse the CASE lines and write test_status.json
++python3 - <<'PY' "$output"
++import sys, json
++out = sys.argv[1]
++statuses = []
++for line in out.splitlines():
++    if line.startswith('CASE1:'):
++        statuses.append({"name": "/testbed/test_reproduction.py::case1", "status": "PASSED" if "OK" in line else "FAILED"})
++    if line.startswith('CASE2:'):
++        statuses.append({"name": "/testbed/test_reproduction.py::case2", "status": "PASSED" if "OK" in line else "FAILED"})
++    if line.startswith('CASE3:'):
++        statuses.append({"name": "/testbed/test_reproduction.py::case3", "status": "PASSED" if "OK" in line else "FAILED"})
++open('/testbed/test_status.json', 'w').write(json.dumps({"tests": statuses}, indent=2))
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..d52e5cfd8d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,32 @@
++import sympy as sp
++import traceback
++
++def run_case1():
++    try:
++        sp.S('Point2D(Integer(1),Integer(2))')
++        print("CASE1: OK")
++    except Exception as e:
++        print("CASE1: ERROR: " + repr(e))
++
++def run_case2():
++    try:
++        sp.S('Point2D(Integer(1),Integer(2))', evaluate=False)
++        print("CASE2: OK")
++    except Exception as e:
++        print("CASE2: ERROR: " + repr(e))
++
++def run_case3():
++    try:
++        with sp.evaluate(False):
++            sp.S('Point2D(Integer(1),Integer(2))')
++        print("CASE3: OK")
++    except Exception as e:
++        tb = traceback.format_exc()
++        print("CASE3: ERROR: " + repr(e))
++        print("CASE3: TRACEBACK:")
++        print(tb)
++
++if __name__ == '__main__':
++    run_case1()
++    run_case2()
++    run_case3()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..ee6b08c48c
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::case1",
++      "status": "PASSED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::case2",
++      "status": "PASSED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::case3",
++      "status": "FAILED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::case3",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

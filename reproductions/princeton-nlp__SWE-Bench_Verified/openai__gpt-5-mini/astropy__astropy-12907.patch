@@ -1,0 +1,64 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..84443415d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++if echo "$output" | grep -q "RESULT: MISMATCH"; then
++  status="FAILED"
++elif echo "$output" | grep -q "RESULT: MATCH"; then
++  status="PASSED"
++else
++  status="ERROR"
++fi
++python - <<PYTHON > /testbed/test_status.json
++import json,sys
++statuses = [{"name": "/testbed/test_reproduction.py::test_separability_nested", "status": "$status"}]
++print(json.dumps({"tests": statuses}, indent=2))
++PYTHON
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..fa5cb25a2
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,21 @@
++import numpy as np
++from astropy.modeling import models as m
++from astropy.modeling.separable import separability_matrix
++
++# Flat composition
++flat = m.Pix2Sky_TAN() & m.Linear1D(10) & m.Linear1D(5)
++mat_flat = separability_matrix(flat)
++
++# Nested composition
++nested = m.Pix2Sky_TAN() & (m.Linear1D(10) & m.Linear1D(5))
++mat_nested = separability_matrix(nested)
++
++print('flat:')
++print(mat_flat)
++print('nested:')
++print(mat_nested)
++
++if np.array_equal(mat_flat, mat_nested):
++    print('RESULT: MATCH')
++else:
++    print('RESULT: MISMATCH')
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..bda876af0
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::test_separability_nested",
++      "status": "FAILED"
++    }
++  ]
++}

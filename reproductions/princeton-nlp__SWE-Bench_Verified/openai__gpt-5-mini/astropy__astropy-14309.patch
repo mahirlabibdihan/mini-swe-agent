@@ -1,0 +1,71 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 000000000..3fbac23a9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,41 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the reproduction Python script
++cat > test_reproduction.py <<'PY'
++import traceback
++from astropy.io.registry import identify_format
++from astropy.table import Table
++
++print("Calling identify_format with ('write', Table, 'bububu.ecsv', None, [], {})")
++try:
++    res = identify_format("write", Table, "bububu.ecsv", None, [], {})
++    print("identify_format returned:", res)
++except Exception:
++    traceback.print_exc()
++    # keep non-zero exit to indicate failure
++    raise
++PY
++
++# Ensure astropy is installed
++pip install astropy -q
++
++# Run the test and capture output (allow python to fail so we can record output)
++output=$(python test_reproduction.py 2>&1 || true)
++echo "=== TEST OUTPUT ==="
++echo "$output"
++echo "=== END OUTPUT ==="
++
++# Determine status based on presence of IndexError in output
++status="PASSED"
++if echo "$output" | grep -q "IndexError"; then
++  status="FAILED"
++fi
++
++mkdir -p /testbed
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"test_reproduction.py","status":"$status"}]}
++JSON
++
++echo "/testbed/test_status.json contents:"
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..27286c59a
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,11 @@
++import traceback
++from astropy.io.registry import identify_format
++from astropy.table import Table
++
++print("Calling identify_format with (\"write\", Table, \"bububu.ecsv\", None, [], {})")
++try:
++    res = identify_format("write", Table, "bububu.ecsv", None, [], {})
++    print("identify_format returned:", res)
++except Exception:
++    traceback.print_exc()
++    raise
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..0828a46a3
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{\"tests\":[{\"name\":\"test_reproduction.py\",\"status\":\"FAILED\"}]}

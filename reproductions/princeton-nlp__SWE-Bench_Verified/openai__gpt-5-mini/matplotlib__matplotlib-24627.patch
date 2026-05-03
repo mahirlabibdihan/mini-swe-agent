@@ -1,0 +1,87 @@
+diff --git a/output.txt b/output.txt
+new file mode 100644
+index 0000000000..71d9779761
+--- /dev/null
++++ b/output.txt
+@@ -0,0 +1,2 @@
++REMOVE_AXES: None
++CLA_AXES: <Axes: >
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..19adabe879
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,29 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++python3 test_reproduction.py > output.txt 2>&1 || true
++
++remove_line=$(grep '^REMOVE_AXES:' output.txt || true)
++cla_line=$(grep '^CLA_AXES:' output.txt || true)
++
++remove_val=$(printf "%s" "$remove_line" | sed -E 's/REMOVE_AXES:[[:space:]]*(.*)/\1/')
++cla_val=$(printf "%s" "$cla_line" | sed -E 's/CLA_AXES:[[:space:]]*(.*)/\1/')
++
++# Determine statuses based on actual output:
++status_remove="FAILED"
++status_cla="FAILED"
++if [ "$remove_val" = "None" ]; then status_remove="PASSED"; fi
++if [ "$cla_val" = "None" ]; then status_cla="PASSED"; fi
++
++python3 - <<PY
++import json
++from pathlib import Path
++statuses = [
++  {"name": "test_reproduction.py::test_remove_unsets_axes", "status": "$status_remove"},
++  {"name": "test_reproduction.py::test_cla_unsets_axes",    "status": "$status_cla"}
++]
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": statuses}, indent=2))
++print(open("output.txt").read())
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..d44ab38822
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,19 @@
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++
++def run():
++    # Test 1: remove() should unset .axes
++    f, a = plt.subplots()
++    l, = a.plot([1, 2])
++    l.remove()
++    print("REMOVE_AXES:", repr(l.axes))
++
++    # Test 2: cla() currently does NOT unset .axes (the bug described)
++    f, a = plt.subplots()
++    l, = a.plot([1, 2])
++    a.cla()
++    print("CLA_AXES:", repr(l.axes))
++
++if __name__ == "__main__":
++    run()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..4f6371ed05
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_remove_unsets_axes",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_cla_unsets_axes",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

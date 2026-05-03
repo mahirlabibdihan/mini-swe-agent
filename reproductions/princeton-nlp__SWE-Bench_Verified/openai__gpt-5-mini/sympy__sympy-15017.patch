@@ -1,0 +1,75 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..48337710e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction script and capture output
++output="$(python3 /testbed/test_reproduction.py 2>&1 || true)"
++echo "$output"
++# Determine status based on observed behavior and write JSON
++python3 - <<'PY' "$output"
++import json, re, sys
++out = sys.argv[1]
++status = "ERROR"
++if "IMPORT_ERROR:" in out:
++    status = "ERROR"
++else:
++    m1 = re.search(r"len\(a\)=(\d+)", out)
++    m2 = re.search(r"len\(list\(a\)\)=(\d+)", out)
++    if m1 and m2:
++        la = int(m1.group(1)); ll = int(m2.group(1))
++        # If observed matches reported bug (len(a)==0 and len(list(a))==1) => bug present => mark FAILED.
++        if la == 0 and ll == 1:
++            status = "FAILED"
++        elif la == 1 and ll == 1:
++            status = "PASSED"
++        else:
++            status = "FAILED"
++    else:
++        status = "ERROR"
++result = {"tests":[{"name":"test_reproduction.py::len_array_scalar_behavior","status":status}]}
++with open("/testbed/test_status.json","w") as f:
++    json.dump(result, f, indent=2)
++print("\nWROTE /testbed/test_status.json")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..74582ec03
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,17 @@
++import sys
++print("START_REPRO")
++try:
++    import sympy
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    sys.exit(0)
++
++try:
++    a = sympy.Array(3)
++    la = len(a)
++    ll = len(list(a))
++    print(f"len(a)={la}")
++    print(f"len(list(a))={ll}")
++except Exception as e:
++    print("RUNTIME_ERROR:", e)
++    sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..dea7c9ea7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::len_array_scalar_behavior",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

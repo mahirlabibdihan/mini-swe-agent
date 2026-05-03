@@ -1,0 +1,81 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a535cf6e92
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction and capture output
++output="$(python3 /testbed/test_reproduction.py 2>&1 || true)"
++echo "$output"
++# Parse results and write JSON
++python3 - "$output" <<'PY2'
++import sys, json, re
++out = sys.argv[1]
++tests = []
++for m in re.finditer(r'RESULT:\s*(test_reproduction.py::\w+)\s+(PASSED|FAILED)', out):
++    tests.append({"name": "/testbed/" + m.group(1), "status": m.group(2)})
++if not tests:
++    status = "FAILED" if ("Traceback" in out or "EXCEPTION" in out or "Exception" in out) else "PASSED"
++    tests.append({"name": "/testbed/test_reproduction.py::test_reproduction", "status": status})
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE /testbed/test_status.json")
++PY2
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..127f77b719
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,32 @@
++
++import sympy as sp
++from sympy import geometry as ge
++import traceback
++
++point1 = ge.Point(0,0)
++point2 = ge.Point(1,1)
++
++statuses = []
++
++# Test 1: right multiplication (point2 * 2.0)
++try:
++    res1 = point1 + point2 * sp.sympify(2.0)
++    print("TEST1: PASSED ->", res1)
++    statuses.append(("test_reproduction.py::test_right_mul", "PASSED"))
++except Exception:
++    print("TEST1: EXCEPTION")
++    traceback.print_exc()
++    statuses.append(("test_reproduction.py::test_right_mul", "FAILED"))
++
++# Test 2: left multiplication (2.0 * point2) - expected to raise per report
++try:
++    res2 = point1 + sp.sympify(2.0) * point2
++    print("TEST2: PASSED ->", res2)
++    statuses.append(("test_reproduction.py::test_left_mul", "PASSED"))
++except Exception:
++    print("TEST2: EXCEPTION")
++    traceback.print_exc()
++    statuses.append(("test_reproduction.py::test_left_mul", "FAILED"))
++
++for name, status in statuses:
++    print("RESULT:", name, status)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..1eed0730cc
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::test_right_mul",
++      "status": "PASSED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::test_left_mul",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

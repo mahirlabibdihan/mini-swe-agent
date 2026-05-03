@@ -1,0 +1,156 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..0cd623837
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,20 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction script and write the JSON test_status file required by the harness.
++python3 /tmp/test_repro.py > /testbed/test_status.json 2>&1 || true
++# Ensure the file exists and is valid JSON; if not, write an ERROR record.
++python3 - <<'PY'
++import json,sys,os
++p="/testbed/test_status.json"
++try:
++    with open(p,'r') as f:
++        data=json.load(f)
++    # Ensure top-level has "tests" key as list; otherwise normalize to ERROR.
++    if not isinstance(data, dict) or "tests" not in data or not isinstance(data["tests"], list):
++        raise ValueError("Invalid structure")
++except Exception as e:
++    data={"tests":[{"name":"run_reproduction","status":"ERROR"}]}
++    with open(p,'w') as out:
++        json.dump(data,out,indent=2)
++PY
++echo "Wrote /testbed/test_status.json"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..5de2b7d91
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,124 @@
++{
++  "tests": [
++    {
++      "name": "test_repro_end_n=60",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_end_n=61",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_end_n=62",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_end_n=63",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_end_n=64",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_end_n=65",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_end_n=66",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_end_n=67",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_end_n=68",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_end_n=69",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=50",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_mid_n=51",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_mid_n=52",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_mid_n=53",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_mid_n=54",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_mid_n=55",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=56",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=57",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=58",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=59",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=60",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=61",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=62",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=63",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=64",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_mid_n=65",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=66",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro_mid_n=67",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=68",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro_mid_n=69",
++      "status": "FAILED"
++    }
++  ]
++}

@@ -1,0 +1,108 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..913b3e0e7c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -u
++# Execute the reproduction test, capture output and exit code
++python test_reproduction.py 2>&1 | tee test_output.txt || true
++py_exit=${PIPESTATUS[0]}
++
++if [ "$py_exit" -eq 0 ]; then status="PASSED"; else status="FAILED"; fi
++
++mkdir -p /testbed
++cat > /testbed/test_status.json <<EOF
++{"tests":[{"name":"test_reproduction.py::test_flip_transpose_hnf","status":"$status"}]}
++EOF
++
++echo "WROTE /testbed/test_status.json with status: $status"
++echo "Full test output:"
++cat test_output.txt
++
++# Exit 0 so the runner itself is considered executed successfully by the harness
++exit 0
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 0000000000..397ceaa8af
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,16 @@
++input:
++ [[5, 8, 12], [0, 0, 1]]
++flipped (before Matrix):
++ [[1, 0, 0], [12, 8, 5]]
++Matrix(flipped).T:
++ Matrix([[1, 12], [0, 8], [0, 5]])
++hermite_normal_form(M):
++ Matrix([[12], [8], [5]])
++h.T as list:
++ [[12, 8, 5]]
++after final flip:
++ [[5, 8, 12]]
++expected:
++ [[5, 8, 0], [0, 0, 1]]
++RESULT: MISMATCH (FAILED)
++out.shape = (1,3) expected.shape = (2,3)
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..5f90e1c7bc
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,48 @@
++import sys
++try:
++    from sympy.matrices.normalforms import hermite_normal_form
++    from sympy import Matrix
++except Exception as e:
++    print("IMPORT_ERROR", e)
++    sys.exit(2)
++
++# Original matrix (as in PR description)
++a = [[5, 8, 12],
++     [0, 0, 1]]
++
++def flip_matrix(mat):
++    # Emulate numpy.flip on a 2D list: reverse rows and reverse each row (equivalent to arr[::-1, ::-1])
++    return [list(reversed(row)) for row in reversed(mat)]
++
++# Emulate the sequence: np.flip -> Matrix(...) -> .T -> hermite_normal_form -> .T -> np.flip
++flipped = flip_matrix(a)
++M = Matrix(flipped).T
++try:
++    h = hermite_normal_form(M)
++except Exception as e:
++    print("HNF_ERROR", e)
++    sys.exit(2)
++
++hT = h.T
++# Use tolist() to get nested lists; convert SymPy Integer to int
++hT_list = [[int(e) for e in row] for row in hT.tolist()]
++out = flip_matrix(hT_list)
++
++expected = [[5, 8, 0],
++            [0, 0, 1]]
++
++print("input:\n", a)
++print("flipped (before Matrix):\n", flipped)
++print("Matrix(flipped).T:\n", M)
++print("hermite_normal_form(M):\n", h)
++print("h.T as list:\n", hT_list)
++print("after final flip:\n", out)
++print("expected:\n", expected)
++
++if len(out) == len(expected) and all(len(out[i]) == len(expected[i]) for i in range(len(expected))) and out == expected:
++    print("RESULT: MATCH (PASSED)")
++    sys.exit(0)
++else:
++    print("RESULT: MISMATCH (FAILED)")
++    print("out.shape = ({},{}) expected.shape = ({},{})".format(len(out), len(out[0]) if out else 0, len(expected), len(expected[0])))
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..9ef14ec7ca
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py::test_flip_transpose_hnf","status":"FAILED"}]}

@@ -1,0 +1,148 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..7a0f16e69
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,72 @@
++#!/bin/bash
++set -uo pipefail
++# Run the reproduction Python and capture all output without exiting on errors
++output=$(python3 - <<'PY' 2>&1 || true
++import numpy as np
++from astropy.nddata import NDDataRef
++import astropy, traceback
++
++def run():
++    array = np.array([[0,1,0],[1,0,1],[0,1,0]])
++    mask = np.array([[0,1,64],[8,0,1],[2,1,0]])
++    nref_nomask = NDDataRef(array)
++    nref_mask = NDDataRef(array, mask=mask)
++
++    ops = [
++      ("nomask_mul_const", lambda: nref_nomask.multiply(1., handle_mask=np.bitwise_or).mask),
++      ("nomask_mul_nomask", lambda: nref_nomask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask),
++      ("mask_mul_const", lambda: nref_mask.multiply(1., handle_mask=np.bitwise_or).mask),
++      ("mask_mul_mask", lambda: nref_mask.multiply(nref_mask, handle_mask=np.bitwise_or).mask),
++      ("mask_mul_nomask", lambda: nref_mask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask),
++    ]
++
++    print("ASTROPY_VERSION:", astropy.__version__)
++    for name,fn in ops:
++        try:
++            val = fn()
++            print(f"TEST: {name} | RESULT: OK | VALUE_TYPE: {type(val).__name__} | VALUE_REPR: {repr(val)}")
++        except Exception as e:
++            tb = traceback.format_exc()
++            print(f"TEST: {name} | EXCEPTION: {type(e).__name__} | MSG: {e!s}")
++            print("TRACEBACK_START")
++            print(tb)
++            print("TRACEBACK_END")
++
++if __name__ == '__main__':
++    run()
++PY
++)
++
++# Show raw output
++echo "$output"
++
++# Parse the output and write /testbed/test_status.json
++printf "%s" "$output" | python3 - <<'PYPARSE'
++import json, re, sys
++out = sys.stdin.read()
++expected = {
++ "nomask_mul_const": False,
++ "nomask_mul_nomask": False,
++ "mask_mul_const": True,
++ "mask_mul_mask": False,
++ "mask_mul_nomask": True,
++}
++tests = []
++for name, exp_exc in expected.items():
++    m_exc = re.search(rf"TEST: {re.escape(name)} .*EXCEPTION: ([^\n]+) \| MSG: ([^\n]+)", out)
++    m_ok = re.search(rf"TEST: {re.escape(name)} .*RESULT: OK", out)
++    observed_exception = m_exc is not None
++    observed_type = m_exc.group(1).strip() if m_exc else None
++    observed_msg = m_exc.group(2).strip() if m_exc else None
++    if exp_exc:
++        matches = observed_exception and observed_type == "TypeError" and ("unsupported operand type" in (observed_msg or ""))
++        status = "PASSED" if matches else "FAILED"
++    else:
++        status = "PASSED" if (not observed_exception and m_ok) else "FAILED"
++    tests.append({"name": f"test_reproduction.py::{name}", "status": status})
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("\nWROTE /testbed/test_status.json")
++print(open("/testbed/test_status.json").read())
++PYPARSE
++
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..b04108632
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,33 @@
++
++import numpy as np
++from astropy.nddata import NDDataRef
++import astropy, traceback
++
++def run():
++    array = np.array([[0,1,0],[1,0,1],[0,1,0]])
++    mask = np.array([[0,1,64],[8,0,1],[2,1,0]])
++    nref_nomask = NDDataRef(array)
++    nref_mask = NDDataRef(array, mask=mask)
++
++    ops = [
++      ("nomask_mul_const", lambda: nref_nomask.multiply(1., handle_mask=np.bitwise_or).mask),
++      ("nomask_mul_nomask", lambda: nref_nomask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask),
++      ("mask_mul_const", lambda: nref_mask.multiply(1., handle_mask=np.bitwise_or).mask),
++      ("mask_mul_mask", lambda: nref_mask.multiply(nref_mask, handle_mask=np.bitwise_or).mask),
++      ("mask_mul_nomask", lambda: nref_mask.multiply(nref_nomask, handle_mask=np.bitwise_or).mask),
++    ]
++
++    print("ASTROPY_VERSION:", astropy.__version__)
++    for name,fn in ops:
++        try:
++            val = fn()
++            print(f"TEST: {name} | RESULT: OK | VALUE_TYPE: {type(val).__name__} | VALUE_REPR: {repr(val)}")
++        except Exception as e:
++            tb = traceback.format_exc()
++            print(f"TEST: {name} | EXCEPTION: {type(e).__name__} | MSG: {e!s}")
++            print("TRACEBACK_START")
++            print(tb)
++            print("TRACEBACK_END")
++
++if __name__ == '__main__':
++    run()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..332da051d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,24 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::nomask_mul_const",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::nomask_mul_nomask",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::mask_mul_const",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::mask_mul_mask",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::mask_mul_nomask",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

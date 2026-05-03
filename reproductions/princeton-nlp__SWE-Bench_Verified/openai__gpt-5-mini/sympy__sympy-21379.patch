@@ -1,0 +1,131 @@
+diff --git a/reproduction_output.txt b/reproduction_output.txt
+new file mode 100644
+index 0000000000..3e675fa967
+--- /dev/null
++++ b/reproduction_output.txt
+@@ -0,0 +1,2 @@
++RESULT test_sinh_no_assumptions: PASSED
++RESULT test_sinh_with_real_x_y: FAILED
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..b5d2174b31
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,50 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++# Prefer python3 if available
++PYTHON=python3
++if ! command -v "$PYTHON" >/dev/null 2>&1; then
++  PYTHON=python
++fi
++
++# Run the reproduction script and capture output
++output="$($PYTHON test_reproduction.py 2>&1 || true)"
++printf "%s\n" "$output" > reproduction_output.txt
++
++# Parse RESULT lines and write test_status.json in this directory and absolute path
++python3 - <<'PY2' "$output"
++import sys, re, json, os
++out = sys.argv[1]
++pattern = re.compile(r'^RESULT\s+([^:]+):\s*(PASSED|FAILED|ERROR)\s*$')
++statuses = []
++for ln in out.splitlines():
++    m = pattern.match(ln.rstrip("\n"))
++    if m:
++        statuses.append({"name": m.group(1).strip(), "status": m.group(2).strip()})
++if not statuses:
++    statuses = [{"name": "test_reproduction.py", "status": "ERROR"}]
++# Write local test_status.json
++with open("test_status.json", "w") as f:
++    json.dump({"tests": statuses}, f, indent=2)
++# Also ensure absolute path exists
++abs_path = "/testbed/test_status.json"
++try:
++    # If the local and absolute paths are different, copy; otherwise do nothing
++    if os.path.abspath("test_status.json") != os.path.abspath(abs_path):
++        from shutil import copyfile
++        copyfile("test_status.json", abs_path)
++    else:
++        # Already same file; ensure it's written
++        pass
++except Exception:
++    # Best-effort: attempt to write absolute path directly
++    with open(abs_path, "w") as f:
++        json.dump({"tests": statuses}, f, indent=2)
++# Print output for visibility
++print(out)
++print("WROTE /testbed/test_status.json")
++PY2
++
++# Exit successfully
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..86a2936501
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,42 @@
++import sys
++try:
++    from sympy import symbols, exp, sinh, Piecewise
++    from sympy.core.cache import clear_cache
++    from sympy.polys.polyerrors import PolynomialError
++except Exception:
++    # If sympy isn't available, report ERROR for both tests
++    print("RESULT test_sinh_no_assumptions: ERROR")
++    print("RESULT test_sinh_with_real_x_y: ERROR")
++    sys.exit(0)
++
++# Test 1: no special assumptions - subs({1:1.0}) is expected to succeed
++try:
++    clear_cache()
++    x, y, z = symbols('x y z')
++    expr = exp(sinh(Piecewise((x, y > x), (y, True)) / z))
++    _ = expr.subs({1: 1.0})
++    print("RESULT test_sinh_no_assumptions: PASSED")
++except Exception:
++    # If this fails, that's unexpected in the bug description -> mark FAILED
++    print("RESULT test_sinh_no_assumptions: FAILED")
++
++# Test 2: x,y declared real. According to the bug report, subs({1:1.0}) erroneously raises PolynomialError.
++# The expected (correct) behavior is that subs should succeed. Therefore, if PolynomialError occurs, mark FAILED.
++try:
++    clear_cache()
++    x, y, z = symbols('x y z', real=True)
++    expr = exp(sinh(Piecewise((x, y > x), (y, True)) / z))
++    try:
++        _ = expr.subs({1: 1.0})
++    except Exception as e:
++        # If PolynomialError occurs, this demonstrates the bug -> report FAILED
++        if isinstance(e, PolynomialError):
++            print("RESULT test_sinh_with_real_x_y: FAILED")
++        else:
++            # Some other exception also indicates failure of expected behavior
++            print("RESULT test_sinh_with_real_x_y: FAILED")
++    else:
++        # No exception -> correct behavior -> PASSED
++        print("RESULT test_sinh_with_real_x_y: PASSED")
++except Exception:
++    print("RESULT test_sinh_with_real_x_y: ERROR")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..65bd99a5b1
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_sinh_no_assumptions",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_sinh_with_real_x_y",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

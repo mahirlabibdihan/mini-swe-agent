@@ -1,0 +1,271 @@
+diff --git a/db.sqlite3 b/db.sqlite3
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/makemigrations.out b/makemigrations.out
+new file mode 100644
+index 0000000000..f2e276d681
+--- /dev/null
++++ b/makemigrations.out
+@@ -0,0 +1,3 @@
++Migrations for 'testapp':
++  testapp/migrations/0001_initial.py
++    - Create model Thing
+diff --git a/manage.py b/manage.py
+new file mode 100755
+index 0000000000..19675dbdee
+--- /dev/null
++++ b/manage.py
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python
++import os, sys
++if __name__ == "__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "project.settings")
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
+diff --git a/project/__init__.py b/project/__init__.py
+new file mode 100644
+index 0000000000..0e9c9a9915
+--- /dev/null
++++ b/project/__init__.py
+@@ -0,0 +1 @@
++# project package
+diff --git a/project/settings.py b/project/settings.py
+new file mode 100644
+index 0000000000..8996df3138
+--- /dev/null
++++ b/project/settings.py
+@@ -0,0 +1,18 @@
++import os
++BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++SECRET_KEY = "fake-key"
++DEBUG = True
++INSTALLED_APPS = [
++    "django.contrib.contenttypes",
++    "django.contrib.auth",
++    "testapp",
++]
++DATABASES = {
++    "default": {
++        "ENGINE": "django.db.backends.sqlite3",
++        "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
++    }
++}
++MIDDLEWARE = []
++ROOT_URLCONF = ""
++USE_TZ = True
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..ffd6b275f9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,119 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Install a specific Django version that may exhibit the bug
++pip install -q "Django==2.2.*"
++
++# Prepare project layout
++rm -rf testapp project db.sqlite3
++mkdir -p testapp/migrations project
++cat > testapp/__init__.py <<'PY'
++# testapp package
++PY
++cat > testapp/migrations/__init__.py <<'PY'
++# migrations package
++PY
++
++cat > manage.py <<'PY'
++#!/usr/bin/env python
++import os, sys
++if __name__ == "__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "project.settings")
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
++PY
++chmod +x manage.py
++
++cat > project/__init__.py <<'PY'
++# project package
++PY
++
++cat > project/settings.py <<'PY'
++import os
++BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++SECRET_KEY = "fake-key"
++DEBUG = True
++INSTALLED_APPS = [
++    "django.contrib.contenttypes",
++    "django.contrib.auth",
++    "testapp",
++]
++DATABASES = {
++    "default": {
++        "ENGINE": "django.db.backends.sqlite3",
++        "NAME": os.path.join(BASE_DIR, "db.sqlite3"),
++    }
++}
++MIDDLEWARE = []
++ROOT_URLCONF = ""
++USE_TZ = True
++PY
++
++# Recreate models to define an inner class inside the Model and a Field that stores it
++cat > testapp/models.py <<'PY'
++from django.db import models
++
++class EnumField(models.Field):
++    def __init__(self, enum=None, *args, **kwargs):
++        self.enum = enum
++        super().__init__(*args, **kwargs)
++    def deconstruct(self):
++        name, path, args, kwargs = super().deconstruct()
++        # Return the enum class object in kwargs so migrations serializer must serialize it
++        kwargs['enum'] = self.enum
++        return name, path, args, kwargs
++    def get_internal_type(self):
++        return "CharField"
++
++class Thing(models.Model):
++    # Inner class defined inside the Model
++    class State:
++        on = 'on'
++        off = 'off'
++    state = EnumField(enum=State, max_length=10)
++PY
++
++cat > testapp/apps.py <<'PY'
++from django.apps import AppConfig
++class TestappConfig(AppConfig):
++    name = "testapp"
++PY
++
++# Clean old migrations and generate new migration
++rm -f testapp/migrations/0001_*.py
++export PYTHONUNBUFFERED=1
++python manage.py makemigrations testapp --noinput > makemigrations.out 2>&1 || true
++
++mig_file=$(ls -1 testapp/migrations/0001*.py 2>/dev/null || true)
++
++status="ERROR"
++if [ -z "$mig_file" ]; then
++    status="ERROR"
++else
++    # Check for incorrect top-level reference to the inner class
++    if grep -q "testapp.models.State" "$mig_file"; then
++        status="FAILED"
++    else
++        status="PASSED"
++    fi
++fi
++
++# Write test_status.json
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "repro/makemigrations_inner_model_class::test_inner_model_class_reference",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++# Output summary
++echo "Migration file: ${mig_file:-<none>}"
++echo "Result status: $status"
++echo "Wrote /testbed/test_status.json"
++echo "---- makemigrations output ----"
++sed -n '1,200p' makemigrations.out || true
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..06137f21d7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "repro/makemigrations_inner_model_class::test_inner_model_class_reference",
++      "status": "FAILED"
++    }
++  ]
++}
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testapp/apps.py b/testapp/apps.py
+new file mode 100644
+index 0000000000..7b7e3d97af
+--- /dev/null
++++ b/testapp/apps.py
+@@ -0,0 +1,3 @@
++from django.apps import AppConfig
++class TestappConfig(AppConfig):
++    name = "testapp"
+diff --git a/testapp/migrations/0001_initial.py b/testapp/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..85c8671a7a
+--- /dev/null
++++ b/testapp/migrations/0001_initial.py
+@@ -0,0 +1,22 @@
++# Generated by Django 3.1 on 2026-04-23 15:51
++
++from django.db import migrations, models
++import testapp.models
++
++
++class Migration(migrations.Migration):
++
++    initial = True
++
++    dependencies = [
++    ]
++
++    operations = [
++        migrations.CreateModel(
++            name='Thing',
++            fields=[
++                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('state', testapp.models.EnumField(enum=testapp.models.State, max_length=10)),
++            ],
++        ),
++    ]
+diff --git a/testapp/migrations/__init__.py b/testapp/migrations/__init__.py
+new file mode 100644
+index 0000000000..7f7d0d386c
+--- /dev/null
++++ b/testapp/migrations/__init__.py
+@@ -0,0 +1 @@
++# migrations package
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..3faf719fcd
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,20 @@
++from django.db import models
++
++class EnumField(models.Field):
++    def __init__(self, enum=None, *args, **kwargs):
++        self.enum = enum
++        super().__init__(*args, **kwargs)
++    def deconstruct(self):
++        name, path, args, kwargs = super().deconstruct()
++        # Return the enum class object in kwargs so migrations serializer must serialize it
++        kwargs['enum'] = self.enum
++        return name, path, args, kwargs
++    def get_internal_type(self):
++        return "CharField"
++
++class Thing(models.Model):
++    # Inner class defined inside the Model
++    class State:
++        on = 'on'
++        off = 'off'
++    state = EnumField(enum=State, max_length=10)

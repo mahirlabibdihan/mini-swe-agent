@@ -1,0 +1,148 @@
+diff --git a/repro.out b/repro.out
+new file mode 100644
+index 0000000000..f121d4c9f1
+--- /dev/null
++++ b/repro.out
+@@ -0,0 +1,4 @@
++form.is_valid: True
++form.cleaned_data: {'name': 'submitted_name', 'value': 0}
++instance_value: 5
++TEST: test_repro::form_overwrite PASSED
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000000..dfe14f04ce
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,56 @@
++import os, sys
++from django.conf import settings
++
++BASE_DIR = os.path.dirname(__file__)
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=['testapp'],
++        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++        DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++        USE_TZ=False,
++    )
++
++import django
++django.setup()
++
++from django import forms
++from testapp.models import Item
++
++class ItemForm(forms.ModelForm):
++    class Meta:
++        model = Item
++        fields = ['name', 'value']
++
++    def clean(self):
++        cleaned = super().clean()
++        # Overwrite 'value' in cleaned_data regardless of whether it was in the submitted data
++        cleaned['value'] = 0
++        return cleaned
++
++def run():
++    # Simulate submitting the form with 'value' omitted from payload
++    data = {'name': 'submitted_name'}
++    form = ItemForm(data=data)
++    is_valid = form.is_valid()
++    try:
++        cleaned = form.cleaned_data
++    except Exception:
++        cleaned = None
++    instance = None
++    try:
++        instance = form.save(commit=False)
++    except Exception as e:
++        print("ERROR during save:", e)
++    print("form.is_valid:", is_valid)
++    print("form.cleaned_data:", cleaned)
++    print("instance_value:", getattr(instance, 'value', None))
++    observed = getattr(instance, 'value', None)
++    cleaned_value = (cleaned or {}).get('value', None)
++    if observed != cleaned_value and observed == 5:
++        status = "PASSED"
++    else:
++        status = "FAILED"
++    print(f"TEST: test_repro::form_overwrite {status}")
++
++if __name__ == '__main__':
++    run()
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a2c9fc4df9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction and capture output
++python /testbed/repro.py > /testbed/repro.out 2>&1 || true
++# Parse the output for TEST lines and write test_status.json
++python - <<'PY' "/testbed/repro.out"
++import json,sys,re
++out = open(sys.argv[1]).read()
++tests = []
++for line in out.splitlines():
++    m = re.match(r"TEST:\s+(\S+)\s+(PASSED|FAILED|SKIPPED|ERROR)", line)
++    if m:
++        # Invert the interpretation: if the reproduction detected the bug,
++        # it will emit PASSED in the repro output; record that as FAILED for CI reporting.
++        name, status = m.group(1), m.group(2)
++        if status == "PASSED":
++            recorded = "FAILED"
++        else:
++            recorded = status
++        tests.append({"name": name, "status": recorded})
++if not tests:
++    tests = [{"name": "test_repro::form_overwrite", "status": "ERROR"}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print(out)
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..bdb8a133ea
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro::form_overwrite",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testapp/apps.py b/testapp/apps.py
+new file mode 100644
+index 0000000000..42a0e07ef6
+--- /dev/null
++++ b/testapp/apps.py
+@@ -0,0 +1,3 @@
++from django.apps import AppConfig
++class TestAppConfig(AppConfig):
++    name = 'testapp'
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..83ec5e527f
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,8 @@
++from django.db import models
++
++class Item(models.Model):
++    name = models.CharField(max_length=100, default='default_name', blank=True)
++    value = models.IntegerField(default=5, blank=True)
++
++    class Meta:
++        app_label = 'testapp'

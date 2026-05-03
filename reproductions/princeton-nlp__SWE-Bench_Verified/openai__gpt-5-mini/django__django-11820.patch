@@ -1,0 +1,180 @@
+diff --git a/check_output.txt b/check_output.txt
+new file mode 100644
+index 0000000000..3a4bcfb469
+--- /dev/null
++++ b/check_output.txt
+@@ -0,0 +1,22 @@
++Traceback (most recent call last):
++  File "<stdin>", line 7, in <module>
++  File "/testbed/django/core/management/__init__.py", line 168, in call_command
++    return command.execute(*args, **defaults)
++  File "/testbed/django/core/management/base.py", line 369, in execute
++    output = self.handle(*args, **options)
++  File "/testbed/django/core/management/commands/check.py", line 64, in handle
++    fail_level=getattr(checks, options['fail_level']),
++  File "/testbed/django/core/management/base.py", line 441, in check
++    raise SystemCheckError(msg)
++django.core.management.base.SystemCheckError: SystemCheckError: System check identified some issues:
++
++ERRORS:
++test_app.SomeModel: (models.E015) 'ordering' refers to the nonexistent field, related field, or lookup 'option__pk'.
++
++System check identified 1 issue (0 silenced).
++EXCEPTION: SystemCheckError: System check identified some issues:
++
++ERRORS:
++test_app.SomeModel: (models.E015) 'ordering' refers to the nonexistent field, related field, or lookup 'option__pk'.
++
++System check identified 1 issue (0 silenced).
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..03aa017cf0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,89 @@
++#!/bin/bash
++# Robust run script: do not exit on non-zero from commands; we'll handle statuses manually.
++set -u
++cd "$(dirname "$0")"
++
++# Install Django (best-effort, quiet)
++pip install -q "Django==4.2" >/dev/null 2>&1 || pip install -q "Django" >/dev/null 2>&1 || true
++
++# Create a minimal Django app that triggers models.E015 via Meta.ordering = ['option__pk']
++mkdir -p test_app
++cat > test_app/__init__.py <<'PY'
++default_app_config = 'test_app.apps.TestAppConfig'
++PY
++
++cat > test_app/apps.py <<'PY'
++from django.apps import AppConfig
++class TestAppConfig(AppConfig):
++    name = 'test_app'
++    default_auto_field = 'django.db.models.BigAutoField'
++PY
++
++cat > test_app/models.py <<'PY'
++from django.db import models
++class Option(models.Model):
++    name = models.CharField(max_length=50)
++
++class SomeModel(models.Model):
++    option = models.ForeignKey(Option, on_delete=models.CASCADE)
++    class Meta:
++        ordering = ['option__pk']
++PY
++
++# Minimal settings
++cat > settings.py <<'PY'
++SECRET_KEY = 'test'
++INSTALLED_APPS = ['test_app']
++DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3','NAME': ':memory:'}}
++ROOT_URLCONF = ''
++DEFAULT_AUTO_FIELD='django.db.models.BigAutoField'
++PY
++
++# Run Django checks, capture output and exit code. Use tee so we can both view and parse.
++python - <<'PY' 2>&1 | tee check_output.txt
++import os, sys
++os.environ.setdefault('DJANGO_SETTINGS_MODULE','settings')
++import django
++from django.core.management import call_command
++django.setup()
++try:
++    call_command('check')
++    sys.exit(0)
++except Exception as e:
++    # Print the exception exactly as Django shows it to match grep checks below
++    print("EXCEPTION:", e)
++    # Also print full traceback for clarity
++    import traceback
++    traceback.print_exc()
++    sys.exit(1)
++PY
++rc=${PIPESTATUS[0]}
++
++# Read the captured output
++output=$(cat check_output.txt)
++
++# Determine status based on actual output
++status="PASSED"
++if echo "$output" | grep -q "models.E015"; then
++  status="FAILED"
++elif echo "$output" | grep -qi "ordering' refers to the nonexistent field, related field, or lookup"; then
++  status="FAILED"
++elif [ "$rc" -ne 0 ]; then
++  status="ERROR"
++fi
++
++# Write the required test status JSON to /testbed/test_status.json
++python - <<PY "$status"
++import json, sys
++from pathlib import Path
++status = sys.argv[1]
++result = {"tests": [{"name": "test_repro::test_meta_ordering_option_pk", "status": status}]}
++Path("/testbed/test_status.json").write_text(json.dumps(result, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PY
++
++# Print summary and exit 0 so the caller always gets output; the status file contains the actual result.
++echo "---- CHECK OUTPUT BEGIN ----"
++cat check_output.txt
++echo "---- CHECK OUTPUT END ----"
++exit 0
+diff --git a/settings.py b/settings.py
+new file mode 100644
+index 0000000000..c97c2fcdd5
+--- /dev/null
++++ b/settings.py
+@@ -0,0 +1,5 @@
++SECRET_KEY = 'test'
++INSTALLED_APPS = ['test_app']
++DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3','NAME': ':memory:'}}
++ROOT_URLCONF = ''
++DEFAULT_AUTO_FIELD='django.db.models.BigAutoField'
+diff --git a/test_app/__init__.py b/test_app/__init__.py
+new file mode 100644
+index 0000000000..88bb5df0fc
+--- /dev/null
++++ b/test_app/__init__.py
+@@ -0,0 +1 @@
++default_app_config = 'test_app.apps.TestAppConfig'
+diff --git a/test_app/apps.py b/test_app/apps.py
+new file mode 100644
+index 0000000000..6a2f6c6327
+--- /dev/null
++++ b/test_app/apps.py
+@@ -0,0 +1,4 @@
++from django.apps import AppConfig
++class TestAppConfig(AppConfig):
++    name = 'test_app'
++    default_auto_field = 'django.db.models.BigAutoField'
+diff --git a/test_app/models.py b/test_app/models.py
+new file mode 100644
+index 0000000000..5594ef248b
+--- /dev/null
++++ b/test_app/models.py
+@@ -0,0 +1,8 @@
++from django.db import models
++class Option(models.Model):
++    name = models.CharField(max_length=50)
++
++class SomeModel(models.Model):
++    option = models.ForeignKey(Option, on_delete=models.CASCADE)
++    class Meta:
++        ordering = ['option__pk']
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..c2081e5ec5
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro::test_meta_ordering_option_pk",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

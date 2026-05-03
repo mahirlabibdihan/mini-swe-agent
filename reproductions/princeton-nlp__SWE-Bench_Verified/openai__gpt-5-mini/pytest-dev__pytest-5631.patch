@@ -1,0 +1,92 @@
+diff --git a/mymod.py b/mymod.py
+new file mode 100644
+index 000000000..58f8ae84e
+--- /dev/null
++++ b/mymod.py
+@@ -0,0 +1,4 @@
++# simple module to be patched
++some_var = 1
++def some_func():
++    return some_var
+diff --git a/run_repro.py b/run_repro.py
+new file mode 100644
+index 000000000..7cc7c92f1
+--- /dev/null
++++ b/run_repro.py
+@@ -0,0 +1,13 @@
++import numpy as np
++from unittest.mock import patch
++# create a function decorated with patch where new is a numpy array
++@patch(target='mymod.some_var', new=np.array([-5.5, 3.0]))
++def test_dummy():
++    pass
++
++# call the problematic helper directly to reproduce the collection-time error
++import _pytest.compat as compat
++
++print("About to call num_mock_patch_args")
++# This should raise the ValueError described in the PR when using pytest 3.6.0
++print(compat.num_mock_patch_args(test_dummy))
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..d90d68d7b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,27 @@
++#!/bin/bash
++set -euo pipefail
++python -m pip install -q pytest==3.6.0 numpy
++
++# run the reproduction script and capture output (do not exit on error)
++output=$(python run_repro.py 2>&1 || true)
++echo "$output"
++
++status="PASSED"
++# mark as FAILED when the ValueError or collection error is present to match expected failing state
++if echo "$output" | grep -q "The truth value of an array"; then
++  status="FAILED"
++elif echo "$output" | grep -q "ValueError"; then
++  status="FAILED"
++elif echo "$output" | grep -q "ERROR collecting"; then
++  status="FAILED"
++fi
++
++python - <<PYCODE > /testbed/test_status.json
++import json
++from pathlib import Path
++res = {"tests": [{"name": "run_repro.py::num_mock_patch_args_call", "status": "$status"}]}
++Path("/testbed/test_status.json").write_text(json.dumps(res, indent=2))
++PYCODE
++
++# Always exit 0 so the submission runner accepts the output, but test_status.json reflects failure
++exit 0
+diff --git a/test_patch_array.py b/test_patch_array.py
+new file mode 100644
+index 000000000..f90049d38
+--- /dev/null
++++ b/test_patch_array.py
+@@ -0,0 +1,9 @@
++import numpy as np
++from unittest.mock import patch
++from mymod import some_func
++
++# patching a module attribute with a numpy array should trigger the collection bug in pytest 3.6.0
++@patch(target='mymod.some_var', new=np.array([-5.5, 3.0]))
++def test_dummy():
++    # body won't be reached if collection fails
++    assert True
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..bbbb86c43
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "run_repro.py::num_mock_patch_args_call",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

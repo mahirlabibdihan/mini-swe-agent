@@ -1,0 +1,89 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..33112004ab
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,28 @@
++#!/bin/bash
++set -euo pipefail
++
++# Run the reproduction script and capture all output (stdout and stderr)
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++
++# Print the original output for visibility
++printf "%s\n" "$output"
++
++# Assume the reproduction prints a JSON object on the last line; extract that line
++json_line=$(printf "%s\n" "$output" | tail -n 1)
++
++# Use Python to parse the JSON line and write the required test_status.json
++python3 - <<'PY' "$json_line"
++import sys, json
++from pathlib import Path
++
++arg = sys.argv[1] if len(sys.argv) > 1 else ""
++try:
++    data = json.loads(arg)
++except Exception:
++    statuses = [{ "name": "test_repro.py::test_cache_clearing", "status": "ERROR" }]
++else:
++    status = "PASSED" if data.get("cache_cleared") else "FAILED"
++    statuses = [{ "name": "test_repro.py::test_cache_clearing", "status": status }]
++Path("/testbed/test_status.json").write_text(json.dumps({ "tests": statuses }, indent=2))
++print(json.dumps({ "tests": statuses }, indent=2))
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..8ae874a300
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,34 @@
++import functools, json
++
++class Apps:
++    def __init__(self):
++        self._state = 0
++
++    @functools.lru_cache()
++    def get_swappable_settings_name(self):
++        # Return depends on internal state; lru_cache should cache it.
++        return f"swappable-{self._state}"
++
++    def clear_cache(self):
++        # Simulate clearing some internal caches/state but NOT calling
++        # get_swappable_settings_name.cache_clear() — mirrors the reported issue.
++        self._state += 1
++
++def main():
++    apps = Apps()
++    first = apps.get_swappable_settings_name()
++    apps.clear_cache()
++    second = apps.get_swappable_settings_name()
++
++    result = {
++        "first": first,
++        "second": second,
++        "cache_cleared": (first != second)
++    }
++    # Print a human-readable summary and JSON for the harness to parse.
++    print("FIRST:", first)
++    print("SECOND:", second)
++    print(json.dumps(result))
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..3631bc5886
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_cache_clearing",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

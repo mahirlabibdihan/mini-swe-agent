@@ -1,0 +1,72 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..f00708964
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,26 @@
++#!/bin/bash
++set -euo pipefail
++PYTHON=$(command -v python3 || command -v python)
++TMP_OUT=/tmp/test_repro_out.txt
++# Run the test but do not let a non-zero exit abort this script
++set +e
++"$PYTHON" /testbed/test_reproduction.py >"$TMP_OUT" 2>&1
++rc=$?
++set -e
++# Print the test output
++cat "$TMP_OUT"
++if [ $rc -eq 0 ]; then STATUS="PASSED"; else STATUS="FAILED"; fi
++# Write test_status.json
++"$PYTHON" - <<PY
++import json
++from pathlib import Path
++status = "$STATUS"
++Path("/testbed/test_status.json").write_text(json.dumps({
++  "tests": [
++    {"name": "test_reproduction.py::test_roc_curve_thresholds", "status": status}
++  ]
++}, indent=2))
++print("/testbed/test_status.json written with status:", status)
++PY
++# Always exit 0 so the harness sees the script ran successfully
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..07e35761b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,19 @@
++import sys
++import numpy as np
++from sklearn.metrics import roc_curve
++
++rng = np.random.RandomState(42)
++y_true = rng.randint(0, 2, size=10)
++y_score = rng.rand(10)
++fpr, tpr, thresholds = roc_curve(y_true, y_score)
++print("y_true:", y_true)
++print("y_score:", y_score)
++print("thresholds:", thresholds)
++# Proper check: thresholds must be within [0, 1] for probability estimates
++max_th = float(thresholds.max())
++min_th = float(thresholds.min())
++if max_th > 1.0 or min_th < 0.0:
++    print(f"TEST FAILURE: thresholds out of [0,1] range: min={min_th}, max={max_th}")
++    sys.exit(1)
++print("TEST PASSED: all thresholds within [0,1]")
++sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..d24c79374
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_roc_curve_thresholds",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

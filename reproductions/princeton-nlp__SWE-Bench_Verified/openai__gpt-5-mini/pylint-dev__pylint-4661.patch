@@ -1,0 +1,81 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..6ed58545
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,49 @@
++#!/bin/bash
++set -euo pipefail
++
++# Clean start
++rm -rf "$HOME/.pylint.d"
++
++PYTHON=python3
++
++# Ensure pylint is importable; try to install if not present
++if ! $PYTHON -c "import pylint" >/dev/null 2>&1; then
++  $PYTHON -m pip install --user pylint >/tmp/pip_install.out 2>&1 || true
++fi
++
++# Run pylint to allow it to create any data dirs it normally would
++$PYTHON -m pylint /testbed/test_pylint_target.py --disable=all >/tmp/pylint_run.out 2>&1 || true
++
++# Check for non-XDG home dir presence (this SHOULD NOT exist under XDG-compliant behavior)
++home_dir_present=false
++if [ -d "$HOME/.pylint.d" ]; then
++  home_dir_present=true
++fi
++
++# Check for XDG-compliant data dir presence under XDG_DATA_HOME or $HOME/.local/share
++xdg_base="${XDG_DATA_HOME:-$HOME/.local/share}"
++xdg_dir_present=false
++# common candidate names
++if [ -d "$xdg_base/pylint" ] || [ -d "$xdg_base/.pylint.d" ] || [ -d "$xdg_base/pylint.d" ]; then
++  xdg_dir_present=true
++fi
++
++# Build test results: first test expects no ~/.pylint.d (will FAIL if present),
++# second test expects an XDG data dir (will PASS if found, else FAIL).
++status_home="PASSED"
++[ "$home_dir_present" = true ] && status_home="FAILED"
++
++status_xdg="FAILED"
++[ "$xdg_dir_present" = true ] && status_xdg="PASSED"
++
++# Write /testbed/test_status.json
++$PYTHON - <<PYCODE "$status_home" "$status_xdg"
++import json, sys, pathlib
++s_home, s_xdg = sys.argv[1], sys.argv[2]
++out = {"tests": [
++  {"name":"repro/no_home_pylint_dir","status": s_home},
++  {"name":"repro/xdg_data_pylint_dir","status": s_xdg}
++]}
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps(out, indent=2))
++print(pathlib.Path("/testbed/test_status.json").read_text())
++PYCODE
+diff --git a/test_pylint_target.py b/test_pylint_target.py
+new file mode 100644
+index 00000000..c0ae0919
+--- /dev/null
++++ b/test_pylint_target.py
+@@ -0,0 +1 @@
++print("hello from test file")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..df4812c9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "repro/no_home_pylint_dir",
++      "status": "FAILED"
++    },
++    {
++      "name": "repro/xdg_data_pylint_dir",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

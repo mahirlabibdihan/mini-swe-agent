@@ -1,0 +1,65 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 000000000..c66704286
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,33 @@
++#!/bin/bash
++set -euo pipefail
++# Write the reproduction script
++cat <<'PY' > /testbed/test_repro.py
++from sklearn.preprocessing import StandardScaler
++from sklearn.base import clone
++
++# Reproduce: pass an estimator class as a parameter and attempt to clone
++clone(StandardScaler(with_mean=StandardScaler))
++print("CLONE_COMPLETED")
++PY
++
++# Run the reproduction and capture output (allow non-zero exit)
++output=$(python /testbed/test_repro.py 2>&1 || true)
++echo "$output"
++
++# Determine status based on presence of the reported error pattern
++status="PASSED"
++if echo "$output" | grep -q "get_params() missing"; then
++  status="FAILED"
++elif echo "$output" | grep -q "TypeError" && echo "$output" | grep -q "get_params"; then
++  status="FAILED"
++elif echo "$output" | grep -q "Traceback"; then
++  status="FAILED"
++fi
++
++# Write test_status.json
++python - <<PYCODE
++import json
++tests = [{"name": "test_repro.py::test_clone_with_class_param", "status": "$status"}]
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print(json.dumps({"tests": tests}, indent=2))
++PYCODE
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..2ee021c22
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,5 @@
++from sklearn.preprocessing import StandardScaler
++from sklearn.base import clone
++# Reproduction: pass estimator class as parameter
++clone(StandardScaler(with_mean=StandardScaler))
++print("CLONE_COMPLETED")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..a615b49e7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_clone_with_class_param",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

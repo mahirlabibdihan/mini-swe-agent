@@ -1,0 +1,79 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..7312095b9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,42 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd /testbed
++
++# Create the reproduction Python script
++cat > test_reproduction.py <<'PY2'
++#!/usr/bin/env python3
++try:
++    from sympy import IndexedBase
++    from sympy.printing.pycode import pycode
++    p = IndexedBase('p')
++    print(pycode(p[0]))
++except Exception:
++    import traceback, sys
++    traceback.print_exc()
++    sys.exit(2)
++PY2
++
++# Ensure sympy is available
++if ! python3 -c "import sympy" >/dev/null 2>&1; then
++    pip3 install --quiet sympy
++fi
++
++# Run reproduction and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++
++# Determine status: if output contains "Not supported" the bug is reproduced -> FAILED
++status="PASSED"
++if echo "$output" | grep -q "Not supported"; then
++    status="FAILED"
++fi
++
++# Write required test_status.json
++python3 - <<PY3 "$output" "$status"
++import sys, json, pathlib
++out = sys.argv[1]
++status = sys.argv[2]
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps({"tests":[{"name":"/testbed/test_reproduction.py","status":status}]}, indent=2))
++print("----- Captured output -----")
++print(out)
++print("----- Wrote /testbed/test_status.json with status:", status, "-----")
++PY3
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100755
+index 000000000..9641c7f9e
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,10 @@
++#!/usr/bin/env python3
++try:
++    from sympy import IndexedBase
++    from sympy.printing.pycode import pycode
++    p = IndexedBase('p')
++    print(pycode(p[0]))
++except Exception:
++    import traceback, sys
++    traceback.print_exc()
++    sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..84ba323eb
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

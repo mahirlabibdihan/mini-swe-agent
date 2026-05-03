@@ -1,0 +1,123 @@
+diff --git a/repro_workspace/run_test.sh b/repro_workspace/run_test.sh
+new file mode 100755
+index 000000000..be26e9030
+--- /dev/null
++++ b/repro_workspace/run_test.sh
+@@ -0,0 +1,35 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Ensure scikit-learn is available; install if necessary
++python - <<'PY2'
++import sys, subprocess
++try:
++    import sklearn  # noqa: F401
++except Exception:
++    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'scikit-learn'])
++PY2
++
++# Run the reproduction and capture output
++output=$(python test_reproduction.py 2>&1 || true)
++
++# Determine status based on actual output
++status="FAILED"
++if echo "$output" | grep -q "IndexError"; then
++  status="PASSED"
++elif echo "$output" | grep -q -E "ModuleNotFoundError|ImportError"; then
++  status="ERROR"
++fi
++
++# Write the required test status JSON to /testbed/test_status.json
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"test_reproduction.py::test_export_text_single_feature","status":"$status"}]}
++JSON
++
++# Also save the raw output for inspection
++echo "$output" > /testbed/run_output.txt
++
++# Print summary to stdout
++echo "Test status: $status"
++echo "Wrote /testbed/test_status.json and /testbed/run_output.txt"
+diff --git a/repro_workspace/test_reproduction.py b/repro_workspace/test_reproduction.py
+new file mode 100644
+index 000000000..500598ccb
+--- /dev/null
++++ b/repro_workspace/test_reproduction.py
+@@ -0,0 +1,18 @@
++# Reproduction of the reported IndexError in export_text with single feature
++from sklearn.tree import DecisionTreeClassifier
++try:
++    # newer sklearn exposes export_text here
++    from sklearn.tree import export_text
++except Exception:
++    from sklearn.tree.export import export_text
++
++from sklearn.datasets import load_iris
++
++X, y = load_iris(return_X_y=True)
++# keep only the first feature to reproduce the single-feature case
++X = X[:, 0].reshape(-1, 1)
++
++tree = DecisionTreeClassifier()
++tree.fit(X, y)
++# This call is expected to raise IndexError in the reported bug
++print(export_text(tree, feature_names=['sepal_length']))
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 000000000..3daaebe28
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,8 @@
++Traceback (most recent call last):
++  File "repro_workspace/test_reproduction.py", line 18, in <module>
++    print(export_text(tree, feature_names=['sepal_length']))
++  File "/testbed/sklearn/tree/export.py", line 893, in export_text
++    feature_names_ = [feature_names[i] for i in tree_.feature]
++  File "/testbed/sklearn/tree/export.py", line 893, in <listcomp>
++    feature_names_ = [feature_names[i] for i in tree_.feature]
++IndexError: list index out of range
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..a616be0a4
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Ensure scikit-learn is available; install if necessary
++if ! python -c "import sklearn" >/dev/null 2>&1; then
++  python -m pip install -q scikit-learn
++fi
++
++# Run the reproduction script and capture output
++output=$(python repro_workspace/test_reproduction.py 2>&1 || true)
++
++# Now: if the IndexError is observed, we want the test to be RECORDED AS FAILED
++status="PASSED"
++if echo "$output" | grep -q "IndexError"; then
++  status="FAILED"
++elif echo "$output" | grep -q -E "ModuleNotFoundError|ImportError"; then
++  status="ERROR"
++fi
++
++# Write the required test status JSON to /testbed/test_status.json
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"repro_workspace/test_reproduction.py::test_export_text_single_feature","status":"$status"}]}
++JSON
++
++# Save raw output for inspection
++echo "$output" > /testbed/run_output.txt
++
++# Print summary
++echo "Test status: $status"
++echo "Wrote /testbed/test_status.json and /testbed/run_output.txt"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..4402b0c1e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"repro_workspace/test_reproduction.py::test_export_text_single_feature","status":"FAILED"}]}

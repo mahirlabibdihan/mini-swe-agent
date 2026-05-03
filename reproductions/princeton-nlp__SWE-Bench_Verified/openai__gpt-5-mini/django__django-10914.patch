@@ -1,0 +1,104 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..78a7b19e7f
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,42 @@
++#!/bin/bash
++set -eu -o pipefail
++# Ensure output dir exists
++mkdir -p /testbed
++
++# Run the reproduction script and capture output
++output="$(python3 test_repro.py 2>&1 || true)"
++
++# Extract permission lines
++temp_line="$(printf "%s\n" "$output" | sed -n 's/^TEMP_RENAME_PERM:\(0o[0-7]*\)$/\1/p')"
++direct_line="$(printf "%s\n" "$output" | sed -n 's/^DIRECT_WRITE_PERM:\(0o[0-7]*\)$/\1/p')"
++
++temp_perm="${temp_line:-unknown}"
++direct_perm="${direct_line:-unknown}"
++
++# Determine test statuses (FAIL when the bug is observed)
++# Test 1: Expect tempfile rename NOT to produce 0o600; FAIL if it does.
++if [ "$temp_perm" = "0o600" ]; then
++  status1="FAILED"
++else
++  status1="PASSED"
++fi
++
++# Test 2: Expect permissions to be consistent; FAIL if they differ.
++if [ "$temp_perm" != "unknown" ] && [ "$direct_perm" != "unknown" ] && [ "$temp_perm" != "$direct_perm" ]; then
++  status2="FAILED"
++else
++  status2="PASSED"
++fi
++
++python3 - <<PY
++import json
++tests = []
++tests.append({"name": "test/reproduce_temp_rename_perm", "status": "$status1"})
++tests.append({"name": "test/compare_direct_vs_temp", "status": "$status2"})
++out = {"tests": tests}
++open("/testbed/test_status.json","w").write(json.dumps(out, indent=2))
++print("----- Reproduction Output -----")
++print("""$output""")
++print("----- /testbed/test_status.json written -----")
++print(open("/testbed/test_status.json").read())
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..b73fa4bb24
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,31 @@
++import os, stat, tempfile, shutil
++d = tempfile.mkdtemp(prefix="upload_repro_")
++try:
++    # Case A: tempfile.NamedTemporaryFile -> close -> os.rename
++    tf = tempfile.NamedTemporaryFile(delete=False, dir=d)
++    try:
++        tf.write(b"data-A")
++        tf.flush()
++        tf_name = tf.name
++    finally:
++        tf.close()
++    final_a = os.path.join(d, "final_a.bin")
++    os.rename(tf_name, final_a)
++
++    # Case B: direct open/write (simulating MemoryUploadedFile write)
++    final_b = os.path.join(d, "final_b.bin")
++    with open(final_b, "wb") as f:
++        f.write(b"data-B")
++
++    # Get permission bits
++    perm_a = stat.S_IMODE(os.stat(final_a).st_mode)
++    perm_b = stat.S_IMODE(os.stat(final_b).st_mode)
++
++    print("TEMP_RENAME_PERM:{}".format(oct(perm_a)))
++    print("DIRECT_WRITE_PERM:{}".format(oct(perm_b)))
++
++    # Exit code 0
++    raise SystemExit(0)
++finally:
++    # Keep files for inspection if needed, but do not delete the containing temp dir here.
++    pass
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..8107841d45
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test/reproduce_temp_rename_perm",
++      "status": "FAILED"
++    },
++    {
++      "name": "test/compare_direct_vs_temp",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

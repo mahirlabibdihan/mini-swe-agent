@@ -1,0 +1,101 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..f0234800
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,53 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Prepare workspace
++rm -rf workspace || true
++mkdir -p workspace/.a
++cat > workspace/.a/foo.py <<'PY'
++# .a/foo.py
++import re
++PY
++cat > workspace/bar.py <<'PY'
++# bar.py
++import re
++PY
++
++mkdir -p /testbed
++
++# Ensure pylint CLI exists; try installing but don't fail install step
++if ! command -v pylint >/dev/null 2>&1; then
++  python -m pip install --quiet pylint==2.13.7 || true
++fi
++
++# Run pylint with empty PYTHONPATH to avoid local package shadowing
++OUT1=$(PYTHONPATH= pylint --recursive=y workspace 2>&1 || true)
++OUT2=$(PYTHONPATH= pylint --recursive=y --ignore=.a workspace 2>&1 || true)
++OUT3=$(PYTHONPATH= pylint --recursive=y --ignore-paths=.a workspace 2>&1 || true)
++OUT4=$(PYTHONPATH= pylint --recursive=y --ignore-patterns="^\.a" workspace 2>&1 || true)
++
++has_foo() {
++  printf '%s' "$1" | grep -F ".a/foo.py" >/dev/null 2>&1 && echo "PRESENT" || echo "ABSENT"
++}
++
++P1=$(has_foo "$OUT1")
++P2=$(has_foo "$OUT2")
++P3=$(has_foo "$OUT3")
++P4=$(has_foo "$OUT4")
++
++# Now mark PASSED when foo is ABSENT (expected), FAILED when PRESENT (bug)
++python - <<PY > /testbed/test_status.json
++import json
++p1="${P1}"; p2="${P2}"; p3="${P3}"; p4="${P4}"
++def status(p): return "PASSED" if p=="ABSENT" else "FAILED"
++tests = [
++  {"name":"pylint_recursive_no_ignore","status": status(p1)},
++  {"name":"pylint_recursive_ignore_flag","status": status(p2)},
++  {"name":"pylint_recursive_ignore_paths","status": status(p3)},
++  {"name":"pylint_recursive_ignore_patterns","status": status(p4)}
++]
++print(json.dumps({"tests": tests}, indent=2))
++PY
++
++# Short summary
++echo "presence: no_ignore=${P1}, ignore=${P2}, ignore-paths=${P3}, ignore-patterns=${P4}"
++cat /testbed/test_status.json
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..7206870e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "pylint_recursive_no_ignore",
++      "status": "FAILED"
++    },
++    {
++      "name": "pylint_recursive_ignore_flag",
++      "status": "FAILED"
++    },
++    {
++      "name": "pylint_recursive_ignore_paths",
++      "status": "FAILED"
++    },
++    {
++      "name": "pylint_recursive_ignore_patterns",
++      "status": "FAILED"
++    }
++  ]
++}
+diff --git a/workspace/.a/foo.py b/workspace/.a/foo.py
+new file mode 100644
+index 00000000..02f80b2f
+--- /dev/null
++++ b/workspace/.a/foo.py
+@@ -0,0 +1,2 @@
++# .a/foo.py
++import re
+diff --git a/workspace/bar.py b/workspace/bar.py
+new file mode 100644
+index 00000000..7af143b4
+--- /dev/null
++++ b/workspace/bar.py
+@@ -0,0 +1,2 @@
++# bar.py
++import re

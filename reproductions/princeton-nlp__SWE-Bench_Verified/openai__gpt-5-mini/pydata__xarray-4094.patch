@@ -1,0 +1,83 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..caef2b26
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -u
++# Install the targeted xarray version
++python -m pip install --quiet xarray==0.15.1 || true
++
++# Run the reproduction and capture output and return code
++output=$(/usr/bin/env python /testbed/test_reproduction.py 2>&1)
++rc=$?
++
++# Decide status based on output and return code
++status="PASSED"
++if echo "$output" | grep -q "EXCEPTION_TYPE: MergeError"; then
++    status="FAILED"
++elif echo "$output" | grep -q "conflicting values for variable 'y'"; then
++    status="FAILED"
++elif [ "$rc" -ne 0 ]; then
++    status="ERROR"
++fi
++
++# Write test_status.json and print summary. Pass arguments correctly to the Python writer.
++python - "$output" "$status" <<PY
++import json,sys
++out=sys.argv[1]
++status=sys.argv[2]
++tests=[{"name":"test_reproduction.py::test_to_unstacked_dataset_single_dim","status": status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print("---- SCRIPT OUTPUT ----")
++print(out)
++print("---- TEST STATUS ----")
++print(json.dumps({"tests":tests}, indent=2))
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..9b38f49d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,25 @@
++import sys,traceback
++def run():
++    try:
++        import xarray as xr
++        import numpy as np
++    except Exception as e:
++        print("IMPORT_ERROR:", e)
++        raise
++    arr = xr.DataArray(
++        np.arange(3),
++        coords=[("x", [0, 1, 2])],
++    )
++    data = xr.Dataset({"a": arr, "b": arr})
++    try:
++        stacked = data.to_stacked_array('y', sample_dims=['x'])
++        unstacked = stacked.to_unstacked_dataset('y')
++        print("NO_ERROR: roundtrip succeeded")
++    except Exception as e:
++        print("EXCEPTION_TYPE:", type(e).__name__)
++        print("EXCEPTION_MSG:", str(e))
++        traceback.print_exc()
++        raise
++
++if __name__ == "__main__":
++    run()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..bc623286
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_to_unstacked_dataset_single_dim",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

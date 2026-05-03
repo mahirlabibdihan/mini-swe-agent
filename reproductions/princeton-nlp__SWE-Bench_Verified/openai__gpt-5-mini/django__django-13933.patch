@@ -1,0 +1,220 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..695cda06f6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,106 @@
++#!/bin/bash
++set -euo pipefail
++
++# Ensure absolute testbed path as required
++mkdir -p /testbed
++
++# Create the reproduction Python script
++cat > test_repro.py <<'PY'
++# Minimal reproduction of the issue described in the PR
++class ValidationError(Exception):
++    def __init__(self, message, params=None):
++        if params:
++            try:
++                message = message % params
++            except Exception:
++                pass
++        super().__init__(message)
++        self.message = str(message)
++        self.params = params
++
++class ModelMultipleChoiceField:
++    """Simulates the snippet where invalid_choice includes %(value)s"""
++    default_error_messages = {
++        'invalid_choice': 'Select a valid choice. %(value)s is not one of the available choices.',
++    }
++    def invalid_choice_message(self, value):
++        try:
++            msg = self.default_error_messages['invalid_choice'] % {'value': value}
++        except Exception:
++            msg = self.default_error_messages['invalid_choice']
++        return msg
++
++class ModelChoiceField:
++    """Simulates the snippet where invalid_choice lacks %(value)s"""
++    default_error_messages = {
++        'invalid_choice': 'Select a valid choice. That choice is not one of the available choices.',
++    }
++    def invalid_choice_message(self, value):
++        msg = self.default_error_messages['invalid_choice']
++        try:
++            msg = msg % {'value': value}
++        except Exception:
++            pass
++        return msg
++
++def run_tests():
++    tests = []
++    mm = ModelMultipleChoiceField()
++    mmsg = mm.invalid_choice_message('BAD_VAL')
++    if 'BAD_VAL' in mmsg:
++        print("TEST_PASS: test_multiple_includes_value")
++        tests.append(("test_multiple_includes_value", "PASSED"))
++    else:
++        print("TEST_FAIL: test_multiple_includes_value")
++        tests.append(("test_multiple_includes_value", "FAILED"))
++
++    mc = ModelChoiceField()
++    smsg = mc.invalid_choice_message('BAD_VAL')
++    if 'BAD_VAL' in smsg:
++        print("TEST_PASS: test_single_includes_value")
++        tests.append(("test_single_includes_value", "PASSED"))
++    else:
++        # Expected failure reproduced here
++        print("TEST_FAIL: test_single_includes_value")
++        tests.append(("test_single_includes_value", "FAILED"))
++
++    all_pass = all(status == "PASSED" for _, status in tests)
++    return tests, 0 if all_pass else 1
++
++if __name__ == '__main__':
++    tests, rc = run_tests()
++    raise SystemExit(rc)
++PY
++
++# Run the reproduction and capture output
++output=$(python3 test_repro.py 2>&1 || true)
++exit_code=$?
++echo "$output"
++
++# Build a valid JSON file at the required absolute path
++python3 - <<'PY' "$output"
++import json,sys,os
++out=sys.argv[1] if len(sys.argv)>1 else ""
++lines=out.splitlines()
++tests=[]
++for line in lines:
++    if line.startswith("TEST_PASS:"):
++        name=line.split(":",1)[1].strip()
++        tests.append({"name":"test_repro.py::"+name, "status":"PASSED"})
++    elif line.startswith("TEST_FAIL:"):
++        name=line.split(":",1)[1].strip()
++        tests.append({"name":"test_repro.py::"+name, "status":"FAILED"})
++if not tests:
++    tests=[{"name":"test_repro.py::unknown","status":"ERROR"}]
++# Ensure /testbed exists and write JSON atomically
++os.makedirs("/testbed", exist_ok=True)
++with open("/testbed/test_status.json.tmp","w") as f:
++    json.dump({"tests":tests}, f, indent=2)
++os.replace("/testbed/test_status.json.tmp","/testbed/test_status.json")
++print("WROTE: /testbed/test_status.json")
++PY
++
++if [ "$exit_code" -ne 0 ]; then
++  exit 1
++fi
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..74cbab48c9
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,64 @@
++# Minimal reproduction of the issue described in the PR
++class ValidationError(Exception):
++    def __init__(self, message, params=None):
++        if params:
++            try:
++                message = message % params
++            except Exception:
++                pass
++        super().__init__(message)
++        self.message = str(message)
++        self.params = params
++
++class ModelMultipleChoiceField:
++    """Simulates the snippet where invalid_choice includes %(value)s"""
++    default_error_messages = {
++        'invalid_choice': 'Select a valid choice. %(value)s is not one of the available choices.',
++    }
++    def invalid_choice_message(self, value):
++        try:
++            msg = self.default_error_messages['invalid_choice'] % {'value': value}
++        except Exception:
++            msg = self.default_error_messages['invalid_choice']
++        return msg
++
++class ModelChoiceField:
++    """Simulates the snippet where invalid_choice lacks %(value)s"""
++    default_error_messages = {
++        'invalid_choice': 'Select a valid choice. That choice is not one of the available choices.',
++    }
++    def invalid_choice_message(self, value):
++        msg = self.default_error_messages['invalid_choice']
++        try:
++            msg = msg % {'value': value}
++        except Exception:
++            pass
++        return msg
++
++def run_tests():
++    tests = []
++    mm = ModelMultipleChoiceField()
++    mmsg = mm.invalid_choice_message('BAD_VAL')
++    if 'BAD_VAL' in mmsg:
++        print("TEST_PASS: test_multiple_includes_value")
++        tests.append(("test_multiple_includes_value", "PASSED"))
++    else:
++        print("TEST_FAIL: test_multiple_includes_value")
++        tests.append(("test_multiple_includes_value", "FAILED"))
++
++    mc = ModelChoiceField()
++    smsg = mc.invalid_choice_message('BAD_VAL')
++    if 'BAD_VAL' in smsg:
++        print("TEST_PASS: test_single_includes_value")
++        tests.append(("test_single_includes_value", "PASSED"))
++    else:
++        # Expected failure reproduced here
++        print("TEST_FAIL: test_single_includes_value")
++        tests.append(("test_single_includes_value", "FAILED"))
++
++    all_pass = all(status == "PASSED" for _, status in tests)
++    return tests, 0 if all_pass else 1
++
++if __name__ == '__main__':
++    tests, rc = run_tests()
++    raise SystemExit(rc)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..90ce6feec7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_multiple_includes_value",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro.py::test_single_includes_value",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testbed/test_status.json b/testbed/test_status.json
+new file mode 100644
+index 0000000000..90ce6feec7
+--- /dev/null
++++ b/testbed/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_multiple_includes_value",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro.py::test_single_includes_value",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,115 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..ea01c8b97
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,20 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd /testbed
++python3 test_min_max.py > test_output.txt 2>&1 || true
++python3 - <<PY
++import json, sys
++raw = open('test_output.txt').read()
++tests = []
++for line in raw.splitlines():
++    if not line:
++        continue
++    parts = line.split(':', 2)
++    if len(parts) < 3:
++        continue
++    name, status, msg = parts
++    tests.append({'name': 'test_min_max.py::' + name, 'status': status})
++open('test_status.json', 'w').write(json.dumps({'tests': tests}, indent=2))
++print(raw)
++PY
++echo 'WROTE /testbed/test_status.json'
+diff --git a/test_min_max.py b/test_min_max.py
+new file mode 100644
+index 000000000..44f68b295
+--- /dev/null
++++ b/test_min_max.py
+@@ -0,0 +1,26 @@
++import sys
++try:
++    from sympy import Min, Max
++except Exception:
++    def Min(*args):
++        if len(args) == 0:
++            raise ValueError('The Min function must have arguments.')
++        return min(args)
++    def Max(*args):
++        if len(args) == 0:
++            raise ValueError('The Max function must have arguments.')
++        return max(args)
++
++def run_checks():
++    results = []
++    for name, func in [('test_min', Min), ('test_max', Max)]:
++        try:
++            func()
++            results.append((name, 'PASSED', 'No exception'))
++        except Exception as e:
++            results.append((name, 'FAILED', str(e)))
++    for name, status, msg in results:
++        print('{}:{}:{}'.format(name,status,msg))
++
++if __name__ == '__main__':
++    run_checks()
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 000000000..08510479e
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,12 @@
++/testbed/sympy/solvers/diophantine.py:3188: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if feasible is 1:  # it's prime and k == 2
++/testbed/sympy/plotting/plot.py:520: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if self.xscale is 'log':
++/testbed/sympy/plotting/plot.py:540: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if self.xscale is 'log':
++/testbed/sympy/plotting/plot.py:553: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if self.xscale is 'log':
++/testbed/sympy/plotting/plot.py:560: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if self.xscale is 'log':
++test_min:FAILED:The Max/Min functions must have arguments.
++test_max:FAILED:The Max/Min functions must have arguments.
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..ae5379a46
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,32 @@
++{
++  "tests": [
++    {
++      "name": "test_min_max.py::/testbed/sympy/solvers/diophantine.py",
++      "status": "3188"
++    },
++    {
++      "name": "test_min_max.py::/testbed/sympy/plotting/plot.py",
++      "status": "520"
++    },
++    {
++      "name": "test_min_max.py::/testbed/sympy/plotting/plot.py",
++      "status": "540"
++    },
++    {
++      "name": "test_min_max.py::/testbed/sympy/plotting/plot.py",
++      "status": "553"
++    },
++    {
++      "name": "test_min_max.py::/testbed/sympy/plotting/plot.py",
++      "status": "560"
++    },
++    {
++      "name": "test_min_max.py::test_min",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_min_max.py::test_max",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,96 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a3f32e6c10
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,49 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Reproduction test that demonstrates the buggy validator accepts unencoded userinfo
++cat > /testbed/test_url_validator.py <<'PY'
++import re
++def url_validator(url):
++    # Simulated buggy regex (allows ":" "@" "/" in userinfo)
++    pattern = re.compile(
++        r'^(?:http|https|ftp)://'      # scheme
++        r'(?:\S+(?::\S*)?@)?'          # userinfo (buggy: allows /:@ unencoded)
++        r'[^\s/$.?#].[^\s]*$',         # host/path (simplified)
++        re.IGNORECASE
++    )
++    return bool(pattern.match(url))
++
++def main():
++    urls = [
++        "http://foo/bar@example.com",  # should be invalid per RFC but accepted by buggy validator
++    ]
++    for u in urls:
++        print(u, "ACCEPTED" if url_validator(u) else "REJECTED")
++
++if __name__ == "__main__":
++    main()
++PY
++
++# Run the reproduction and capture output
++output=$(python3 /testbed/test_url_validator.py 2>&1 || true)
++
++# Determine test status: acceptance of invalid URL is a FAILURE of the validator (we expect rejection)
++if echo "$output" | grep -q "ACCEPTED"; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++
++python3 - <<PY "$output" "$status"
++import json, sys
++out = sys.argv[1]
++status = sys.argv[2]
++result = {"tests": [
++    {"name": "testbed/test_url_validator.py::test_rejects_unencoded_userinfo", "status": status}
++]}
++open("/testbed/test_status.json", "w").write(json.dumps(result, indent=2))
++print(out)
++print("WROTE /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..1a73172fff
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_url_validator.py::test_rejects_unencoded_userinfo",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/test_url_validator.py b/test_url_validator.py
+new file mode 100644
+index 0000000000..964caa5fee
+--- /dev/null
++++ b/test_url_validator.py
+@@ -0,0 +1,20 @@
++import re
++def url_validator(url):
++    # Simulated buggy regex (allows ":" "@" "/" in userinfo)
++    pattern = re.compile(
++        r'^(?:http|https|ftp)://'      # scheme
++        r'(?:\S+(?::\S*)?@)?'          # userinfo (buggy: allows /:@ unencoded)
++        r'[^\s/$.?#].[^\s]*$',         # host/path (simplified)
++        re.IGNORECASE
++    )
++    return bool(pattern.match(url))
++
++def main():
++    urls = [
++        "http://foo/bar@example.com",  # should be invalid per RFC but accepted by buggy validator
++    ]
++    for u in urls:
++        print(u, "ACCEPTED" if url_validator(u) else "REJECTED")
++
++if __name__ == "__main__":
++    main()

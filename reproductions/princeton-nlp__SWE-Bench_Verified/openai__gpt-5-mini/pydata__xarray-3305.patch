@@ -1,0 +1,90 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..9a6d78a2
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,44 @@
++#!/bin/bash
++set -euo pipefail
++
++# create the python reproduction script
++cat > /testbed/test_repro.py <<'PY'
++#!/usr/bin/env python3
++import json, sys, traceback
++try:
++    import xarray as xr
++except Exception as e:
++    print(json.dumps({"status":"ERROR","error":"ImportError","message":str(e)}))
++    sys.exit(0)
++
++try:
++    da = xr.DataArray([0, 0], dims="x", attrs={"units":"K"})
++    out = da.quantile(.9, dim="x", keep_attrs=True)
++    try:
++        attrs = dict(out.attrs)
++    except Exception:
++        attrs = {}
++    status = "PASSED" if attrs.get("units") == "K" else "FAILED"
++    print(json.dumps({"status": status, "attrs": attrs}))
++except Exception as e:
++    print(json.dumps({"status":"ERROR","error":str(e),"traceback":traceback.format_exc()}))
++PY
++
++# run the reproduction script and capture its output
++output="$(python3 /testbed/test_repro.py 2>&1 || true)"
++
++# parse output and write test_status.json
++python3 - <<'PY2' "$output"
++import json,sys
++from pathlib import Path
++raw = sys.argv[1]
++status = "ERROR"
++try:
++    obj = json.loads(raw)
++    status = obj.get("status","ERROR")
++except Exception:
++    status = "ERROR"
++result = {"tests":[{"name":"testbed/test_repro.py::test_keep_attrs_quantile","status": status}]}
++Path("/testbed/test_status.json").write_text(json.dumps(result, indent=2))
++print(raw)
++PY2
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 00000000..c55684ae
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,19 @@
++#!/usr/bin/env python3
++import json, sys, traceback
++try:
++    import xarray as xr
++except Exception as e:
++    print(json.dumps({"status":"ERROR","error":"ImportError","message":str(e)}))
++    sys.exit(0)
++
++try:
++    da = xr.DataArray([0, 0], dims="x", attrs={"units":"K"})
++    out = da.quantile(.9, dim="x", keep_attrs=True)
++    try:
++        attrs = dict(out.attrs)
++    except Exception:
++        attrs = {}
++    status = "PASSED" if attrs.get("units") == "K" else "FAILED"
++    print(json.dumps({"status": status, "attrs": attrs}))
++except Exception as e:
++    print(json.dumps({"status":"ERROR","error":str(e),"traceback":traceback.format_exc()}))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..93187370
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_repro.py::test_keep_attrs_quantile",
++      "status": "ERROR"
++    }
++  ]
++}
+\ No newline at end of file

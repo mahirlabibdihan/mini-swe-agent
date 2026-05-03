@@ -1,0 +1,103 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..94d4ec47
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,30 @@
++#!/bin/bash
++set -uo pipefail
++
++# Ensure output directory
++mkdir -p /testbed
++
++# Run the test script and capture output and exit code
++python test_repro.py > test_output.txt 2>&1
++rc=$?
++output=$(cat test_output.txt)
++
++# Determine test status
++if [ $rc -eq 0 ]; then
++  status="PASSED"
++else
++  status="FAILED"
++fi
++
++# Write the required test_status.json in /testbed
++python - <<PY "$output" "$status"
++import json, sys, pathlib
++output = sys.argv[1]
++status = sys.argv[2]
++path = pathlib.Path("/testbed/test_status.json")
++data = {"tests": [{"name": "test_repro.py::test_where_keep_attrs_coord_attrs", "status": status}]}
++path.write_text(json.dumps(data, indent=2))
++# Also write a human-readable log for debugging
++pathlib.Path("/testbed/test_output.log").write_text(output)
++print(output)
++PY
+diff --git a/test_output.log b/test_output.log
+new file mode 100644
+index 00000000..d08a914a
+--- /dev/null
++++ b/test_output.log
+@@ -0,0 +1,2 @@
++out_attrs: {'long_name': '4xDaily Air temperature at sigma level 995', 'units': 'degK', 'precision': 2, 'GRIB_id': 11}
++RESULT: FAILED
+\ No newline at end of file
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 00000000..7e0f858d
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,2 @@
++out_attrs: {'long_name': '4xDaily Air temperature at sigma level 995', 'units': 'degK', 'precision': 2, 'GRIB_id': 11}
++RESULT: FAILED
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 00000000..3713c8f4
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,29 @@
++import xarray as xr
++import numpy as np
++import pandas as pd
++import sys
++
++# Build dataset with a time coordinate that has coordinate attrs
++times = pd.date_range("2000-01-01", periods=3)
++coords = {'time': ('time', times, {'standard_name': 'time', 'long_name': 'Time'})}
++data_attrs = {
++    'long_name': '4xDaily Air temperature at sigma level 995',
++    'units': 'degK',
++    'precision': 2,
++    'GRIB_id': 11
++}
++ds = xr.Dataset({'air': ('time', np.arange(3), data_attrs)}, coords=coords)
++
++# Apply xr.where with keep_attrs=True
++res = xr.where(True, ds.air, ds.air, keep_attrs=True)
++out_attrs = dict(res.time.attrs)
++
++print("out_attrs:", out_attrs)
++
++# Expectation: coordinate attrs preserved, i.e., standard_name == 'time'
++if out_attrs.get('standard_name') == 'time':
++    print("RESULT: PASSED")
++    sys.exit(0)
++else:
++    print("RESULT: FAILED")
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..595b73fb
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_where_keep_attrs_coord_attrs",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

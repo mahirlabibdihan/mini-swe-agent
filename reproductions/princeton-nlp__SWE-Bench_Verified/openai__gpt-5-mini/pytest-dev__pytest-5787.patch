@@ -1,0 +1,146 @@
+diff --git a/basic/test_basic.py b/basic/test_basic.py
+new file mode 100644
+index 000000000..700ac6c6f
+--- /dev/null
++++ b/basic/test_basic.py
+@@ -0,0 +1,18 @@
++def test_chained_exception_with_from():
++    try:
++        try:
++            raise ValueError(11)
++        except Exception as e1:
++            raise ValueError(12) from e1
++    except Exception as e2:
++        raise ValueError(13) from e2
++
++
++def test_chained_exception_without_from():
++    try:
++        try:
++            raise ValueError(21)
++        except Exception:
++            raise ValueError(22)
++    except Exception:
++        raise ValueError(23)
+diff --git a/normal.out b/normal.out
+new file mode 100644
+index 000000000..db5f59e50
+--- /dev/null
++++ b/normal.out
+@@ -0,0 +1,8 @@
++Traceback (most recent call last):
++  File "/testbed/venv/bin/pytest", line 3, in <module>
++    from pytest import main
++  File "/testbed/venv/lib/python3.9/site-packages/pytest.py", line 8, in <module>
++    from _pytest.config import cmdline
++  File "/testbed/venv/lib/python3.9/site-packages/_pytest/config/__init__.py", line 17, in <module>
++    from pkg_resources import parse_version
++ModuleNotFoundError: No module named 'pkg_resources'
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..fc63ab5f0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,63 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Create test file
++mkdir -p basic
++cat > basic/test_basic.py <<'PY'
++def test_chained_exception_with_from():
++    try:
++        try:
++            raise ValueError(11)
++        except Exception as e1:
++            raise ValueError(12) from e1
++    except Exception as e2:
++        raise ValueError(13) from e2
++
++
++def test_chained_exception_without_from():
++    try:
++        try:
++            raise ValueError(21)
++        except Exception:
++            raise ValueError(22)
++    except Exception:
++        raise ValueError(23)
++PY
++
++# Create venv and install exact pytest and xdist versions
++python3 -m venv venv
++# shellcheck disable=SC1091
++source venv/bin/activate
++pip install -q --upgrade pip setuptools wheel
++pip install -q pytest==4.0.2 pytest-xdist==1.25.0
++
++# Run pytest normally and with xdist, capture outputs (don't exit on test failures)
++pytest -q --tb=long > normal.out 2>&1 || true
++pytest -q -n auto --tb=long > xdist.out 2>&1 || true
++
++# Determine per-test statuses by running each test individually
++tests="basic/test_basic.py::test_chained_exception_with_from basic/test_basic.py::test_chained_exception_without_from"
++echo '{"tests":[' > test_status.json
++sep=
++for t in $tests; do
++  if pytest -q "$t" > /dev/null 2>&1; then
++    status=PASSED
++  else
++    status=FAILED
++  fi
++  printf '%s{"name":"%s","status":"%s"}' "$sep" "$t" "$status" >> test_status.json
++  sep=','
++done
++printf ']}\n' >> test_status.json
++
++# Move outputs to /testbed (they are already there) and print summary
++mv normal.out xdist.out /testbed/ 2>/dev/null || true
++echo 'WROTE /testbed/test_status.json'
++cat /testbed/test_status.json || true
++echo
++echo '---- normal pytest output (first 200 lines) ----'
++sed -n '1,200p' /testbed/normal.out || true
++echo
++echo '---- xdist pytest output (first 200 lines) ----'
++sed -n '1,200p' /testbed/xdist.out || true
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..33cb71aef
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,2 @@
++{"tests":[
++{"name":"basic/test_basic.py::test_chained_exception_with_from","status":"FAILED"},{"name":"basic/test_basic.py::test_chained_exception_without_from","status":"FAILED"}]}
+diff --git a/venv/lib64 b/venv/lib64
+new file mode 120000
+index 000000000..7951405f8
+--- /dev/null
++++ b/venv/lib64
+@@ -0,0 +1 @@
++lib
+\ No newline at end of file
+diff --git a/venv/pyvenv.cfg b/venv/pyvenv.cfg
+new file mode 100644
+index 000000000..2cf8b08a2
+--- /dev/null
++++ b/venv/pyvenv.cfg
+@@ -0,0 +1,3 @@
++home = /opt/miniconda3/envs/testbed/bin
++include-system-site-packages = false
++version = 3.9.20
+diff --git a/xdist.out b/xdist.out
+new file mode 100644
+index 000000000..db5f59e50
+--- /dev/null
++++ b/xdist.out
+@@ -0,0 +1,8 @@
++Traceback (most recent call last):
++  File "/testbed/venv/bin/pytest", line 3, in <module>
++    from pytest import main
++  File "/testbed/venv/lib/python3.9/site-packages/pytest.py", line 8, in <module>
++    from _pytest.config import cmdline
++  File "/testbed/venv/lib/python3.9/site-packages/_pytest/config/__init__.py", line 17, in <module>
++    from pkg_resources import parse_version
++ModuleNotFoundError: No module named 'pkg_resources'

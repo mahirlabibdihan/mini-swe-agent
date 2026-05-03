@@ -1,0 +1,60 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..07bf4d9e6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -euo pipefail
++python3 -m pip install -q sympy
++set +e
++python3 /testbed/test_reproduction.py > /tmp/repro_output.txt 2>&1
++rc=$?
++set -e
++cat /tmp/repro_output.txt
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++python3 - <<PY "$status"
++import sys, json
++status=sys.argv[1]
++res={"tests":[{"name":"/testbed/repro_assert_n_eq_2","status":status}]}
++open("/testbed/test_status.json","w").write(json.dumps(res, indent=2))
++print(json.dumps(res, indent=2))
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..3c56e8350
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,14 @@
++from sympy import Product, simplify, symbols, Rational
++n,k = symbols('n k')
++p = Product(n + 1/2**k, (k,0,n-1)).doit()
++print('SIMPLIFIED:', simplify(p))
++print('NUMERIC_n_eq_2:', p.subs(n,2))
++expected = Rational(15,2)
++actual = p.subs(n,2)
++import sys
++if actual == expected:
++    print('CHECK: OK')
++    sys.exit(0)
++else:
++    print('CHECK: FAIL (expected 15/2, got %s)' % actual)
++    sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..c1392310a
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/repro_assert_n_eq_2",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

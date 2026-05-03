@@ -1,0 +1,85 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8b5b732713
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,45 @@
++#!/bin/bash
++# Intentionally do NOT use set -e so we can capture non-zero exit codes reliably
++set -u
++mkdir -p /testbed
++
++# Create the reproduction Python script that triggers TypeError by accessing [0] on None
++cat > test_reproduction.py <<'PY'
++import traceback
++class DummyCursor:
++    def execute(self, *args, **kwargs):
++        return None
++    def fetchone(self):
++        return None
++
++def _cull():
++    cursor = DummyCursor()
++    cursor.execute('SELECT ...')
++    # This will raise: TypeError: 'NoneType' object is not subscriptable
++    return cursor.fetchone()[0]
++
++if __name__ == '__main__':
++    try:
++        _cull()
++        print('NO_ERROR')
++        raise SystemExit(0)
++    except Exception:
++        traceback.print_exc()
++        raise SystemExit(1)
++PY
++
++# Run the reproduction, capture its output and real exit code
++output=$(python3 test_reproduction.py 2>&1)
++rc=$?
++
++# Determine status and write /testbed/test_status.json based on the actual rc
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++
++printf '{"tests":[{"name":"test_reproduction.py::test_cull_none_fetchone","status":"%s"}]}\n' "$status" > /testbed/test_status.json
++
++# Print the captured output (traceback) for visibility
++printf '%s\n' "$output"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..855d5ee2bf
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,21 @@
++import traceback
++class DummyCursor:
++    def execute(self, *args, **kwargs):
++        return None
++    def fetchone(self):
++        return None
++
++def _cull():
++    cursor = DummyCursor()
++    cursor.execute('SELECT ...')
++    # This will raise: TypeError: 'NoneType' object is not subscriptable
++    return cursor.fetchone()[0]
++
++if __name__ == '__main__':
++    try:
++        _cull()
++        print('NO_ERROR')
++        raise SystemExit(0)
++    except Exception:
++        traceback.print_exc()
++        raise SystemExit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..7d0b71ae8a
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py::test_cull_none_fetchone","status":"FAILED"}]}

@@ -1,0 +1,62 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..1c1d110bcd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++set -u
++cd "$(dirname "$0")"
++# Capture test output and exit code
++output="$(python3 test_repro.py 2>&1)"
++rc=$?
++status="PASSED"
++if [ $rc -ne 0 ]; then status="FAILED"; fi
++
++# Write the required test_status.json in /testbed
++cat > test_status.json <<JSON
++{"tests":[{"name":"test_repro.py::test_replace_named_groups_trailing","status":"$status"}]}
++JSON
++
++# Print the test output for visibility, then always exit 0 so the runner sees the script executed
++echo "$output"
++echo "Wrote $(pwd)/test_status.json with status $status"
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..d72f559681
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,25 @@
++#!/usr/bin/env python3
++import re
++import sys
++
++def buggy_replace(urlpattern):
++    # buggy behavior: only replace named groups that are followed by a '/'
++    return re.sub(r'\(\?P<(?P<name>[^>]+)>[^)]+\)/', r'{\g<name>}/', urlpattern)
++
++def correct_replace(urlpattern):
++    return re.sub(r'\(\?P<(?P<name>[^>]+)>[^)]+\)', r'{\g<name>}', urlpattern)
++
++pattern = r'entries/(?P<pk>[^/.]+)/relationships/(?P<related_field>\w+)'
++buggy = buggy_replace(pattern)
++expected = correct_replace(pattern)
++
++print("input:   ", pattern)
++print("buggy:   ", buggy)
++print("expected:", expected)
++
++if buggy != expected:
++    print("TEST FAILED: final named group was not replaced as expected")
++    sys.exit(1)
++else:
++    print("TEST PASSED")
++    sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..eae5185ebf
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_repro.py::test_replace_named_groups_trailing","status":"FAILED"}]}

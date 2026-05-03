@@ -1,0 +1,102 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..c5a89c794f
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,12 @@
++Traceback (most recent call last):
++  File "/testbed/test_repro.py", line 38, in <module>
++    run_repro()
++  File "/testbed/test_repro.py", line 34, in run_repro
++    changes = MigrationAutodetector(before, after)._detect_changes()
++  File "/testbed/django/db/migrations/autodetector.py", line 159, in _detect_changes
++    self.generate_renamed_models()
++  File "/testbed/django/db/migrations/autodetector.py", line 477, in generate_renamed_models
++    model_fields_def = self.only_relation_agnostic_fields(model_state.fields)
++  File "/testbed/django/db/migrations/autodetector.py", line 99, in only_relation_agnostic_fields
++    del deconstruction[2]['to']
++KeyError: 'to'
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..9b878c7acf
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++    #!/bin/bash
++    set -euo pipefail
++    python /testbed/test_repro.py > /testbed/run_output.txt 2>&1 || true
++    output=$(sed -n '1,1000p' /testbed/run_output.txt)
++
++    status="PASSED"
++    if echo "$output" | grep -q "KeyError: 'to'"; then
++      status="FAILED"
++    fi
++
++    python - <<PY2 "$output" "$status"
++import sys, json
++out = sys.argv[1]
++status = sys.argv[2]
++data = {"tests": [{"name": "test_repro.py::test_reproduction", "status": status}]}
++open("/testbed/test_status.json", "w").write(json.dumps(data, indent=2))
++PY2
++
++    cat /testbed/run_output.txt
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..fa407d50c1
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,38 @@
++# Minimal Django setup to avoid AppRegistryNotReady
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=['django.contrib.auth', 'django.contrib.contenttypes'],
++        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++        SECRET_KEY='test',
++    )
++import django
++django.setup()
++
++from django.db import models
++from django.db.migrations.autodetector import MigrationAutodetector
++from django.db.migrations.state import ModelState, ProjectState
++
++class CustomFKField(models.ForeignKey):
++    def __init__(self, *args, **kwargs):
++        # Hardcode the 'to' argument like in the report
++        kwargs['to'] = 'testapp.HardcodedModel'
++        super().__init__(*args, **kwargs)
++    def deconstruct(self):
++        name, path, args, kwargs = super().deconstruct()
++        # Remove 'to' from kwargs to mimic the problematic custom field
++        del kwargs['to']
++        return name, path, args, kwargs
++
++def run_repro():
++    before = ProjectState()
++    before.add_model(ModelState('testapp', 'HardcodedModel', []))
++    after = ProjectState()
++    after.add_model(ModelState('testapp', 'HardcodedModel', []))
++    after.add_model(ModelState('testapp', 'TestModel', [('custom', CustomFKField(on_delete=models.CASCADE))]))
++    # This call should raise KeyError: 'to' per the PR description
++    changes = MigrationAutodetector(before, after)._detect_changes()
++    print("Changes detected:", changes)
++
++if __name__ == '__main__':
++    run_repro()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..d95b45454e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_reproduction",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,74 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..3dc0b41c40
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,29 @@
++#!/bin/bash
++set -euo pipefail
++PYOUT=$(python3 /testbed/test_repro.py 2>&1 || true)
++echo "$PYOUT"
++f_default=$(awk -F': ' '/^factor\(z\):/ {print $2}' <<<"$PYOUT" || true)
++f_ext_true=$(awk -F': ' '/^factor\(z, extension=True\):/ {print $2}' <<<"$PYOUT" || true)
++f_ext_i=$(awk -F': ' '/^factor\(z, extension=\[I\]\):/ {print $2}' <<<"$PYOUT" || true)
++
++status_default="PASSED"
++status_ext_true="PASSED"
++status_ext_i="PASSED"
++
++# Expected default factoring is '(x - 1)*(y - 1)'
++if [ "$f_default" != "(x - 1)*(y - 1)" ]; then status_default="FAILED"; fi
++# The reported bug: extension=True or extension=[I] returns 'x - 1'
++if [ "$f_ext_true" = "x - 1" ]; then status_ext_true="FAILED"; fi
++if [ "$f_ext_i" = "x - 1" ]; then status_ext_i="FAILED"; fi
++
++# Write the JSON test status file (shell vars expanded into this here-doc)
++python3 - <<PY
++import json
++tests = [
++ {"name": "test_repro.py::factor_default", "status": "PASSED" if "$status_default"=="PASSED" else "FAILED"},
++ {"name": "test_repro.py::factor_extension_true", "status": "PASSED" if "$status_ext_true"=="PASSED" else "FAILED"},
++ {"name": "test_repro.py::factor_extension_[I]", "status": "PASSED" if "$status_ext_i"=="PASSED" else "FAILED"},
++]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print(open('/testbed/test_status.json').read())
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..d7656d5aec
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,10 @@
++import sympy as sp
++x,y=sp.symbols('x y')
++z=sp.expand((x-1)*(y-1))
++f_default=sp.factor(z)
++f_ext_true=sp.factor(z, extension=True)
++f_ext_i=sp.factor(z, extension=[sp.I])
++print("z:", z)
++print("factor(z):", f_default)
++print("factor(z, extension=True):", f_ext_true)
++print("factor(z, extension=[I]):", f_ext_i)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..9ed91ae3dc
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::factor_default",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro.py::factor_extension_true",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro.py::factor_extension_[I]",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

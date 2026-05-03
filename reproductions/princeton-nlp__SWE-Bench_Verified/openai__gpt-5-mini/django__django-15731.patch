@@ -1,0 +1,95 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..7e82d1a5c3
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,40 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++
++original=$(printf "%s\n" "$output" | awk -F': ' '/^original:/ {print $2; exit}')
++wrapped=$(printf "%s\n" "$output" | awk -F': ' '/^wrapped_from_person:/ {print $2; exit}')
++
++# Determine statuses:
++# - test_bug_present: should be PASSED if buggy behavior observed (wrapped == "(*args, **kwargs)")
++# - test_expected_behavior: should be PASSED only if wrapped matches original (i.e., bug fixed), else FAILED
++bug_present="false"
++if [ "$wrapped" = "(*args, **kwargs)" ]; then
++  bug_present="true"
++fi
++
++test1_status="FAILED"
++test2_status="FAILED"
++if [ "$bug_present" = "true" ]; then
++  test1_status="PASSED"
++else
++  test1_status="FAILED"
++fi
++
++if [ "$wrapped" = "$original" ]; then
++  test2_status="PASSED"
++else
++  test2_status="FAILED"
++fi
++
++mkdir -p /testbed
++python3 - <<PY "$test1_status" "$test2_status"
++import json,sys
++t1=sys.argv[1]
++t2=sys.argv[2]
++tests=[{"name":"test_reproduction.py::test_bug_present","status": t1},
++       {"name":"test_reproduction.py::test_expected_behavior","status": t2}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++print(json.dumps({"tests":tests}))
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..3830226907
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,24 @@
++import inspect
++def bulk_create(objs, batch_size=None, ignore_conflicts=False):
++    """Create many objects in bulk"""
++    pass
++
++def manager_wrap(func):
++    # Simulates the buggy manual copying of __name__ and __doc__ (no functools.wraps)
++    def inner(*args, **kwargs):
++        return func(*args, **kwargs)
++    inner.__name__ = func.__name__
++    inner.__doc__ = func.__doc__
++    return inner
++
++class Manager:
++    def __init__(self):
++        # manager attaches a wrapped method
++        self.bulk_create = manager_wrap(bulk_create)
++
++class Person:
++    objects = Manager()
++
++print("original:", inspect.signature(bulk_create))
++print("wrapped_unbound:", inspect.signature(Manager().bulk_create))
++print("wrapped_from_person:", inspect.signature(Person.objects.bulk_create))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..89f26bd51a
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_bug_present",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_expected_behavior",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

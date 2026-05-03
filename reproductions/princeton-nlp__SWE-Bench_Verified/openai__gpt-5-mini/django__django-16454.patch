@@ -1,0 +1,177 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5a635859c2
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,63 @@
++#!/bin/bash
++set -euo pipefail
++
++cat > test_repro.py <<'PY'
++import sys, traceback, argparse
++
++class CommandError(Exception): pass
++
++class CommandParser(argparse.ArgumentParser):
++    def error(self, message):
++        raise CommandError('Error: %s' % message)
++
++def build_parser():
++    parser = CommandParser(prog='manage.py')
++    subparsers = parser.add_subparsers(required=True)
++    create = subparsers.add_parser('create')
++    create.add_argument('name')
++    return parser
++
++def run_case(args, label):
++    print('CASE:', label)
++    try:
++        p = build_parser()
++        p.parse_args(args)
++        print('NO_EXCEPTION')
++    except Exception:
++        traceback.print_exc()
++
++if __name__ == '__main__':
++    run_case([], 'missing_subparser_name')
++    print('----')
++    run_case(['create'], 'missing_create_name')
++PY
++
++output="$(python3 test_repro.py 2>&1 || true)"
++echo "$output"
++
++python3 - <<'PY' "$output"
++import sys, json
++full = sys.argv[1]
++parts = [p.strip() for p in full.split('----') if p.strip()]
++
++def status_for(text):
++    return 'FAILED' if 'Traceback (most recent call last):' in text or 'Traceback' in text else 'PASSED'
++
++results = []
++for i, part in enumerate(parts, start=1):
++    name_line = None
++    for ln in part.splitlines():
++        if ln.startswith('CASE: '):
++            name_line = ln[len('CASE: '):].strip()
++            break
++    if not name_line:
++        name_line = 'case_{}'.format(i)
++    test_name = 'test_repro.py::case_{}_{}'.format(i, name_line.replace(' ', '_'))
++    results.append({'name': test_name, 'status': status_for(part)})
++
++with open('test_status.json', 'w') as f:
++    json.dump({'tests': results}, f, indent=2)
++
++print('\nWROTE test_status.json:')
++print(open('test_status.json').read())
++PY
+diff --git a/test_parent.py b/test_parent.py
+new file mode 100644
+index 0000000000..bdb67c0fb4
+--- /dev/null
++++ b/test_parent.py
+@@ -0,0 +1,11 @@
++import argparse, sys
++parser = argparse.ArgumentParser(prog='manage.py')
++subparsers = parser.add_subparsers(required=True)
++create = subparsers.add_parser('create')
++create.add_argument('name')
++try:
++    parser.parse_args([])
++    print('NO_EXCEPTION')
++except SystemExit as e:
++    # argparse prints usage and raises SystemExit; capture that as a non-traceback outcome
++    print('SYSTEM_EXIT:', e)
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..36fa8658f5
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,28 @@
++import sys, traceback, argparse
++
++class CommandError(Exception): pass
++
++class CommandParser(argparse.ArgumentParser):
++    def error(self, message):
++        raise CommandError('Error: %s' % message)
++
++def build_parser():
++    parser = CommandParser(prog='manage.py')
++    subparsers = parser.add_subparsers(required=True)
++    create = subparsers.add_parser('create')
++    create.add_argument('name')
++    return parser
++
++def run_case(args, label):
++    print('CASE:', label)
++    try:
++        p = build_parser()
++        p.parse_args(args)
++        print('NO_EXCEPTION')
++    except Exception:
++        traceback.print_exc()
++
++if __name__ == '__main__':
++    run_case([], 'missing_subparser_name')
++    print('----')
++    run_case(['create'], 'missing_create_name')
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..6d43e90047
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,32 @@
++import sys, traceback, argparse
++
++class CommandError(Exception):
++    pass
++
++class CommandParser(argparse.ArgumentParser):
++    # Mimic Django's CommandParser.error which raises a CommandError
++    def error(self, message):
++        raise CommandError("Error: %s" % message)
++
++def build_parser():
++    parser = CommandParser(prog='manage.py')
++    subparsers = parser.add_subparsers(required=True)
++    create = subparsers.add_parser("create")
++    create.add_argument("name")
++    return parser
++
++def run_case(args):
++    print("CASE:", " ".join(args))
++    try:
++        parser = build_parser()
++        parser.parse_args(args)
++        print("NO_EXCEPTION")
++    except Exception:
++        traceback.print_exc()
++
++if __name__ == '__main__':
++    # Case 1: missing the subparser name entirely
++    run_case(['cheeses'])
++    print("----")
++    # Case 2: invoked the subparser but missing its required 'name' arg
++    run_case(['cheeses', 'create'])
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..fe040934a4
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::missing_subparser_name",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro.py::missing_create_name",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

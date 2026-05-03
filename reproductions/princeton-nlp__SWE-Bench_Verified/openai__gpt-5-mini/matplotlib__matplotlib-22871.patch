@@ -1,0 +1,122 @@
+diff --git a/concise_date_formatter_plot.png b/concise_date_formatter_plot.png
+new file mode 100644
+index 0000000000..c75f77f326
+Binary files /dev/null and b/concise_date_formatter_plot.png differ
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..66d256f6d7
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,3 @@
++OFFSET_TEXT:
++TICK_TEXTS:['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep']
++FOUND_YEAR:False
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..c713dee8d8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,30 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++# extract FOUND_YEAR line
++found_line=$(printf "%s\n" "$output" | sed -n 's/^FOUND_YEAR:\(.*\)$/\1/p' | tr -d '\r\n')
++if [ -z "$found_line" ]; then
++  # Unexpected: treat as ERROR
++  status="ERROR"
++else
++  if [ "$found_line" = "True" ] || [ "$found_line" = "true" ]; then
++    status="PASSED"
++  else
++    status="FAILED"
++  fi
++fi
++
++# Write test status file to /testbed/test_status.json
++python3 - <<PYTHON > /testbed/test_status.json
++import json, sys
++statuses = [{"name":"test_reproduction.py::test_concise_date_formatter_year","status":"$status"}]
++print(json.dumps({"tests": statuses}, indent=2))
++PYTHON
++
++# Also save the runner stdout for inspection
++printf "%s\n" "$output" > /testbed/run_output.txt
++
++# Print a short summary so CI logs show the outcome
++echo "Reproduction run complete. Test status: $status"
++echo "Wrote /testbed/test_status.json and /testbed/concise_date_formatter_plot.png"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..2c58af7293
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,53 @@
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++import matplotlib.dates as mdates
++from datetime import datetime, timedelta
++from pathlib import Path
++
++# create time array
++initial = datetime(2021,2,14,0,0,0)
++time_array = [initial + timedelta(days=x) for x in range(1,200)]
++
++# create data array
++data = [-x**2/20000 for x in range(1,200)]
++
++fig, ax = plt.subplots()
++ax.plot(time_array, data)
++
++locator = mdates.AutoDateLocator()
++formatter = mdates.ConciseDateFormatter(locator)
++
++ax.grid(True)
++ax.set_ylabel("Temperature ($\\degree$C)")
++ax.xaxis.set_major_locator(locator)
++ax.xaxis.set_major_formatter(formatter)
++fig.autofmt_xdate()
++
++# draw to make sure tick labels and offset text are updated
++fig.canvas.draw()
++
++# collect offset text and tick labels
++offset_text = ax.xaxis.get_offset_text().get_text()
++tick_texts = [t.get_text() for t in ax.get_xticklabels()]
++
++# save figure for manual inspection
++outfn = Path("/testbed/concise_date_formatter_plot.png")
++fig.savefig(outfn, dpi=150)
++
++found_year = False
++year_str = "2021"
++
++if year_str in offset_text:
++    found_year = True
++else:
++    # also check if any tick label contains the year
++    for t in tick_texts:
++        if year_str in t:
++            found_year = True
++            break
++
++# Print a machine-friendly marker for the runner script
++print(f"OFFSET_TEXT:{offset_text}")
++print(f"TICK_TEXTS:{tick_texts}")
++print(f"FOUND_YEAR:{found_year}")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..d66fe4da50
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_concise_date_formatter_year",
++      "status": "FAILED"
++    }
++  ]
++}

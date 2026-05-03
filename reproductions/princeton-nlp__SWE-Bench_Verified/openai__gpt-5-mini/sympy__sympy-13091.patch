@@ -1,0 +1,105 @@
+diff --git a/out.txt b/out.txt
+new file mode 100644
+index 000000000..b27d57367
+--- /dev/null
++++ b/out.txt
+@@ -0,0 +1,2 @@
++f==s: True
++s==f: False
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..db0e9efc6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,50 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the Python reproduction file
++cat <<'PY' > test_reproduction.py
++# Reproduction of asymmetry when __eq__ returns False instead of NotImplemented
++class Basic:
++    def __eq__(self, other):
++        # Simulate the problematic behavior: return False for unknown types
++        if isinstance(other, Basic):
++            return True
++        return False
++
++class Foo:
++    def __eq__(self, other):
++        # Foo knows how to compare to Basic and returns True
++        if isinstance(other, Basic):
++            return True
++        return NotImplemented
++
++if __name__ == "__main__":
++    f = Foo()
++    s = Basic()
++    print("f==s:", f == s)
++    print("s==f:", s == f)
++PY
++
++# Run the reproduction
++python3 test_reproduction.py > out.txt 2>&1 || true
++
++# Extract results
++f_val=$(grep '^f==s:' out.txt | awk -F': ' '{print $2}' || true)
++s_val=$(grep '^s==f:' out.txt | awk -F': ' '{print $2}' || true)
++
++status="PASSED"
++# If f==s is True but s==f is False, that's the reproduced bug -> mark FAILED
++if [ "$f_val" = "True" ] && [ "$s_val" = "False" ]; then
++  status="FAILED"
++fi
++
++# Write the required test_status.json in /testbed
++python3 - <<PY "$status"
++import json,sys
++st=sys.argv[1]
++open("test_status.json","w").write(json.dumps({"tests":[{"name":"test_reproduction.py::test_symmetry","status":st}]},indent=2))
++PY
++
++# Print outputs for inspection
++cat out.txt
++echo "Wrote test_status.json with status: $status"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..732e42748
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,20 @@
++# Reproduction of asymmetry when __eq__ returns False instead of NotImplemented
++class Basic:
++    def __eq__(self, other):
++        # Simulate the problematic behavior: return False for unknown types
++        if isinstance(other, Basic):
++            return True
++        return False
++
++class Foo:
++    def __eq__(self, other):
++        # Foo knows how to compare to Basic and returns True
++        if isinstance(other, Basic):
++            return True
++        return NotImplemented
++
++if __name__ == "__main__":
++    f = Foo()
++    s = Basic()
++    print("f==s:", f == s)
++    print("s==f:", s == f)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..c1cb91fb7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_symmetry",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

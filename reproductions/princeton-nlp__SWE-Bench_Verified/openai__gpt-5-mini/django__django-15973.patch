@@ -1,0 +1,308 @@
+diff --git a/django_project/db.sqlite3 b/django_project/db.sqlite3
+new file mode 100644
+index 0000000000..5255d40778
+Binary files /dev/null and b/django_project/db.sqlite3 differ
+diff --git a/django_project/fonte/__init__.py b/django_project/fonte/__init__.py
+new file mode 100644
+index 0000000000..926b8d97ac
+--- /dev/null
++++ b/django_project/fonte/__init__.py
+@@ -0,0 +1 @@
++default_app_config = 'fonte.apps.FonteConfig'
+diff --git a/django_project/fonte/apps.py b/django_project/fonte/apps.py
+new file mode 100644
+index 0000000000..43fd247009
+--- /dev/null
++++ b/django_project/fonte/apps.py
+@@ -0,0 +1,4 @@
++from django.apps import AppConfig
++class FonteConfig(AppConfig):
++    default_auto_field = 'django.db.models.BigAutoField'
++    name = 'fonte'
+diff --git a/django_project/fonte/migrations/0001_initial.py b/django_project/fonte/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..5fe0dcb2c2
+--- /dev/null
++++ b/django_project/fonte/migrations/0001_initial.py
+@@ -0,0 +1,24 @@
++from django.db import migrations, models
++class Migration(migrations.Migration):
++    initial = True
++    dependencies = [
++        ('variavel', '0001_initial'),
++    ]
++    operations = [
++        migrations.CreateModel(
++            name='FonteModel',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('nome', models.TextField(unique=True)),
++                ('descricao', models.TextField()),
++                ('data_inicial', models.DateField()),
++                ('data_final', models.DateField(blank=True, null=True)),
++                ('variaveis', models.ManyToManyField(through='fonte_variavel.FonteVariavelModel', to='variavel.variavelmodel')),
++            ],
++            options={
++                'verbose_name': 'Fonte',
++                'verbose_name_plural': 'Fontes',
++                'db_table': 'fontes',
++            },
++        ),
++    ]
+diff --git a/django_project/fonte/migrations/__init__.py b/django_project/fonte/migrations/__init__.py
+new file mode 100644
+index 0000000000..7f7d0d386c
+--- /dev/null
++++ b/django_project/fonte/migrations/__init__.py
+@@ -0,0 +1 @@
++# migrations package
+diff --git a/django_project/fonte/models.py b/django_project/fonte/models.py
+new file mode 100644
+index 0000000000..70f5311d78
+--- /dev/null
++++ b/django_project/fonte/models.py
+@@ -0,0 +1 @@
++# placeholder models file for fonte
+diff --git a/django_project/fonte_variavel/__init__.py b/django_project/fonte_variavel/__init__.py
+new file mode 100644
+index 0000000000..425f1ad84f
+--- /dev/null
++++ b/django_project/fonte_variavel/__init__.py
+@@ -0,0 +1 @@
++default_app_config = 'fonte_variavel.FonteVariavelConfig'
+diff --git a/django_project/fonte_variavel/apps.py b/django_project/fonte_variavel/apps.py
+new file mode 100644
+index 0000000000..4c22a238ce
+--- /dev/null
++++ b/django_project/fonte_variavel/apps.py
+@@ -0,0 +1,4 @@
++from django.apps import AppConfig
++class FonteVariavelConfig(AppConfig):
++    default_auto_field = 'django.db.models.BigAutoField'
++    name = 'fonte_variavel'
+diff --git a/django_project/fonte_variavel/migrations/0001_initial.py b/django_project/fonte_variavel/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..9d6e120f5e
+--- /dev/null
++++ b/django_project/fonte_variavel/migrations/0001_initial.py
+@@ -0,0 +1,23 @@
++from django.db import migrations, models
++import django.db.models.deletion
++class Migration(migrations.Migration):
++    initial = True
++    dependencies = [
++        ('variavel', '0001_initial'),
++        ('fonte', '0001_initial'),
++    ]
++    operations = [
++        migrations.CreateModel(
++            name='FonteVariavelModel',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('variavel', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='variavel.variavelmodel')),
++                ('fonte', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='fonte.fontemodel')),
++            ],
++            options={
++                'db_table': 'fontes_variaveis',
++                'verbose_name': 'Fonte',
++                'verbose_name_plural': 'Fontes',
++            },
++        ),
++    ]
+diff --git a/django_project/fonte_variavel/migrations/__init__.py b/django_project/fonte_variavel/migrations/__init__.py
+new file mode 100644
+index 0000000000..7f7d0d386c
+--- /dev/null
++++ b/django_project/fonte_variavel/migrations/__init__.py
+@@ -0,0 +1 @@
++# migrations package
+diff --git a/django_project/fonte_variavel/models.py b/django_project/fonte_variavel/models.py
+new file mode 100644
+index 0000000000..86ff65af2e
+--- /dev/null
++++ b/django_project/fonte_variavel/models.py
+@@ -0,0 +1 @@
++# placeholder models file for fonte_variavel
+diff --git a/django_project/manage.py b/django_project/manage.py
+new file mode 100755
+index 0000000000..8d55c46910
+--- /dev/null
++++ b/django_project/manage.py
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python
++import os, sys
++if __name__ == '__main__':
++    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'proj.settings')
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
+diff --git a/django_project/migrate_output.txt b/django_project/migrate_output.txt
+new file mode 100644
+index 0000000000..f7cfc05dc0
+--- /dev/null
++++ b/django_project/migrate_output.txt
+@@ -0,0 +1,31 @@
++Operations to perform:
++  Apply all migrations: fonte, fonte_variavel, variavel
++Running migrations:
++  Applying fonte.0001_initial...Traceback (most recent call last):
++  File "/testbed/django_project/manage.py", line 6, in <module>
++    execute_from_command_line(sys.argv)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/core/management/__init__.py", line 446, in execute_from_command_line
++    utility.execute()
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/core/management/__init__.py", line 440, in execute
++    self.fetch_command(subcommand).run_from_argv(self.argv)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/core/management/base.py", line 402, in run_from_argv
++    self.execute(*args, **cmd_options)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/core/management/base.py", line 448, in execute
++    output = self.handle(*args, **options)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/core/management/base.py", line 96, in wrapped
++    res = handle_func(*args, **kwargs)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/core/management/commands/migrate.py", line 349, in handle
++    post_migrate_state = executor.migrate(
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/db/migrations/executor.py", line 135, in migrate
++    state = self._migrate_all_forwards(
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/db/migrations/executor.py", line 167, in _migrate_all_forwards
++    state = self.apply_migration(
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/db/migrations/executor.py", line 252, in apply_migration
++    state = migration.apply(state, schema_editor)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/db/migrations/migration.py", line 130, in apply
++    operation.database_forwards(
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/db/migrations/operations/models.py", line 96, in database_forwards
++    schema_editor.create_model(model)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/django/db/backends/base/schema.py", line 455, in create_model
++    if field.remote_field.through._meta.auto_created:
++AttributeError: 'str' object has no attribute '_meta'
+diff --git a/django_project/proj/__init__.py b/django_project/proj/__init__.py
+new file mode 100644
+index 0000000000..31be87831f
+--- /dev/null
++++ b/django_project/proj/__init__.py
+@@ -0,0 +1 @@
++# proj package
+diff --git a/django_project/proj/settings.py b/django_project/proj/settings.py
+new file mode 100644
+index 0000000000..e133ed6a62
+--- /dev/null
++++ b/django_project/proj/settings.py
+@@ -0,0 +1,17 @@
++SECRET_KEY = 'for-testing-only'
++DEBUG = True
++ALLOWED_HOSTS = []
++INSTALLED_APPS = [
++    'variavel',
++    'fonte',
++    'fonte_variavel',
++]
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': 'db.sqlite3',
++    }
++}
++ROOT_URLCONF = None
++MIDDLEWARE = []
++DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+diff --git a/django_project/variavel/__init__.py b/django_project/variavel/__init__.py
+new file mode 100644
+index 0000000000..1101f03734
+--- /dev/null
++++ b/django_project/variavel/__init__.py
+@@ -0,0 +1 @@
++default_app_config = 'variavel.apps.VariavelConfig'
+diff --git a/django_project/variavel/apps.py b/django_project/variavel/apps.py
+new file mode 100644
+index 0000000000..eb82082108
+--- /dev/null
++++ b/django_project/variavel/apps.py
+@@ -0,0 +1,4 @@
++from django.apps import AppConfig
++class VariavelConfig(AppConfig):
++    default_auto_field = 'django.db.models.BigAutoField'
++    name = 'variavel'
+diff --git a/django_project/variavel/migrations/0001_initial.py b/django_project/variavel/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..3118ca47fd
+--- /dev/null
++++ b/django_project/variavel/migrations/0001_initial.py
+@@ -0,0 +1,19 @@
++from django.db import migrations, models
++class Migration(migrations.Migration):
++    initial = True
++    dependencies = []
++    operations = [
++        migrations.CreateModel(
++            name='VariavelModel',
++            fields=[
++                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('nome', models.TextField(unique=True)),
++                ('descricao', models.TextField()),
++            ],
++            options={
++                'db_table': 'variaveis',
++                'verbose_name': 'Variável',
++                'verbose_name_plural': 'Variáveis',
++            },
++        ),
++    ]
+diff --git a/django_project/variavel/migrations/__init__.py b/django_project/variavel/migrations/__init__.py
+new file mode 100644
+index 0000000000..7f7d0d386c
+--- /dev/null
++++ b/django_project/variavel/migrations/__init__.py
+@@ -0,0 +1 @@
++# migrations package
+diff --git a/django_project/variavel/models.py b/django_project/variavel/models.py
+new file mode 100644
+index 0000000000..f66d88b0a6
+--- /dev/null
++++ b/django_project/variavel/models.py
+@@ -0,0 +1 @@
++# placeholder models file for variavel
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..9a9a40f0d9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,27 @@
++#!/bin/bash
++set -u
++# Install Django 4.1 quietly
++python -m pip install --quiet "Django==4.1.*"
++# Ensure PYTHONPATH includes the prepared project
++export PYTHONPATH="/testbed/django_project:${PYTHONPATH:-}"
++cd /testbed/django_project
++# Run migrations and capture output without failing the script
++output=$(python manage.py migrate --noinput 2>&1 || true)
++echo "$output" > /testbed/django_project/migrate_output.txt
++# Determine status based on presence of the specific AttributeError
++status="PASSED"
++if echo "$output" | grep -q "AttributeError: 'str' object has no attribute '_meta'"; then
++  status="FAILED"
++fi
++# Write machine-readable test status
++python - <<PY "$output" "$status"
++import json, sys, os
++out = sys.argv[1]
++status = sys.argv[2]
++tests = [{"name": "manage.py migrate", "status": status}]
++os.makedirs("/testbed", exist_ok=True)
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print(out)
++PY
++# Always exit 0 so the harness reads test_status.json to determine pass/fail
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e2157a5353
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "manage.py migrate",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

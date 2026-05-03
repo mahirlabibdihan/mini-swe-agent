@@ -1,0 +1,80 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..4972f72dd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,35 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++# Ensure sympy is available
++python3 -m pip install --quiet sympy || true
++
++# Run the reproduction script and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Parse outputs
++diag=$(echo "$output" | sed -n 's/^DIAG_SUM=//p' | tr -d '[:space:]')
++total=$(echo "$output" | sed -n 's/^TOTAL_SUM=//p' | tr -d '[:space:]')
++
++status="ERROR"
++if [ -z "$diag" ] || [ -z "$total" ]; then
++  status="ERROR"
++elif [ "$diag" = "n" ] && [ "$total" = "0" ]; then
++  # Observed the bug described in the PR
++  status="FAILED"
++elif [ "$diag" = "n" ] && [ "$total" = "n" ]; then
++  # Behavior as expected (no bug)
++  status="PASSED"
++else
++  status="ERROR"
++fi
++
++python3 - <<PY "$status"
++import json,sys
++status=sys.argv[1]
++data={"tests":[{"name":"test_reproduction.py::test_identity_total_sum","status":status}]}
++open("/testbed/test_status.json","w").write(json.dumps(data, indent=2))
++print("/testbed/test_status.json written with status:", status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..d06fc4c4a
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,18 @@
++from sympy import *
++from sympy import Q as Query
++
++n = Symbol('n', integer=True, positive=True)
++i, j = symbols('i j', integer=True)
++M = MatrixSymbol('M', n, n)
++
++e = None
++with assuming(Query.orthogonal(M)):
++    e = refine((M.T * M).doit())
++
++# Compute sums
++diag_sum = Sum(e[i, i], (i, 0, n-1)).doit()
++total_sum = Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit()
++
++# Print clear machine-parseable outputs
++print("DIAG_SUM=" + str(diag_sum))
++print("TOTAL_SUM=" + str(total_sum))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..eaf0ae6a2
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_identity_total_sum",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

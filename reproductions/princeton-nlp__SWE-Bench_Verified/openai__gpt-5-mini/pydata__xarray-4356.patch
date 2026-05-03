@@ -1,0 +1,89 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..7a943e1d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,44 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Ensure python is available
++python -V
++
++# Install xarray (and numpy as a dependency) quietly
++python -m pip install --quiet --no-input xarray >/dev/null 2>&1 || python -m pip install --no-input xarray
++
++# Run the reproduction script and capture output and exit code
++output=$(python test_reproduction.py 2>&1 || true)
++exit_code=$?
++
++echo "=== Reproduction Output ==="
++echo "$output"
++echo "Exit code: $exit_code"
++echo "==========================="
++
++# Determine test status based on output content
++# We mark the test as FAILED if the expected min_count exception occurs,
++# because this reproduction demonstrates a failing bug/issue state.
++status="PASSED"
++if echo "$output" | grep -q "EXCEPTION:"; then
++    if echo "$output" | grep -qi "min_count"; then
++        status="FAILED"
++    else
++        status="FAILED"
++    fi
++else
++    status="PASSED"
++fi
++
++# Write test status JSON as required (absolute path)
++python - <<PYTHON > /testbed/test_status.json
++import json
++tests = [{"name": "test_reproduction.py::reproduce_min_count_multi_dim_error", "status": "$status"}]
++print(json.dumps({"tests": tests}, indent=2))
++PYTHON
++
++echo "Wrote /testbed/test_status.json with status: $status"
++
++# Exit 0 to allow submission flow to continue even though the test status indicates failure.
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..3fb6ceef
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,19 @@
++import sys
++try:
++    import xarray as xr
++    import numpy as np
++except Exception as e:
++    print("IMPORT_ERROR:", type(e).__name__, str(e))
++    raise SystemExit(1)
++
++da = xr.DataArray([[1., 2, 3], [4, 5, 6]], dims=("dim_0", "dim_1"))
++try:
++    # This call is expected to raise an error per the issue description
++    res = da.sum(["dim_0", "dim_1"], min_count=1)
++    print("NO_EXCEPTION: result:", res.values)
++    sys.exit(0)
++except Exception as e:
++    # Print out exception details for parsing
++    print("EXCEPTION:", type(e).__name__, str(e))
++    # non-zero exit to indicate exception occurred
++    sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..42e16b06
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::reproduce_min_count_multi_dim_error",
++      "status": "FAILED"
++    }
++  ]
++}

@@ -1,0 +1,103 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..0fdc8b58d6
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1 @@
++RENDER_ERROR:TemplateSyntaxError("Invalid filter: 'escapeseq'")
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..1d604eb92d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,51 @@
++#!/bin/bash
++set -euo pipefail
++# Create the Python reproduction test using Engine to avoid Django settings
++cat > test_escapeseq.py <<'PY2'
++#!/usr/bin/env python3
++import sys
++try:
++    from django.template import Engine, Context
++except Exception as e:
++    print("IMPORT_ERROR:" + repr(e))
++    sys.exit(1)
++
++tmpl = '{{ some_list|escapeseq|join:", " }}'
++try:
++    engine = Engine(autoescape=False)
++    t = engine.from_string(tmpl)
++    out = t.render(Context({'some_list': ['a', '<b>']}))
++    print("RENDER_OK:" + out)
++    sys.exit(0)
++except Exception as e:
++    print("RENDER_ERROR:" + repr(e))
++    sys.exit(1)
++PY2
++
++# Run the test and capture output
++python3 test_escapeseq.py > run_output.txt 2>&1 || true
++output=$(cat run_output.txt)
++
++# Determine status based on actual output (treat both "Invalid filter" and "is not a registered filter" as FAIL)
++status="ERROR"
++if echo "$output" | grep -q "IMPORT_ERROR"; then
++  status="SKIPPED"
++elif echo "$output" | grep -q "is not a registered filter"; then
++  status="FAILED"
++elif echo "$output" | grep -q "Invalid filter"; then
++  status="FAILED"
++elif echo "$output" | grep -q "RENDER_OK:"; then
++  status="PASSED"
++elif echo "$output" | grep -q "RENDER_ERROR:"; then
++  status="ERROR"
++fi
++
++# Write test_status.json to /testbed per required schema and print output
++python3 - "$status" "$output" <<'PY3'
++import sys, json
++status=sys.argv[1]
++out=sys.argv[2]
++tests=[{"name":"test_escapeseq.py::test_uses_missing_escapeseq_filter","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print(out)
++PY3
+diff --git a/test_escapeseq.py b/test_escapeseq.py
+new file mode 100755
+index 0000000000..d57e7f8858
+--- /dev/null
++++ b/test_escapeseq.py
+@@ -0,0 +1,18 @@
++#!/usr/bin/env python3
++import sys
++try:
++    from django.template import Engine, Context
++except Exception as e:
++    print("IMPORT_ERROR:" + repr(e))
++    sys.exit(1)
++
++tmpl = '{{ some_list|escapeseq|join:", " }}'
++try:
++    engine = Engine(autoescape=False)
++    t = engine.from_string(tmpl)
++    out = t.render(Context({'some_list': ['a', '<b>']}))
++    print("RENDER_OK:" + out)
++    sys.exit(0)
++except Exception as e:
++    print("RENDER_ERROR:" + repr(e))
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..a6a3a2c8f1
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_escapeseq.py::test_uses_missing_escapeseq_filter",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,133 @@
+diff --git a/run_and_execute.sh b/run_and_execute.sh
+new file mode 100644
+index 000000000..0447b8e24
+--- /dev/null
++++ b/run_and_execute.sh
+@@ -0,0 +1,55 @@
++#!/bin/bash
++set -euo pipefail
++
++mkdir -p /testbed
++
++cat > test_reproduction.py <<'PY'
++import sys
++try:
++    from sklearn.impute import IterativeImputer
++except Exception as e:
++    print("EXCEPTION:ImportError:" + str(e))
++    sys.exit(0)
++
++try:
++    # Try to instantiate with fill_value which the PR says is missing from IterativeImputer
++    imp = IterativeImputer(initial_strategy='constant', fill_value=42)
++    print("NO_EXCEPTION")
++except Exception as e:
++    print("EXCEPTION:" + type(e).__name__ + ":" + str(e))
++PY
++
++cat > run_test.sh <<'RUN'
++#!/bin/bash
++set -euo pipefail
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++status="ERROR"
++
++if echo "$output" | grep -q '^NO_EXCEPTION$'; then
++    # If no exception, the IterativeImputer accepted fill_value -> issue not reproducible here
++    status="FAILED"
++elif echo "$output" | grep -q '^EXCEPTION:TypeError:'; then
++    # TypeError likely indicates unexpected keyword argument 'fill_value' -> reproduces issue
++    status="PASSED"
++elif echo "$output" | grep -q '^EXCEPTION:ImportError:'; then
++    # sklearn not installed or import failed -> mark as ERROR
++    status="ERROR"
++elif echo "$output" | grep -q '^EXCEPTION:'; then
++    # Some other exception occurred; treat as PASSED because an exception was raised on using fill_value
++    status="PASSED"
++else
++    status="ERROR"
++fi
++
++python3 - <<PY
++import json
++from pathlib import Path
++statuses=[{"name":"test_reproduction.py::test_iterative_imputer_fill_value","status":"%s"}]
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": statuses}, indent=2))
++print(Path("/testbed/test_status.json").read_text())
++PY
++RUN
++
++chmod +x run_test.sh
++./run_test.sh
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..dd9c09415
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,30 @@
++    #!/bin/bash
++    set -euo pipefail
++    output=$(python3 test_reproduction.py 2>&1 || true)
++    echo "$output"
++    status="ERROR"
++
++    if echo "$output" | grep -q '^NO_EXCEPTION$'; then
++        # If no exception, the IterativeImputer accepted fill_value -> test PASSED (feature present)
++        status="PASSED"
++    elif echo "$output" | grep -q '^EXCEPTION:TypeError:'; then
++        # TypeError indicates unexpected keyword argument 'fill_value' -> reproduce failing state -> mark FAILED
++        status="FAILED"
++    elif echo "$output" | grep -q '^EXCEPTION:ImportError:'; then
++        # sklearn import issue -> mark as ERROR
++        status="ERROR"
++    elif echo "$output" | grep -q '^EXCEPTION:'; then
++        # Some other exception occurred; treat as FAILED because an exception was raised when passing fill_value
++        status="FAILED"
++    else
++        status="ERROR"
++    fi
++
++    python3 - "$status" <<PYINNER
++import json, sys
++from pathlib import Path
++status = sys.argv[1]
++statuses = [{"name":"test_reproduction.py::test_iterative_imputer_fill_value","status": status}]
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": statuses}, indent=2))
++print(Path("/testbed/test_status.json").read_text())
++PYINNER
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..c8af62874
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,15 @@
++import sys
++try:
++    # Enable the experimental IterativeImputer API first
++    from sklearn.experimental import enable_iterative_imputer  # noqa: F401
++    from sklearn.impute import IterativeImputer
++except Exception as e:
++    print("EXCEPTION:ImportError:" + str(e))
++    sys.exit(0)
++
++try:
++    # Try to instantiate with fill_value which the PR says is missing from IterativeImputer
++    imp = IterativeImputer(initial_strategy='constant', fill_value=42)
++    print("NO_EXCEPTION")
++except Exception as e:
++    print("EXCEPTION:" + type(e).__name__ + ":" + str(e))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..0a4fd7936
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_iterative_imputer_fill_value",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

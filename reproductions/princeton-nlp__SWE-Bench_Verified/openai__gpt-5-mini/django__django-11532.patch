@@ -1,0 +1,92 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8ccf4ea3e2
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,30 @@
++#!/bin/bash
++# Execute the test, capture its real exit code, print output, write /testbed/test_status.json, and exit 0.
++cd /testbed
++PY=python3
++tmp_out="test_run_output.txt"
++
++# Run the test, capture exit code (do not use || true inside substitution)
++$PY test_mail_unicode.py >"$tmp_out" 2>&1
++exit_code=$?
++
++# Print captured output
++cat "$tmp_out"
++
++# Determine status
++if [ "$exit_code" -ne 0 ]; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++
++# Write /testbed/test_status.json reflecting actual result
++python3 - <<PYEOF "$status"
++import json,sys
++status=sys.argv[1]
++tests=[{"name":"test_mail_unicode.py::test_unicode_dns","status": status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++PYEOF
++
++# Always exit 0 so the harness sees run_test.sh completed
++exit 0
+diff --git a/test_mail_unicode.py b/test_mail_unicode.py
+new file mode 100644
+index 0000000000..f7d2e28eda
+--- /dev/null
++++ b/test_mail_unicode.py
+@@ -0,0 +1,18 @@
++#!/usr/bin/env python3
++from email.utils import make_msgid
++from email.header import Header
++import sys
++
++def test_unicode_dns():
++    domain = "漢字"
++    mid = make_msgid(domain=domain)
++    try:
++        h = Header(mid, 'iso-8859-1')
++        encoded = h.encode()
++        sys.stdout.buffer.write(b"OK: header encoded: " + encoded.encode('utf-8') + b"\n")
++    except Exception as e:
++        sys.stdout.buffer.write(b"EXCEPTION: " + str(type(e)).encode('utf-8') + b": " + str(e).encode('utf-8') + b"\n")
++        raise
++
++if __name__ == "__main__":
++    test_unicode_dns()
+diff --git a/test_run_output.txt b/test_run_output.txt
+new file mode 100644
+index 0000000000..354cbe4c73
+--- /dev/null
++++ b/test_run_output.txt
+@@ -0,0 +1,11 @@
++EXCEPTION: <class 'UnicodeEncodeError'>: 'latin-1' codec can't encode characters in position 38-39: ordinal not in range(256)
++Traceback (most recent call last):
++  File "test_mail_unicode.py", line 18, in <module>
++    test_unicode_dns()
++  File "test_mail_unicode.py", line 10, in test_unicode_dns
++    h = Header(mid, 'iso-8859-1')
++  File "/opt/miniconda3/envs/testbed/lib/python3.6/email/header.py", line 217, in __init__
++    self.append(s, charset, errors)
++  File "/opt/miniconda3/envs/testbed/lib/python3.6/email/header.py", line 301, in append
++    s.encode(output_charset, errors)
++UnicodeEncodeError: 'latin-1' codec can't encode characters in position 38-39: ordinal not in range(256)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..43e4813b44
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_mail_unicode.py::test_unicode_dns",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

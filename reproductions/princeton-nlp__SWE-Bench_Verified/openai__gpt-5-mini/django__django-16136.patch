@@ -1,0 +1,128 @@
+diff --git a/manage.py b/manage.py
+new file mode 100644
+index 0000000000..e85a311fe4
+--- /dev/null
++++ b/manage.py
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python
++import os, sys
++if __name__=="__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "test_settings")
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..baa7344fe4
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/usr/bin/env bash
++set -euo pipefail
++export PYTHONUNBUFFERED=1
++python -m pip install --quiet "Django==4.1.1"
++python /testbed/manage.py runserver 127.0.0.1:8000 > /testbed/server.log 2>&1 &
++echo $! >/testbed/server.pid
++# wait for server to start (timeout after ~15s)
++for i in $(seq 1 15); do
++  if grep -q "Starting development server at" /testbed/server.log 2>/dev/null; then break; fi
++  sleep 1
++done
++# trigger GET to reproduce the error
++curl -sS -o /tmp/resp -w "%{http_code}" http://127.0.0.1:8000/demo || true
++sleep 1
++if grep -q "TypeError: object HttpResponseNotAllowed can't be used in 'await' expression" /testbed/server.log 2>/dev/null; then status="FAILED"; else status="PASSED"; fi
++python - <<PY2 "$status"
++import json, sys
++s=sys.argv[1]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":[{"name":"testbed/repro_django_view_async_post","status":s}]}, indent=2))
++PY2
++kill $(cat /testbed/server.pid) >/dev/null 2>&1 || true
+diff --git a/server.log b/server.log
+new file mode 100644
+index 0000000000..787b234718
+--- /dev/null
++++ b/server.log
+@@ -0,0 +1,25 @@
++Watching for file changes with StatReloader
++Performing system checks...
++
++System check identified no issues (0 silenced).
++April 25, 2026 - 11:42:28
++Django version 4.2.dev20250910130907, using settings 'test_settings'
++Starting development server at http://127.0.0.1:8000/
++Quit the server with CONTROL-C.
++Method Not Allowed (GET): /demo
++Internal Server Error: /demo
++Traceback (most recent call last):
++  File "/testbed/django/core/handlers/exception.py", line 55, in inner
++    response = get_response(request)
++  File "/testbed/django/core/handlers/base.py", line 197, in _get_response
++    response = wrapped_callback(request, *callback_args, **callback_kwargs)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/asgiref/sync.py", line 254, in __call__
++    return call_result.result()
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/concurrent/futures/_base.py", line 439, in result
++    return self.__get_result()
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/concurrent/futures/_base.py", line 391, in __get_result
++    raise self._exception
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/asgiref/sync.py", line 331, in main_wrap
++    result = await self.awaitable(*args, **kwargs)
++TypeError: object HttpResponseNotAllowed can't be used in 'await' expression
++[25/Apr/2026 11:42:28] "GET /demo HTTP/1.1" 500 56341
+diff --git a/server.pid b/server.pid
+new file mode 100644
+index 0000000000..920a139664
+--- /dev/null
++++ b/server.pid
+@@ -0,0 +1 @@
++43
+diff --git a/test_settings.py b/test_settings.py
+new file mode 100644
+index 0000000000..5409309619
+--- /dev/null
++++ b/test_settings.py
+@@ -0,0 +1,7 @@
++SECRET_KEY="testkey"
++DEBUG=True
++ROOT_URLCONF="urls"
++ALLOWED_HOSTS=["*"]
++INSTALLED_APPS=[]
++MIDDLEWARE=[]
++DATABASES={"default":{"ENGINE":"django.db.backends.sqlite3","NAME":":memory:"}}
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..357211a520
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro_django_view_async_post",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/urls.py b/urls.py
+new file mode 100644
+index 0000000000..80fde670de
+--- /dev/null
++++ b/urls.py
+@@ -0,0 +1,5 @@
++from django.urls import path
++from views import Demo
++urlpatterns = [
++    path("demo", Demo.as_view()),
++]
+diff --git a/views.py b/views.py
+new file mode 100644
+index 0000000000..9e7502e918
+--- /dev/null
++++ b/views.py
+@@ -0,0 +1,6 @@
++from django.views import View
++from django.http import HttpResponse
++class Demo(View):
++    """This basic view supports only POST requests"""
++    async def post(self, request):
++        return HttpResponse("ok")

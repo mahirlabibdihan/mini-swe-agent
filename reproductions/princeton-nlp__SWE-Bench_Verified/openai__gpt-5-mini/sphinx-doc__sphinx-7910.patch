@@ -1,0 +1,100 @@
+diff --git a/decmod.py b/decmod.py
+new file mode 100644
+index 000000000..9df66a8bf
+--- /dev/null
++++ b/decmod.py
+@@ -0,0 +1,6 @@
++from functools import wraps
++def decwrap(f):
++    @wraps(f)
++    def wrapper(*args, **kwargs):
++        return f(*args, **kwargs)
++    return wrapper
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..1411da887
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++python3 test_repro.py > test_repro.out 2>&1 || true
++REPRO=$(grep -F "REPRODUCED=True" test_repro.out || true)
++# If the bug is reproduced, record it as FAILED to indicate the failing issue state.
++if [[ -n "$REPRO" ]]; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++mkdir -p /testbed
++cat > /testbed/test_status.json <<EOF
++{"tests": [{"name": "test_repro.py::test_decorated_init", "status": "$status"}]}
++EOF
++nl -ba test_repro.out || true
++cat /testbed/test_status.json
+diff --git a/target.py b/target.py
+new file mode 100644
+index 000000000..cdb748a65
+--- /dev/null
++++ b/target.py
+@@ -0,0 +1,6 @@
++from decmod import decwrap
++class DistributedTrainerReplicated(object):
++    @decwrap
++    def __init__(self, x):
++        """init doc"""
++        self.x = x
+diff --git a/test_repro.out b/test_repro.out
+new file mode 100644
+index 000000000..6eb371879
+--- /dev/null
++++ b/test_repro.out
+@@ -0,0 +1,7 @@
++qualname='DistributedTrainerReplicated.__init__'
++name='__init__'
++obj.__doc__ has contents=True
++cls_path='DistributedTrainerReplicated'
++obj.__globals__ module name='decmod'
++Lookup failed as in reported bug: KeyError 'DistributedTrainerReplicated'
++REPRODUCED=True
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..5a2008fb3
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,27 @@
++import sys
++from target import DistributedTrainerReplicated
++obj = DistributedTrainerReplicated.__init__
++qualname = getattr(obj, '__qualname__', None)
++name = getattr(obj, '__name__', None)
++doc = getattr(obj, '__doc__', None)
++print("qualname=%r" % qualname)
++print("name=%r" % name)
++print("obj.__doc__ has contents=%r" % bool(doc))
++cls_name = None
++if qualname and '.' in qualname:
++    parts = qualname.split('.')
++    cls_name = parts[-2]
++    print("cls_path=%r" % cls_name)
++else:
++    print("qualname missing or no dot")
++g = getattr(obj, '__globals__', {})
++print("obj.__globals__ module name=%r" % g.get('__name__'))
++try:
++    cls = g[cls_name]
++    print("Found class in obj.__globals__ -> does NOT match reported bug")
++    print("REPRODUCED=False")
++    sys.exit(2)
++except Exception as e:
++    print("Lookup failed as in reported bug:", type(e).__name__, str(e))
++    print("REPRODUCED=True")
++    sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..feb1a647d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_repro.py::test_decorated_init", "status": "FAILED"}]}

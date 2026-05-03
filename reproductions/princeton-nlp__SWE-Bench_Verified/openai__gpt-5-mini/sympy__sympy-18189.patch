@@ -1,0 +1,83 @@
+diff --git a/run_repro.py b/run_repro.py
+new file mode 100644
+index 0000000000..f75a59a27e
+--- /dev/null
++++ b/run_repro.py
+@@ -0,0 +1,29 @@
++from sympy import symbols, diophantine
++import json
++from pathlib import Path
++
++m, n = symbols('m n')
++expr = n**4 + m**4 - 2**4 - 3**4
++res1 = diophantine(expr, syms=(m, n), permute=True)
++res2 = diophantine(expr, syms=(n, m), permute=True)
++
++# Expect both orders to yield the same (full) set; this will cause a failure
++# if the implementation is order-dependent (the bug we're reproducing).
++expected_full = {(-3, -2), (-3, 2), (-2, -3), (-2, 3), (2, -3), (2, 3), (3, -2), (3, 2)}
++
++tests = []
++tests.append({
++    "name": "test_reproduction.py::diophantine_syms_m_n_permute",
++    "status": "PASSED" if res1 == expected_full else "FAILED"
++})
++tests.append({
++    "name": "test_reproduction.py::diophantine_syms_n_m_permute",
++    "status": "PASSED" if res2 == expected_full else "FAILED"
++})
++
++Path("/testbed").mkdir(parents=True, exist_ok=True)
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++
++# Print outputs for visibility
++print("RES1:", repr(res1))
++print("RES2:", repr(res2))
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..1dceafd1c0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,6 @@
++#!/bin/bash
++set -euo pipefail
++if ! python -c "import sympy" >/dev/null 2>&1; then
++    pip install sympy
++fi
++python run_repro.py
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..fa5933bd89
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,11 @@
++from sympy import symbols, diophantine
++m, n = symbols('m n')
++expr = n**4 + m**4 - 2**4 - 3**4
++res1 = diophantine(expr, syms=(m, n), permute=True)
++res2 = diophantine(expr, syms=(n, m), permute=True)
++print("RES1_REPR_START")
++print(repr(res1))
++print("RES1_REPR_END")
++print("RES2_REPR_START")
++print(repr(res2))
++print("RES2_REPR_END")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..ab542363af
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::diophantine_syms_m_n_permute",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::diophantine_syms_n_m_permute",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

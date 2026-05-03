@@ -1,0 +1,105 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..d4df10a00
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,37 @@
++#!/bin/bash
++set -euo pipefail
++
++mkdir -p /testbed
++
++output="$(python test_repro.py 2>&1 || true)"
++rc=$?
++
++if [ "$rc" -eq 0 ]; then
++  status="FAILED"
++elif [ "$rc" -eq 1 ]; then
++  status="PASSED"
++elif [ "$rc" -eq 2 ]; then
++  status="SKIPPED"
++elif [ "$rc" -eq 3 ]; then
++  status="ERROR"
++else
++  status="ERROR"
++fi
++
++python - <<PY
++import json, pathlib
++data = {"tests": [{"name": "test_sparsecoder::missing_max_iter_exposed", "status": "$status"}]}
++p = pathlib.Path("/testbed/test_status.json")
++p.parent.mkdir(parents=True, exist_ok=True)
++p.write_text(json.dumps(data, indent=2))
++PY
++
++echo "=== test_repro.py output ==="
++echo "$output"
++echo "=== /testbed/test_status.json ==="
++cat /testbed/test_status.json
++
++# Exit with non-zero only if runner encountered ERROR or SKIPPED (optional)
++if [ "$status" = "ERROR" ] || [ "$status" = "SKIPPED" ]; then
++  exit 1
++fi
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..5655d8fdb
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,27 @@
++import sys
++import inspect
++try:
++    from sklearn.decomposition import SparseCoder
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    sys.exit(3)
++
++sig = inspect.signature(SparseCoder.__init__)
++params = list(sig.parameters.keys())
++params = [p for p in params if p != 'self']
++print("SparseCoder.__init__ params:", params)
++
++has_algorithm = any('algorithm' in p or ('transform' in p and 'algorithm' in p) for p in params)
++has_max_iter = 'max_iter' in params
++
++if not has_algorithm:
++    print("SKIPPED: SparseCoder does not expose an 'algorithm' parameter in this sklearn version.")
++    sys.exit(2)
++
++if not has_max_iter:
++    print("REPRODUCED: SparseCoder exposes algorithm but does NOT expose 'max_iter' in its __init__ signature.")
++    # Exit 0 to indicate reproduction detected; run_test.sh will map this to FAILED
++    sys.exit(0)
++else:
++    print("NOT_REPRODUCED: SparseCoder exposes 'max_iter' (issue not present).")
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..e7c0e03d0
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_sparsecoder::missing_max_iter_exposed",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testbed/test_status.json b/testbed/test_status.json
+new file mode 100644
+index 000000000..bfbc7aedc
+--- /dev/null
++++ b/testbed/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_sparsecoder::missing_max_iter_exposed",
++      "status": "PASSED"
++    }
++  ]
++}

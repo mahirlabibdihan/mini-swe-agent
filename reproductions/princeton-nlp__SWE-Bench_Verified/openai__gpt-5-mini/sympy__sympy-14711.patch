@@ -1,0 +1,85 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..936336ee3
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++# Ensure sympy is installed
++python3 -c "import sympy" 2>/dev/null || pip3 install --quiet sympy
++
++# Run the reproduction script, capture output
++output="$(python3 test_reproduction.py 2>&1 || true)"
++
++# Determine status based on actual output
++if echo "$output" | grep -F -q "TypeError: A Vector must be supplied"; then
++  status="FAILED"
++elif echo "$output" | grep -F -q "RESULT:"; then
++  status="PASSED"
++elif echo "$output" | grep -F -q "EXCEPTION_RAISED"; then
++  status="ERROR"
++else
++  status="ERROR"
++fi
++
++# Write the required JSON to /testbed/test_status.json
++python3 - <<PY "$status" > /testbed/test_status.json
++import json,sys
++status=sys.argv[1]
++print(json.dumps({"tests":[{"name":"test_reproduction.py::sum_vector_zero","status":status}]}, indent=2))
++PY
++
++# Output logs for verification
++echo "----- TEST OUTPUT -----"
++echo "$output"
++echo "----- WRITTEN /testbed/test_status.json -----"
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..9de5466ea
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,27 @@
++import sys
++from traceback import format_exc
++
++def main():
++    try:
++        from sympy.physics.vector import ReferenceFrame
++        from sympy import symbols
++    except Exception as e:
++        print("IMPORT_ERROR")
++        print(format_exc())
++        return 2
++
++    try:
++        N = ReferenceFrame('N')
++        # Print a marker, then attempt the problematic expression
++        print("RUNNING_EXPRESSION")
++        result = sum([N.x, (0 * N.x)])
++        print("RESULT:", result)
++        return 0
++    except Exception as e:
++        print("EXCEPTION_RAISED")
++        print(format_exc())
++        return 1
++
++if __name__ == '__main__':
++    rc = main()
++    sys.exit(rc)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..de5bfdc75
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::sum_vector_zero",
++      "status": "FAILED"
++    }
++  ]
++}

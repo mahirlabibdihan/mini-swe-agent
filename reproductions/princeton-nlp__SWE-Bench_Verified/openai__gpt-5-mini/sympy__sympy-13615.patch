@@ -1,0 +1,68 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..70f68d3b9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Ensure sympy is available
++python3 -m pip install -q --upgrade pip setuptools >/dev/null 2>&1 || true
++python3 -m pip install -q sympy >/dev/null 2>&1 || true
++
++# Run the reproduction script and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Detect the buggy behavior: result prints as "{x, y}" (or FiniteSet without Complement/Interval)
++observed_bug=false
++if echo "$output" | grep -qE "RES_STR:.*\{x, *y\}"; then
++  # If the output contains no mention of 'Complement' or 'Interval', treat it as the bug
++  if ! echo "$output" | grep -q "Complement" && ! echo "$output" | grep -q "Interval"; then
++    observed_bug=true
++  fi
++fi
++
++status="PASSED"
++if [ "$observed_bug" = true ]; then
++  status="FAILED"
++fi
++
++# Write the test_status.json as required
++python3 - <<PYCODE
++import json
++from pathlib import Path
++status = "$status"
++tests = [{"name": "test_reproduction.py::test_complement_mixed", "status": status}]
++Path("test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print("WROTE test_status.json with status:", status)
++PYCODE
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..d61078653
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,7 @@
++from sympy import symbols, FiniteSet, Interval, Complement
++x, y = symbols('x y')
++a = FiniteSet(x, y, 2)
++b = Interval(-10, 10)
++res = Complement(a, b)
++print("RES_STR:", str(res))
++print("RES_REPR:", repr(res))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..0649870b1
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_complement_mixed",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

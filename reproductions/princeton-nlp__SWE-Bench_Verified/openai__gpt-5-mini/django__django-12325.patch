@@ -1,0 +1,143 @@
+diff --git a/repro/mysite/__init__.py b/repro/mysite/__init__.py
+new file mode 100644
+index 0000000000..ea71adc85e
+--- /dev/null
++++ b/repro/mysite/__init__.py
+@@ -0,0 +1 @@
++# settings package
+diff --git a/repro/mysite/settings.py b/repro/mysite/settings.py
+new file mode 100644
+index 0000000000..0d2b67c88b
+--- /dev/null
++++ b/repro/mysite/settings.py
+@@ -0,0 +1,12 @@
++SECRET_KEY = 'test'
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'reproapp',
++]
++DATABASES = {
++    'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}
++}
++USE_TZ = False
++MIDDLEWARE = []
++ROOT_URLCONF = ''
++DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+diff --git a/repro/repro_run.py b/repro/repro_run.py
+new file mode 100644
+index 0000000000..0429148eaf
+--- /dev/null
++++ b/repro/repro_run.py
+@@ -0,0 +1,13 @@
++import os, sys, traceback
++# Ensure the project base is importable
++sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
++os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'mysite.settings')
++try:
++    import django
++    django.setup()
++    import reproapp.models as _m
++    print("IMPORT_OK")
++    sys.exit(0)
++except Exception:
++    traceback.print_exc()
++    sys.exit(1)
+diff --git a/repro/reproapp/__init__.py b/repro/reproapp/__init__.py
+new file mode 100644
+index 0000000000..a33bc8c234
+--- /dev/null
++++ b/repro/reproapp/__init__.py
+@@ -0,0 +1 @@
++# repro app
+diff --git a/repro/reproapp/models.py b/repro/reproapp/models.py
+new file mode 100644
+index 0000000000..6a00f4e28d
+--- /dev/null
++++ b/repro/reproapp/models.py
+@@ -0,0 +1,9 @@
++from django.db import models
++
++class Document(models.Model):
++    pass
++
++class Picking(Document):
++    # document_ptr declared before origin (reported to cause ImproperlyConfigured)
++    document_ptr = models.OneToOneField(Document, on_delete=models.CASCADE, parent_link=True, related_name='+')
++    origin = models.OneToOneField(Document, related_name='picking', on_delete=models.PROTECT)
+diff --git a/repro/run_test.sh b/repro/run_test.sh
+new file mode 100755
+index 0000000000..a8d7f6998b
+--- /dev/null
++++ b/repro/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -uo pipefail
++cd "$(dirname "$0")"
++# Run the reproduction script, capture output and exit code
++python3 repro_run.py 2>&1 | tee /tmp/repro_out.txt
++rc=${PIPESTATUS[0]:-0}
++output="$(cat /tmp/repro_out.txt || true)"
++status="PASSED"
++# Mark FAILED if exit non-zero or ImproperlyConfigured appears
++if [ "$rc" -ne 0 ] || echo "$output" | grep -q "ImproperlyConfigured"; then
++  status="FAILED"
++fi
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"reproapp/models_import","status":"$status"}]}
++JSON
++echo "$output"
++if [ "$status" = "FAILED" ]; then
++  exit 1
++fi
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..08dd05db92
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,39 @@
++#!/bin/bash
++# Do not use errexit so we can capture test failures and still exit 0 for the harness
++set -u
++
++REPRO_DIR="/testbed/repro"
++TEST_NAME="reproapp/models_import"
++OUTFILE="/testbed/test_status.json"
++
++if [ ! -d "$REPRO_DIR" ]; then
++  echo "Repro directory $REPRO_DIR not found" >&2
++  echo "{\"tests\":[{\"name\":\"$TEST_NAME\",\"status\":\"ERROR\"}]}" > "$OUTFILE"
++  # Exit 0 so harness sees the script ran
++  exit 0
++fi
++
++cd "$REPRO_DIR"
++
++# Ensure Django is available (best-effort)
++python3 -m pip install --quiet Django >/dev/null 2>&1 || true
++
++# Run the reproduction script, capture output and return code
++output=$(python3 repro_run.py 2>&1) || rc=$?
++rc=${rc:-0}
++
++status="PASSED"
++if [ "$rc" -ne 0 ] || echo "$output" | grep -q "ImproperlyConfigured"; then
++  status="FAILED"
++fi
++
++# Write the required test_status.json
++cat > "$OUTFILE" <<JSON
++{"tests":[{"name":"$TEST_NAME","status":"$status"}]}
++JSON
++
++# Print reproduction output for visibility
++printf "%s\n" "$output"
++
++# Always exit 0 so the harness recognizes the script executed successfully.
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..1cc0117ed9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"reproapp/models_import","status":"FAILED"}]}

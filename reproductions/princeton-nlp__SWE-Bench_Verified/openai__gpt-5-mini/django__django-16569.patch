@@ -1,0 +1,89 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..23c17221e3
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,10 @@
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 27, in <module>
++    print(repr(my_formset.empty_form))
++               ^^^^^^^^^^^^^^^^^^^^^
++  File "/testbed/django/forms/formsets.py", line 267, in empty_form
++    self.add_fields(form, None)
++  File "/testbed/django/forms/formsets.py", line 493, in add_fields
++    if self.can_delete and (self.can_delete_extra or index < initial_form_count):
++                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
++TypeError: '<' not supported between instances of 'NoneType' and 'int'
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5a3c83110d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -euo pipefail
++python3 -V
++pip install -q Django
++output=$(/usr/bin/env python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "----SCRIPT OUTPUT----"
++echo "$output"
++echo "----END OUTPUT----"
++echo "$output" > /testbed/run_output.txt
++status=PASSED
++if echo "$output" | grep -qE "Traceback|TypeError|NoneType"; then status=FAILED; fi
++python3 - "$status" <<PY
++import json
++import sys
++status = sys.argv[1]
++result = {"tests":[{"name":"/testbed/test_reproduction.py::reproduce_formset_empty_form","status":status}]}
++open("/testbed/test_status.json","w").write(json.dumps(result, indent=2))
++print("Wrote /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100755
+index 0000000000..56bf725010
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,27 @@
++#!/usr/bin/env python3
++import os
++import django
++from django import forms
++
++class MyForm(forms.Form):
++    my_field = forms.CharField()
++
++if __name__ == "__main__":
++    settings_file = os.path.splitext(os.path.basename(__file__))[0]
++    from django.conf import settings
++    settings.configure(
++        DEBUG=True,
++        MIDDLEWARE_CLASSES=[],
++        ROOT_URLCONF=settings_file,
++    )
++    django.setup()
++    MyFormSet = forms.formset_factory(
++        form=MyForm,
++        can_delete=True,
++        can_delete_extra=False,
++    )
++    my_formset = MyFormSet(
++        initial=None,
++    )
++    # Force evaluation of empty_form to reproduce the reported TypeError
++    print(repr(my_formset.empty_form))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..0fc1550308
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::reproduce_formset_empty_form",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,73 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..3a01a44cd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,28 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++output="$(python3 test_repro.py 2>&1)" || true
++python3 - "$output" <<'PY2'
++import sys, re, json
++out = sys.argv[1]
++name = "testbed/repro_span_selector.py::test_forced_zero"
++tests = []
++status = "ERROR"
++if "Traceback" in out or "ImportError" in out or "Exception" in out:
++    status = "ERROR"
++else:
++    m = re.search(r'XLIM:\s*\(\s*([0-9eE+.\-]+)\s*,\s*([0-9eE+.\-]+)\s*\)', out)
++    if not m:
++        status = "ERROR"
++    else:
++        a = float(m.group(1)); b = float(m.group(2))
++        # Treat inclusion of 0 as FAILURE to indicate the bug is reproduced.
++        if a <= 0.0 <= b:
++            status = "FAILED"
++        else:
++            status = "PASSED"
++tests.append({"name": name, "status": status})
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print(out)
++print("WROTE /testbed/test_status.json with status:", status)
++PY2
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100755
+index 000000000..26ed1065c
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,18 @@
++
++#!/usr/bin/env python3
++import matplotlib
++matplotlib.use('Agg')
++from matplotlib import pyplot as plt
++from matplotlib.widgets import SpanSelector
++
++print('MATPLOTLIB_VERSION:', matplotlib.__version__)
++fig, ax = plt.subplots()
++ax.plot([10, 20], [10, 20])
++try:
++    ss = SpanSelector(ax, lambda vmin, vmax: None, 'horizontal', interactive=True)
++    xlim = ax.get_xlim()
++    print('XLIM:', xlim)
++except Exception:
++    import traceback
++    traceback.print_exc()
++    raise
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..745ed29dd
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro_span_selector.py::test_forced_zero",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

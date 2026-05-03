@@ -1,0 +1,133 @@
+diff --git a/db.sqlite3 b/db.sqlite3
+new file mode 100644
+index 0000000000..a9b5c5b8cd
+Binary files /dev/null and b/db.sqlite3 differ
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..da6b930717
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -u -o pipefail
++# Clean DB to ensure deterministic run
++rm -f db.sqlite3
++# Ensure Django installed
++python -m pip install "Django>=3.2" -q
++# Run reproduction and capture output
++output=$(python test_reproduction.py 2>&1 || true)
++rc=$?
++# Determine status: FAILED if non-zero rc or if output includes the specific FieldError message
++status="PASSED"
++if [ "$rc" -ne 0 ] || echo "$output" | grep -q "cannot be both deferred and traversed"; then
++  status="FAILED"
++fi
++# Write test_status.json
++python - <<PY "$output" "$status"
++import json,sys
++out=sys.argv[1]
++status=sys.argv[2]
++tests=[{"name":"test_reproduction.py::test_serialize_m2m_select_related","status":status}]
++open("test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print(out)
++PY
++# Exit with the original return code so caller sees the same result
++exit $rc
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..7b4eaab271
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,44 @@
++import os, sys, traceback
++def main():
++    import django
++    from django.conf import settings
++    BASE_DIR = os.getcwd()
++    settings.configure(
++        INSTALLED_APPS=['testapp'],
++        DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME': os.path.join(BASE_DIR,'db.sqlite3')}},
++        SECRET_KEY='test-secret-key',
++        DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++        USE_TZ=False,
++    )
++    django.setup()
++    from django.db import connection
++    from django.core import serializers
++    from testapp import models as tm
++    # Create only the concrete model tables. Do NOT explicitly create the auto m2m table
++    # because creating the model that defines the ManyToManyField will create it implicitly.
++    table_order_create = [tm.TestTagMaster, tm.TestTag, tm.Test]
++    with connection.schema_editor() as schema_editor:
++        for model in table_order_create:
++            try:
++                schema_editor.create_model(model)
++            except Exception:
++                pass
++    # Create objects and attempt serialization
++    tag_master = tm.TestTagMaster.objects.create(name='master')
++    tag = tm.TestTag.objects.create(name='tag', master=tag_master)
++    test = tm.Test.objects.create(name='test')
++    test.tags.add(tag)
++    test.save()
++    print("Attempting to serialize Test instance with m2m...")
++    out = serializers.serialize('json', [test])
++    print("Serialization Succeeded. Output snippet:")
++    print(out[:400])
++    return 0
++
++if __name__ == '__main__':
++    try:
++        rc = main()
++        sys.exit(rc or 0)
++    except Exception:
++        traceback.print_exc()
++        sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..db60c07e0e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_serialize_m2m_select_related",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..9ecc2ad5d7
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,20 @@
++from django.db import models
++from django.db.models import Manager
++
++class TestTagManager(Manager):
++    def get_queryset(self):
++        qs = super().get_queryset()
++        qs = qs.select_related("master")  # follow master by default
++        return qs
++
++class TestTagMaster(models.Model):
++    name = models.CharField(max_length=120)
++
++class TestTag(models.Model):
++    objects = TestTagManager()
++    name = models.CharField(max_length=120)
++    master = models.ForeignKey(TestTagMaster, on_delete=models.SET_NULL, null=True)
++
++class Test(models.Model):
++    name = models.CharField(max_length=120)
++    tags = models.ManyToManyField(TestTag, blank=True)

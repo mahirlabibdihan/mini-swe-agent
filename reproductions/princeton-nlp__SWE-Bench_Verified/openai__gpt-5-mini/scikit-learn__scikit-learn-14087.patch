@@ -1,0 +1,96 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..cc6d747d5
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,52 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the reproduction Python script
++cat > /testbed/test_reproduction.py <<'PY'
++import traceback
++import numpy as np
++from sklearn.linear_model import LogisticRegressionCV
++
++def reproduce():
++    np.random.seed(29)
++    X = np.random.normal(size=(1000, 3))
++    beta = np.random.normal(size=3)
++    intercept = np.random.normal()
++    y = np.sign(intercept + X @ beta)
++
++    try:
++        LogisticRegressionCV(
++            cv=5,
++            solver='saga',
++            tol=1e-2,
++            refit=False
++        ).fit(X, y)
++        print("NO_EXCEPTION")
++    except Exception:
++        print("EXCEPTION_RAISED")
++        traceback.print_exc()
++
++if __name__ == "__main__":
++    reproduce()
++PY
++
++# Run the reproduction and capture output
++output=$(python /testbed/test_reproduction.py 2>&1 || true)
++
++# Determine status based on whether an exception occurred (and match the reported IndexError if present)
++if echo "$output" | grep -q "EXCEPTION_RAISED"; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++
++# Write the required test status JSON
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_reproduction.py::test_logistic_regression_cv_refit_false", "status": "$status"}]}
++JSON
++
++# Print outputs for visibility
++echo "===== SCRIPT OUTPUT ====="
++echo "$output"
++echo "===== WROTE /testbed/test_status.json ====="
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..22ed80448
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,25 @@
++import traceback
++import numpy as np
++from sklearn.linear_model import LogisticRegressionCV
++
++def reproduce():
++    np.random.seed(29)
++    X = np.random.normal(size=(1000, 3))
++    beta = np.random.normal(size=3)
++    intercept = np.random.normal()
++    y = np.sign(intercept + X @ beta)
++
++    try:
++        LogisticRegressionCV(
++            cv=5,
++            solver='saga',
++            tol=1e-2,
++            refit=False
++        ).fit(X, y)
++        print("NO_EXCEPTION")
++    except Exception:
++        print("EXCEPTION_RAISED")
++        traceback.print_exc()
++
++if __name__ == "__main__":
++    reproduce()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..88c7a7c5c
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_reproduction.py::test_logistic_regression_cv_refit_false", "status": "FAILED"}]}

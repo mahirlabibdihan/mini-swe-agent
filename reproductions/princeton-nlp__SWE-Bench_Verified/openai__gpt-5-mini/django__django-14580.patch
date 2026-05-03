@@ -1,0 +1,91 @@
+diff --git a/app/__init__.py b/app/__init__.py
+new file mode 100644
+index 0000000000..b868da5b1b
+--- /dev/null
++++ b/app/__init__.py
+@@ -0,0 +1 @@
++# package init
+diff --git a/app/migrations/0001_initial.py b/app/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..74baca92db
+--- /dev/null
++++ b/app/migrations/0001_initial.py
+@@ -0,0 +1,19 @@
++# Generated migration (simulating Django 3.2.4 output with missing import)
++import app.models
++from django.db import migrations
++class Migration(migrations.Migration):
++    initial = True
++    dependencies = [
++    ]
++    operations = [
++        migrations.CreateModel(
++            name='MyModel',
++            fields=[
++                ('name', app.models.MyField(primary_key=True, serialize=False)),
++            ],
++            options={
++                'abstract': False,
++            },
++            bases=(app.models.MyMixin, models.Model),
++        ),
++    ]
+diff --git a/app/migrations/__init__.py b/app/migrations/__init__.py
+new file mode 100644
+index 0000000000..7f7d0d386c
+--- /dev/null
++++ b/app/migrations/__init__.py
+@@ -0,0 +1 @@
++# migrations package
+diff --git a/app/models.py b/app/models.py
+new file mode 100644
+index 0000000000..eff0b76102
+--- /dev/null
++++ b/app/models.py
+@@ -0,0 +1,13 @@
++# Minimal stand-ins so we don't depend on Django being installed.
++class MyField:
++    def __init__(self, *args, **kwargs):
++        pass
++
++class MyBaseModel:
++    pass
++
++class MyMixin:
++    pass
++
++class MyModel(MyMixin, MyBaseModel):
++    name = MyField(primary_key=True)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..e1a137f4ad
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,20 @@
++#!/bin/bash
++set -euo pipefail
++# Run the migration module and capture output (don't let non-zero exit stop us)
++output=$(python3 - <<'PY' 2>&1 || true
++import runpy
++runpy.run_path('app/migrations/0001_initial.py', run_name='__main__')
++PY
++)
++# If the specific NameError occurs, mark the test as FAILED (reproduction of the bug).
++if echo "$output" | grep -q "NameError: name 'models' is not defined"; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++# Write the machine-readable test status
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"app/migrations/0001_initial.py::import_migration","status":"$status"}]}
++JSON
++# Print captured output for visibility
++printf "%s\n" "$output"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..7f1bca5874
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"app/migrations/0001_initial.py::import_migration","status":"FAILED"}]}

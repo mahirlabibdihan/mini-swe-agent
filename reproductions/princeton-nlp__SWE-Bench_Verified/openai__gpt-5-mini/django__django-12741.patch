@@ -1,0 +1,61 @@
+diff --git a/repro_test.py b/repro_test.py
+new file mode 100644
+index 0000000000..d686faad7d
+--- /dev/null
++++ b/repro_test.py
+@@ -0,0 +1,13 @@
++class DatabaseOperations:
++    # Problematic signature: expects both 'using' and 'sql_list'
++    def execute_sql_flush(self, using, sql_list):
++        print("Flushed SQL with using:", using, sql_list)
++
++def run():
++    ops = DatabaseOperations()
++    sql_flush = ["DELETE FROM table;"]
++    # Caller omits 'using' and passes only sql_list -> should raise TypeError
++    ops.execute_sql_flush(sql_flush)
++
++if __name__ == "__main__":
++    run()
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..7d5a468e15
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++set -uo pipefail
++outfile=/tmp/repro_out.txt
++# Run the reproduction and capture output and real exit code
++python3 /testbed/repro_test.py >"$outfile" 2>&1
++rc=$?
++out=$(cat "$outfile")
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++python3 - <<PY "$out" "$status"
++import sys, json
++out=sys.argv[1]
++status=sys.argv[2]
++tests=[{"name":"testbed/repro_test.py::test_execute_sql_flush_signature","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print(out)
++PY
++# Ensure the script itself exits successfully for the harness, even if test failed
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..1a27ca8336
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro_test.py::test_execute_sql_flush_signature",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

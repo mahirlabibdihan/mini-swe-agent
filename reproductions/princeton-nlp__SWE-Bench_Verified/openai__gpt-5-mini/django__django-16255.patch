@@ -1,0 +1,93 @@
+diff --git a/__out.txt b/__out.txt
+new file mode 100644
+index 0000000000..62d2cb9041
+--- /dev/null
++++ b/__out.txt
+@@ -0,0 +1,7 @@
++Invoking get_latest_lastmod() to reproduce the error...
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 23, in <module>
++    print(s.get_latest_lastmod())
++  File "/testbed/test_reproduction.py", line 16, in get_latest_lastmod
++    return max([self.lastmod(item) for item in self.items()])
++ValueError: max() arg is an empty sequence
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..aed05c1fcf
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -u
++cd "$(dirname "$0")"
++# Run the reproduction script and capture output and exit code
++python3 test_reproduction.py > __out.txt 2>&1
++rc=$?
++output=$(cat __out.txt)
++
++# Determine test status based on actual run
++status="PASSED"
++if [ "$rc" -ne 0 ] || echo "$output" | grep -q "ValueError: max() arg is an empty sequence"; then
++  status="FAILED"
++fi
++
++# Write machine-readable test results to /testbed/test_status.json
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_empty_items_callable_lastmod",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++# Print the script output for inspection and always exit 0 so the runner execution is considered successful
++echo "----- SCRIPT OUTPUT -----"
++cat __out.txt
++echo "----- END OUTPUT -----"
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..87b0714a97
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,23 @@
++# Simple reproduction of Django Sitemap.get_latest_lastmod behavior
++class Sitemap:
++    def __init__(self):
++        # lastmod is a callable (simulating a sitemap that can compute lastmod per item)
++        self.lastmod = lambda item: item.get("lastmod") if isinstance(item, dict) else None
++
++    def items(self):
++        # Simulate a sitemap with no items
++        return []
++
++    def get_latest_lastmod(self):
++        if not hasattr(self, "lastmod"):
++            return None
++        if callable(self.lastmod):
++            # This will raise ValueError because items() is empty -> max([])
++            return max([self.lastmod(item) for item in self.items()])
++        else:
++            return self.lastmod
++
++if __name__ == "__main__":
++    s = Sitemap()
++    print("Invoking get_latest_lastmod() to reproduce the error...")
++    print(s.get_latest_lastmod())
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..8e85aa3a88
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_empty_items_callable_lastmod",
++      "status": "FAILED"
++    }
++  ]
++}

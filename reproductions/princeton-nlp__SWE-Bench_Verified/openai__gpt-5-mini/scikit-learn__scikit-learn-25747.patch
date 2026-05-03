@@ -1,0 +1,99 @@
+diff --git a/last_run_output.txt b/last_run_output.txt
+new file mode 100644
+index 000000000..5c945fa02
+--- /dev/null
++++ b/last_run_output.txt
+@@ -0,0 +1,24 @@
++=== transform_output=default (should work) ===
++[240 240 240 240]
++=== transform_output=pandas (should raise) ===
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 29, in <module>
++    reproduce()
++  File "/testbed/test_reproduction.py", line 26, in reproduce
++    print(make_union(MyTransformer()).fit_transform(data))
++  File "/testbed/sklearn/utils/_set_output.py", line 150, in wrapped
++    return _wrap_data_with_container(method, data_to_wrap, X, self)
++  File "/testbed/sklearn/utils/_set_output.py", line 130, in _wrap_data_with_container
++    return _wrap_in_pandas_container(
++  File "/testbed/sklearn/utils/_set_output.py", line 59, in _wrap_in_pandas_container
++    data_to_wrap.index = index
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pandas/core/generic.py", line 5588, in __setattr__
++    return object.__setattr__(self, name, value)
++  File "pandas/_libs/properties.pyx", line 70, in pandas._libs.properties.AxisProperty.__set__
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pandas/core/generic.py", line 769, in _set_axis
++    self._mgr.set_axis(axis, labels)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pandas/core/internals/managers.py", line 214, in set_axis
++    self._validate_set_axis(axis, new_labels)
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/pandas/core/internals/base.py", line 69, in _validate_set_axis
++    raise ValueError(
++ValueError: Length mismatch: Expected axis has 4 elements, new values have 96 elements
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..36505ca4b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++set -u
++# Execute the reproducer, capture output and exit code
++python3 /testbed/test_reproduction.py > /testbed/last_run_output.txt 2>&1 || true
++rc=$?
++out="$(cat /testbed/last_run_output.txt || true)"
++
++# Default to PASSED, mark FAILED if non-zero exit code or if output contains error markers
++status="PASSED"
++if [ "$rc" -ne 0 ] || echo "$out" | grep -q -E "Traceback|ValueError|Exception|Error"; then
++  status="FAILED"
++fi
++
++# Write the required machine-readable test status JSON
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"/testbed/test_reproduction.py::reproduce","status":"$status"}]}
++JSON
++
++# Print captured output for visibility and exit with the reproducer's code
++cat /testbed/last_run_output.txt || true
++exit $rc
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..0975c6c23
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,29 @@
++import pandas as pd
++from sklearn.base import BaseEstimator, TransformerMixin
++from sklearn import set_config
++from sklearn.pipeline import make_union
++
++def reproduce():
++    index = pd.date_range(start="2020-01-01", end="2020-01-05", inclusive="left", freq="H")
++    data = pd.DataFrame(index=index, data=[10] * len(index), columns=["value"])
++    data["date"] = index.date
++
++    class MyTransformer(BaseEstimator, TransformerMixin):
++        def fit(self, X, y=None, **kwargs):
++            return self
++
++        def transform(self, X, y=None):
++            return X["value"].groupby(X["date"]).sum()
++
++    # This works.
++    set_config(transform_output="default")
++    print("=== transform_output=default (should work) ===")
++    print(make_union(MyTransformer()).fit_transform(data))
++
++    # This does not work.
++    set_config(transform_output="pandas")
++    print("=== transform_output=pandas (should raise) ===")
++    print(make_union(MyTransformer()).fit_transform(data))
++
++if __name__ == "__main__":
++    reproduce()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..17c674c2e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"/testbed/test_reproduction.py::reproduce","status":"FAILED"}]}

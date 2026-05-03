@@ -1,0 +1,108 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..3cedfc874b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++# Don't use -e so we can handle test failures and still exit 0 at the end
++set -u
++echo "Python version: $(python3 --version 2>&1)"
++# Try to install Django but do not fail the script if pip fails
++python3 -m pip install -q Django || true
++# Run the reproduction and capture output (and exit code)
++python3 - <<'PY' > /testbed/test_output.txt 2>&1
++# Configure Django settings before importing DateFormat
++try:
++    from django.conf import settings
++    if not settings.configured:
++        settings.configure(TIME_ZONE='UTC')
++except Exception as e:
++    print("SETTINGS_CONFIG_ERROR:", e)
++    raise SystemExit(2)
++
++from datetime import datetime
++try:
++    from django.utils.dateformat import DateFormat
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    raise SystemExit(2)
++
++dt = datetime(5, 1, 1)
++df = DateFormat(dt)
++result = df.format('Y')
++expected = '0005'
++print("datetime:", dt.isoformat())
++print("DateFormat('Y') ->", result)
++print("expected ->", expected)
++if result == expected:
++    print("RESULT: PASS")
++    raise SystemExit(0)
++else:
++    print("RESULT: FAIL")
++    raise SystemExit(1)
++PY
++rc=$?
++# Map rc to status
++if [ "$rc" -eq 0 ]; then status="PASSED"
++elif [ "$rc" -eq 2 ]; then status="ERROR"
++else status="FAILED"
++fi
++# Write the required JSON file reflecting the actual test result
++printf '%s\n' "{\"tests\":[{\"name\":\"test_reproduction.py::test_DateFormat_Y_zero_pad\",\"status\":\"${status}\"}]}" > /testbed/test_status.json
++# Print outputs for visibility
++echo "----- test output -----"
++cat /testbed/test_output.txt || true
++echo "----- /testbed/test_status.json -----"
++nl -ba /testbed/test_status.json || true
++# Exit 0 so the runner sees the script executed successfully; the test result is in test_status.json
++exit 0
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 0000000000..ab6dad077b
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,4 @@
++datetime: 0005-01-01T00:00:00
++DateFormat('Y') -> 5
++expected -> 0005
++RESULT: FAIL
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..c211e084cb
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,26 @@
++#!/usr/bin/env python3
++from datetime import datetime
++try:
++    from django.utils.dateformat import DateFormat
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    raise
++
++def run():
++    dt = datetime(5, 1, 1)
++    df = DateFormat(dt)
++    result = df.format('Y')
++    expected = '0005'
++    print("datetime:", dt.isoformat())
++    print("DateFormat('Y') ->", result)
++    print("expected ->", expected)
++    if result == expected:
++        print("RESULT: PASS")
++        return 0
++    else:
++        print("RESULT: FAIL")
++        return 1
++
++if __name__ == '__main__':
++    import sys
++    sys.exit(run())
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e8686ed7e5
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py::test_DateFormat_Y_zero_pad","status":"FAILED"}]}

@@ -1,0 +1,82 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..c36a4a5ac
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,30 @@
++#!/usr/bin/env bash
++set -euo pipefail
++output="$(python /testbed/test_reproduction.py 2>&1 || true)"
++status="ERROR"
++if echo "$output" | grep -q "RESULT: DUPLICATE"; then
++  status="FAILED"
++elif echo "$output" | grep -q "RESULT: No duplicate"; then
++  status="PASSED"
++elif echo "$output" | grep -q "IMPORT_ERROR"; then
++  status="ERROR"
++else
++  status="SKIPPED"
++fi
++
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "testbed/test_reproduction.py::test_copy_X_duplication",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++# Print outputs for visibility
++echo "===== SCRIPT OUTPUT ====="
++echo "$output"
++echo "===== TEST STATUS JSON ====="
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..25afc8145
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,26 @@
++import inspect
++import sys
++try:
++    from sklearn.linear_model import LassoLarsIC
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    sys.exit(0)
++
++sig_init = inspect.signature(LassoLarsIC.__init__)
++sig_fit = inspect.signature(LassoLarsIC.fit)
++
++has_init = 'copy_X' in sig_init.parameters
++has_fit = 'copy_X' in sig_fit.parameters
++
++init_def = sig_init.parameters['copy_X'].default if has_init else None
++fit_def = sig_fit.parameters['copy_X'].default if has_fit else None
++
++print("LassoLarsIC __init__ signature:", sig_init)
++print("LassoLarsIC.fit signature:   ", sig_fit)
++print(f"init has copy_X: {has_init}, default={init_def!r}")
++print(f"fit  has copy_X: {has_fit}, default={fit_def!r}")
++
++if has_init and has_fit:
++    print("RESULT: DUPLICATE copy_X present -> REPRODUCED")
++else:
++    print("RESULT: No duplicate -> NOT REPRODUCED")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..0dd7cc551
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_reproduction.py::test_copy_X_duplication",
++      "status": "FAILED"
++    }
++  ]
++}

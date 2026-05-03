@@ -1,0 +1,93 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..941a95fa0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,28 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++python3 - <<'PY' "$output"
++import json, sys
++out = sys.argv[1]
++tests = []
++for line in out.splitlines():
++    if line.startswith("RESULT\t"):
++        parts = line.split("\t", 3)
++        if len(parts) >= 3:
++            name = parts[1]
++            status = parts[2]
++            # Interpret the reproduction script's semantics:
++            # test_mul_order_2 reports PASSED when the UnboundLocalError was reproduced.
++            # We want the final test_status.json to show a FAILED test when the bug is reproduced.
++            if name.endswith("test_mul_order_2"):
++                final_status = "FAILED" if status == "PASSED" else "PASSED"
++            else:
++                final_status = status
++            tests.append({"name": name, "status": final_status})
++if not tests:
++    tests = [{"name": "/testbed/test_repro.py::reproduction", "status": "ERROR"}]
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print(out)
++PY
++echo "Wrote /testbed/test_status.json:"
++nl -ba /testbed/test_status.json | sed -n '1,200p'
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..e2ee786bb
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,34 @@
++import traceback
++try:
++    from sympy import symbols, Mul, Max
++except Exception as e:
++    print("RESULT\t/testbed/test_repro.py::IMPORT\tFAILED\tImportError: " + repr(e))
++    raise
++
++x, y = symbols('x y')
++
++def report(name, ok, msg):
++    status = 'PASSED' if ok else 'FAILED'
++    # Emit a single-line structured result the runner will parse
++    print(f"RESULT\t{name}\t{status}\t{msg}")
++
++# Test 1: Mul(x, Max(0, y), evaluate=False).evalf()
++try:
++    r1 = Mul(x, Max(0, y), evaluate=False).evalf()
++    s1 = str(r1)
++    ok1 = 'Max(0' in s1  # Expect something like "x*Max(0, y)"
++    report("test_repro.py::test_mul_order_1", ok1, s1)
++except Exception:
++    report("test_repro.py::test_mul_order_1", False, "EXCEPTION:\\n" + traceback.format_exc())
++
++# Test 2: Mul(Max(0, y), x, evaluate=False).evalf()
++try:
++    r2 = Mul(Max(0, y), x, evaluate=False).evalf()
++    s2 = str(r2)
++    # If no exception, that's a failure to reproduce the bug
++    report("test_repro.py::test_mul_order_2", False, "No exception, output: " + s2)
++except Exception:
++    tb = traceback.format_exc()
++    # Check for the specific UnboundLocalError involving 'reprec' as in the PR description
++    reproduced = ('UnboundLocalError' in tb) and ('reprec' in tb)
++    report("test_repro.py::test_mul_order_2", reproduced, tb)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..5723c0d83
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_mul_order_1",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro.py::test_mul_order_2",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

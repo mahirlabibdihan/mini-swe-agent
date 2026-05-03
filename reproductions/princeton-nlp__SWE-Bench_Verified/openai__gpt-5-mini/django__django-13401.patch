@@ -1,0 +1,97 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5e32316601
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,29 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Ensure Django is available
++pip install -q "Django>=3.2" || true
++
++# Run the reproduction script
++output=$(python3 test_reproduction.py 2>&1 || true)
++rc=$?
++echo "$output"
++
++# Invert status: if reproduction observed (rc==0) that means the bug exists -> mark FAILED
++status="PASSED"
++if [ "$rc" -eq 0 ]; then
++  status="FAILED"
++elif [ "$rc" -eq 2 ]; then
++  status="ERROR"
++else
++  status="PASSED"
++fi
++
++# Write test_status.json in /testbed
++python3 - <<PY
++import json, pathlib
++out = """$output"""
++status = "$status"
++p = pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests": [{"name": "test_reproduction.py::test_field_equality", "status": status}]}, indent=2))
++print("WROTE", p.resolve())
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..cc639ce7c3
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,41 @@
++#!/usr/bin/env python3
++import sys
++try:
++    import django
++    from django.conf import settings
++    from django.db import models
++except Exception as e:
++    print("DJANGO_IMPORT_ERROR", e, file=sys.stderr)
++    sys.exit(2)
++
++if not settings.configured:
++    settings.configure(INSTALLED_APPS=[])
++
++django.setup()
++
++class A(models.Model):
++    class Meta:
++        abstract = True
++        app_label = 'myapp'
++    myfield = models.IntegerField()
++
++class B(A):
++    class Meta:
++        app_label = 'myapp'
++
++class C(A):
++    class Meta:
++        app_label = 'myapp'
++
++fB = B._meta.get_field('myfield')
++fC = C._meta.get_field('myfield')
++
++print("len_set:", len({fB, fC}))
++print("equal:", fB == fC)
++
++if len({fB, fC}) == 1 and (fB == fC):
++    print("REPRODUCED")
++    sys.exit(0)
++else:
++    print("NOT_REPRODUCED")
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..67d0fc1dad
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_field_equality",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

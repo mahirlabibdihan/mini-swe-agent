@@ -1,0 +1,106 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..874f6e143
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Embedded Python reproducer: writes test_status.json with PASSED/FAILED/ERROR
++python3 - <<'PY'
++import json, traceback, sys
++test_name = 'test_kbins_repro.py::test_kmeans_unsorted_bin_edges'
++status = 'ERROR'
++try:
++    import numpy as np
++    from sklearn.preprocessing import KBinsDiscretizer
++except Exception as e:
++    status = 'ERROR'
++    print('IMPORT_ERROR', type(e).__name__, str(e))
++    with open('test_status.json', 'w') as f:
++        json.dump({'tests': [{'name': test_name, 'status': status}]}, f, indent=2)
++    sys.exit(0)
++
++# Reproduction input from PR
++X = np.array([0, 0.5, 2, 3, 9, 10]).reshape(-1, 1)
++est = KBinsDiscretizer(n_bins=5, strategy='kmeans', encode='ordinal')
++
++try:
++    Xt = est.fit_transform(X)
++    print('TRANSFORM_SUCCESS', Xt.ravel())
++    status = 'PASSED'
++except Exception as e:
++    msg = str(e)
++    traceback.print_exc()
++    print('EXCEPTION', type(e).__name__, msg)
++    if 'bins must be monotonically increasing or decreasing' in msg:
++        status = 'FAILED'
++    else:
++        status = 'ERROR'
++
++with open('test_status.json', 'w') as f:
++    json.dump({'tests': [{'name': test_name, 'status': status}]}, f, indent=2)
++
++print('WROTE /testbed/test_status.json with status:', status)
++# Exit 0 so the outer run_test.sh completes successfully; the status is in test_status.json
++sys.exit(0)
++PY
++
++# Display the status file for visibility
++if [ -f test_status.json ]; then
++  echo '--- /testbed/test_status.json ---'
++  cat test_status.json
++else
++  echo 'test_status.json not found'
++fi
++
++exit 0
+diff --git a/test_kbins_repro.py b/test_kbins_repro.py
+new file mode 100644
+index 000000000..593376816
+--- /dev/null
++++ b/test_kbins_repro.py
+@@ -0,0 +1,26 @@
++import sys, traceback, json
++try:
++    import numpy as np
++    from sklearn.preprocessing import KBinsDiscretizer
++except Exception as e:
++    tests = [{"name": "test_kbins_repro.py::test_kmeans_unsorted_bin_edges", "status": "ERROR"}]
++    open("test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++    print("IMPORT_ERROR", type(e).__name__, str(e))
++    sys.exit(2)
++
++X = np.array([0, 0.5, 2, 3, 9, 10]).reshape(-1, 1)
++est = KBinsDiscretizer(n_bins=5, strategy='kmeans', encode='ordinal')
++try:
++    Xt = est.fit_transform(X)
++    print("TRANSFORM_SUCCESS", Xt.ravel())
++    tests = [{"name": "test_kbins_repro.py::test_kmeans_unsorted_bin_edges", "status": "PASSED"}]
++    open("test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++    sys.exit(0)
++except Exception as e:
++    msg = str(e)
++    traceback.print_exc()
++    status = "FAILED" if "bins must be monotonically increasing or decreasing" in msg else "ERROR"
++    tests = [{"name": "test_kbins_repro.py::test_kmeans_unsorted_bin_edges", "status": status}]
++    open("test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++    print("EXCEPTION", type(e).__name__, msg)
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..f8d437b08
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_kbins_repro.py::test_kmeans_unsorted_bin_edges",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,42 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..371ed86b9c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,29 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Ensure Django is available (best-effort)
++python -m pip install --quiet Django >/tmp/pip_install.out 2>&1 || true
++
++OUTPUT_FILE=/tmp/runserver_output2.txt
++# Run the runserver command with the candidate option; don't block on server start
++set +e
++django-admin runserver --skip-checks --noreload --nothreading >"$OUTPUT_FILE" 2>&1 < /dev/null
++EXIT_CODE=$?
++set -e
++
++OUTPUT=$(sed -n '1,400p' "$OUTPUT_FILE" || true)
++
++STATUS="PASSED"
++if [ $EXIT_CODE -ne 0 ]; then
++  STATUS="FAILED"
++fi
++
++mkdir -p /testbed
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"tests/django_runserver_skip_checks_option_test","status":"${STATUS}"}]}
++JSON
++
++# Print diagnostics
++echo "Exit code: $EXIT_CODE"
++echo "---- captured output ----"
++printf '%s\n' "$OUTPUT"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..3b23286bff
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"tests/django_runserver_skip_checks_option_test","status":"FAILED"}]}

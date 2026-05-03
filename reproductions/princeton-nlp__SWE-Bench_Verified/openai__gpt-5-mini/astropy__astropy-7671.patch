@@ -1,0 +1,80 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..0b0ad19d9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,36 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python /testbed/test_minversion.py 2>&1 || true)
++
++# Determine statuses from the real output
++test1_status="FAILED"
++test2_status="FAILED"
++
++if echo "$output" | grep -q "RESULT1: False"; then
++  test1_status="PASSED"
++elif echo "$output" | grep -q "RESULT1: True"; then
++  test1_status="FAILED"
++else
++  test1_status="ERROR"
++fi
++
++if echo "$output" | grep -q "EXCEPTION_TYPE: TypeError"; then
++  test2_status="FAILED"
++elif echo "$output" | grep -q "RESULT2:"; then
++  test2_status="PASSED"
++else
++  test2_status="ERROR"
++fi
++
++python - <<PY "$output" "$test1_status" "$test2_status"
++import json, sys
++out=sys.argv[1]
++t1=sys.argv[2]
++t2=sys.argv[3]
++tests=[
++  {"name":"testbed/test_minversion.py::test_looseversion_simple","status": t1},
++  {"name":"testbed/test_minversion.py::test_looseversion_buggy_compare","status": t2}
++]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print(out)
++PY
+diff --git a/test_minversion.py b/test_minversion.py
+new file mode 100644
+index 000000000..f112aef4c
+--- /dev/null
++++ b/test_minversion.py
+@@ -0,0 +1,13 @@
++from distutils.version import LooseVersion
++
++print("STARTING TESTS")
++print("RESULT1:", LooseVersion('1.14') >= LooseVersion('1.14dev'))
++# The next line may raise TypeError in some Python/distutils versions
++try:
++    res = LooseVersion('1.14.3') >= LooseVersion('1.14dev')
++    print("RESULT2:", res)
++except Exception as e:
++    import traceback, sys
++    print("EXCEPTION_TYPE:", type(e).__name__)
++    traceback.print_exc(file=sys.stdout)
++print("END OF TESTS")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..8a5831cde
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_minversion.py::test_looseversion_simple",
++      "status": "PASSED"
++    },
++    {
++      "name": "testbed/test_minversion.py::test_looseversion_buggy_compare",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

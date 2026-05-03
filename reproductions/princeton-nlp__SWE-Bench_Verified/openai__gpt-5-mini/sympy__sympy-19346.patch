@@ -1,0 +1,84 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..32dcefb95a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,33 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++python3 - <<'PY_INNER' "$output"
++import sys, json
++out = sys.argv[1]
++tests = []
++cases = [
++    ("test_reproduction.py::test_srepr_list","LIST:"),
++    ("test_reproduction.py::test_srepr_tuple","TUPLE:"),
++    ("test_reproduction.py::test_srepr_set","SET:"),
++    ("test_reproduction.py::test_srepr_dict","DICT:")
++]
++for name,label in cases:
++    status = "ERROR"
++    for line in out.splitlines():
++        if line.startswith("IMPORT_ERROR:"):
++            status = "ERROR"
++            break
++        if line.startswith(label):
++            val = line[len(label):].strip()
++            # Consider correct if Symbol('x') is present
++            if "Symbol('x')" in val:
++                status = "PASSED"
++            else:
++                status = "FAILED"
++            break
++    tests.append({"name": name, "status": status})
++open("test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE /testbed/test_status.json")
++PY_INNER
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..42e9817529
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,12 @@
++import sys
++try:
++    from sympy import srepr
++    from sympy.abc import x,y
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    sys.exit(0)
++
++print("LIST:", srepr([x,y]))
++print("TUPLE:", srepr((x,y)))
++print("SET:", srepr({x,y}))
++print("DICT:", srepr({x:y}))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e1cecd1ab7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_srepr_list",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_srepr_tuple",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_srepr_set",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_srepr_dict",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

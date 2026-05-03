@@ -1,0 +1,122 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 0000000000..8142ec1eff
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,65 @@
++#!/bin/bash
++set -euo pipefail
++# Create the reproduction Python script
++cat > /testbed/test_reproduction.py <<'PY'
++import numpy as np
++# Build a standard flat-top window (Harris' flat top)
++def flattop(M):
++    if M < 1:
++        return np.array([])
++    if M == 1:
++        return np.array([1.0])
++    n = np.arange(0, M)
++    a0 = 1.0
++    a1 = 1.93
++    a2 = 1.29
++    a3 = 0.388
++    a4 = 0.028
++    fac = 2.0 * np.pi * n / (M - 1)
++    w = (a0
++         - a1 * np.cos(fac)
++         + a2 * np.cos(2 * fac)
++         - a3 * np.cos(3 * fac)
++         + a4 * np.cos(4 * fac))
++    return w
++
++if __name__ == "__main__":
++    M = 512
++    w = flattop(M)
++    diff = np.abs(w).sum()**2 - w.sum()**2
++    print("MIN:", w.min())
++    print("SUM:", w.sum())
++    print("ABS_SUM:", np.abs(w).sum())
++    print("DIFF:", diff)
++PY
++
++# Run the reproduction and capture output
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Extract DIFF value
++diff_line=$(echo "$output" | sed -n 's/.*DIFF: //p' || true)
++
++# Prepare test status JSON based on diff
++if [ -n "$diff_line" ]; then
++  python3 - <<PYCODE "$diff_line"
++import sys, json
++out = {"tests": []}
++try:
++    d = float(sys.argv[1])
++except Exception:
++    status = "ERROR"
++else:
++    status = "PASSED" if abs(d) < 1e-12 else "FAILED"
++out["tests"].append({"name": "/testbed/test_reproduction.py::test_windows_correction", "status": status})
++open("/testbed/test_status.json","w").write(json.dumps(out, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PYCODE
++else
++  python3 - <<PYCODE
++import json
++out = {"tests": [{"name": "/testbed/test_reproduction.py::test_windows_correction", "status": "ERROR"}]}
++open("/testbed/test_status.json","w").write(json.dumps(out, indent=2))
++print("Could not parse DIFF; wrote ERROR status to /testbed/test_status.json")
++PYCODE
++fi
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..3d68fa5697
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,30 @@
++import numpy as np
++# Build a standard flat-top window (Harris' flat top) without SciPy dependency
++def flattop(M):
++    if M < 1:
++        return np.array([])
++    if M == 1:
++        return np.array([1.0])
++    n = np.arange(0, M)
++    a0 = 1.0
++    a1 = 1.93
++    a2 = 1.29
++    a3 = 0.388
++    a4 = 0.028
++    # Note: uses M-1 denominator like many window implementations
++    fac = 2.0 * np.pi * n / (M - 1)
++    w = (a0
++         - a1 * np.cos(fac)
++         + a2 * np.cos(2 * fac)
++         - a3 * np.cos(3 * fac)
++         + a4 * np.cos(4 * fac))
++    return w
++
++if __name__ == "__main__":
++    M = 512
++    w = flattop(M)
++    diff = np.abs(w).sum()**2 - w.sum()**2
++    print("MIN:", w.min())
++    print("SUM:", w.sum())
++    print("ABS_SUM:", np.abs(w).sum())
++    print("DIFF:", diff)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..27ef05c275
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/inline_repro::test_windows_correction",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

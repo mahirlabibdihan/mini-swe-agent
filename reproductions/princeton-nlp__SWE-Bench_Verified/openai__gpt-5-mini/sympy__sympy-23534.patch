@@ -1,0 +1,123 @@
+diff --git a/parse_output.py b/parse_output.py
+new file mode 100644
+index 0000000000..15b69a0dd1
+--- /dev/null
++++ b/parse_output.py
+@@ -0,0 +1,20 @@
++import sys, json, re
++from pathlib import Path
++out = sys.argv[1] if len(sys.argv) > 1 else ""
++tests = []
++for line in out.splitlines():
++    m = re.match(r"^CASE name=(\w+) is_symbol=(True|False)", line)
++    if m:
++        name = m.group(1)
++        is_symbol = m.group(2) == "True"
++        status = "FAILED" if is_symbol else "PASSED"
++        tests.append({"name": f"test_reproduction.py::{name}", "status": status})
++        continue
++    m2 = re.match(r"^CASE name=(\w+) ERROR", line)
++    if m2:
++        name = m2.group(1)
++        tests.append({"name": f"test_reproduction.py::{name}", "status": "ERROR"})
++if not tests:
++    tests.append({"name":"test_reproduction.py::reproduction","status":"ERROR"})
++Path("test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print("WROTE test_status.json")
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a3a941e461
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,20 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Ensure sympy==1.10.1 is installed
++if ! python3 -c 'import sympy,sys; print(sympy.__version__)' >/dev/null 2>&1; then
++  pip3 install sympy==1.10.1 -q
++else
++  ver=$(python3 -c 'import sympy,sys; print(sympy.__version__)')
++  if [ "$ver" != "1.10.1" ]; then
++    pip3 install sympy==1.10.1 -q
++  fi
++fi
++
++# Run the reproduction script and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Parse and write test_status.json
++python3 parse_output.py "$output"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..6ccbfa749e
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,19 @@
++import sympy as smp
++
++def run():
++    try:
++        q,u = smp.symbols("q:2", "u:2", cls=smp.Function)
++        q0 = q[0]
++        print(f"CASE name=no_parens is_symbol={isinstance(q0, smp.Symbol)} type={type(q0)}")
++    except Exception as e:
++        print(f"CASE name=no_parens ERROR {e!r}")
++
++    try:
++        q2,u2 = smp.symbols(("q:2", "u:2"), cls=smp.Function)
++        q20 = q2[0]
++        print(f"CASE name=parens is_symbol={isinstance(q20, smp.Symbol)} type={type(q20)}")
++    except Exception as e:
++        print(f"CASE name=parens ERROR {e!r}")
++
++if __name__ == "__main__":
++    run()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..007e204ed5
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::no_parens",
++      "status": "ERROR"
++    },
++    {
++      "name": "test_reproduction.py::parens",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testbed/test_reproduction.py b/testbed/test_reproduction.py
+new file mode 100644
+index 0000000000..387068c729
+--- /dev/null
++++ b/testbed/test_reproduction.py
+@@ -0,0 +1,21 @@
++import sympy as smp
++
++def run():
++    # Case 1: passing as two separate strings (no extra parentheses)
++    try:
++        q,u = smp.symbols('q:2', 'u:2', cls=smp.Function)
++        q0 = q[0]
++        print(f"CASE name=no_parens is_symbol={isinstance(q0, smp.Symbol)} type={type(q0)}")
++    except Exception as e:
++        print(f"CASE name=no_parens ERROR {e!r}")
++
++    # Case 2: passing a single tuple (extra parentheses)
++    try:
++        q2,u2 = smp.symbols(('q:2', 'u:2'), cls=smp.Function)
++        q20 = q2[0]
++        print(f"CASE name=parens is_symbol={isinstance(q20, smp.Symbol)} type={type(q20)}")
++    except Exception as e:
++        print(f"CASE name=parens ERROR {e!r}")
++
++if __name__ == '__main__':
++    run()

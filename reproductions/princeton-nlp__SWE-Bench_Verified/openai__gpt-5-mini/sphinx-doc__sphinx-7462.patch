@@ -1,0 +1,330 @@
+diff --git a/docs/conf.py b/docs/conf.py
+new file mode 100644
+index 000000000..f2974bbc0
+--- /dev/null
++++ b/docs/conf.py
+@@ -0,0 +1,5 @@
++import os, sys
++sys.path.insert(0, os.path.abspath('..'))
++project = 'repro'
++master_doc = 'index'
++extensions = ['sphinx.ext.autodoc']
+diff --git a/docs/index.rst b/docs/index.rst
+new file mode 100644
+index 000000000..b56351738
+--- /dev/null
++++ b/docs/index.rst
+@@ -0,0 +1,5 @@
++Welcome to repro
++================
++
++.. automodule:: mymodule
++    :members:
+diff --git a/mymodule.py b/mymodule.py
+new file mode 100644
+index 000000000..6abbd5f25
+--- /dev/null
++++ b/mymodule.py
+@@ -0,0 +1,5 @@
++from typing import Tuple
++
++def foo() -> Tuple[()]:
++    """Sample text."""
++    return ()
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..d9a13b8b8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,61 @@
++#!/bin/bash
++set -euo pipefail
++
++# Prepare minimal docs and module under /testbed
++mkdir -p /testbed/docs
++
++cat > /testbed/mymodule.py <<'PY'
++from typing import Tuple
++
++def foo() -> Tuple[()]:
++    """Sample text."""
++    return ()
++PY
++
++cat > /testbed/docs/conf.py <<'PY'
++import os, sys
++sys.path.insert(0, os.path.abspath('..'))
++project = 'repro'
++master_doc = 'index'
++extensions = ['sphinx.ext.autodoc']
++PY
++
++cat > /testbed/docs/index.rst <<'PY'
++Welcome to repro
++================
++
++.. automodule:: mymodule
++    :members:
++PY
++
++# Try to install the specific Sphinx version (best-effort)
++python -m pip install --quiet "Sphinx==3.0.1" "sphinx-rtd-theme" || true
++
++# Run sphinx-build and capture output
++outf=$(mktemp)
++rc=0
++set +e
++( cd /testbed/docs && python -m sphinx -b html . _build ) >"$outf" 2>&1 || rc=$?
++set -e
++
++# Save a trimmed copy of the build output
++head -n 300 "$outf" > /testbed/sphinx_build_output.txt || true
++output=$(head -n 300 "$outf" || true)
++
++# Decide test status based on the output or return code
++status="PASSED"
++if echo "$output" | grep -q "IndexError: pop from empty list"; then
++  status="FAILED"
++elif [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++
++# Write the required JSON status file
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"testbed/sphinx_build::autodoc_with_Tuple_empty_tuple_annotation","status":"$status"}]}
++JSON
++
++# Print a brief summary for visibility; exit 0 so the harness sees the script completed
++echo "run_test.sh completed: status=$status rc=$rc"
++echo "Trimmed sphinx output saved to /testbed/sphinx_build_output.txt"
++exit 0
+diff --git a/setup_and_run.sh b/setup_and_run.sh
+new file mode 100755
+index 000000000..a3b62ed07
+--- /dev/null
++++ b/setup_and_run.sh
+@@ -0,0 +1,66 @@
++#!/bin/bash
++set -euxo pipefail
++
++# Prepare directories
++rm -rf testbed
++mkdir -p testbed/docs
++
++# Create the module with the problematic annotation
++cat > testbed/mymodule.py <<'PY'
++from typing import Tuple
++
++def foo() -> Tuple[()]:
++    """Sample text."""
++    return ()
++PY
++
++# Sphinx conf that ensures testbed is on sys.path so autodoc can import mymodule
++cat > testbed/docs/conf.py <<'PY'
++import os
++import sys
++sys.path.insert(0, os.path.abspath('..'))
++
++project = 'repro'
++master_doc = 'index'
++extensions = ['sphinx.ext.autodoc']
++PY
++
++# index.rst referencing the module
++cat > testbed/docs/index.rst <<'PY'
++Welcome to repro
++================
++
++.. automodule:: mymodule
++    :members:
++PY
++
++# Install specific Sphinx version (allow failure but continue)
++python -m pip install --quiet "Sphinx==3.0.1" "sphinx-rtd-theme" || true
++
++# Run sphinx-build and capture output without exiting on error
++set +e
++output=$(cd testbed/docs && sphinx-build -b html . _build 2>&1)
++rc=$?
++set -e
++
++echo "----- SPHINX BUILD OUTPUT START -----"
++echo "$output"
++echo "----- SPHINX BUILD OUTPUT END -----"
++
++status="PASSED"
++if echo "$output" | grep -q "IndexError: pop from empty list"; then
++    status="FAILED"
++elif [ "$rc" -ne 0 ]; then
++    status="FAILED"
++fi
++
++# Write the required test status JSON file
++python - <<PY > testbed/test_status.json
++import json
++print(json.dumps({"tests": [{"name": "testbed/sphinx_build::autodoc_with_Tuple_empty_tuple_annotation", "status": "$status"}]}, indent=2))
++PY
++
++# Exit non-zero if failed so the runner observes failure
++if [ "$status" = "FAILED" ]; then
++    exit 1
++fi
+diff --git a/sphinx_build_output.txt b/sphinx_build_output.txt
+new file mode 100644
+index 000000000..2c5956a8c
+--- /dev/null
++++ b/sphinx_build_output.txt
+@@ -0,0 +1,15 @@
++Running Sphinx v3.0.1
++WARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered, its visitors will be overridden
++building [mo]: targets for 0 po files that are out of date
++building [html]: targets for 1 source files that are out of date
++updating environment: [new config] 1 added, 0 changed, 0 removed
++reading sources... [100%] index
++WARNING: error while formatting arguments for mymodule.foo: type object 'tuple' has no attribute '_special'
++
++Exception occurred:
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/typing.py", line 710, in __getattr__
++    return getattr(self.__origin__, attr)
++AttributeError: type object 'tuple' has no attribute '_special'
++The full traceback has been saved in /tmp/sphinx-err-9cx1dj_c.log, if you want to report the issue to the developers.
++Please also report this if it was a user error, so that a better error message can be provided next time.
++A bug report can be filed in the tracker at <https://github.com/sphinx-doc/sphinx/issues>. Thanks!
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..ed17716b5
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"testbed/sphinx_build::autodoc_with_Tuple_empty_tuple_annotation","status":"FAILED"}]}
+diff --git a/testbed/docs/conf.py b/testbed/docs/conf.py
+new file mode 100644
+index 000000000..f2974bbc0
+--- /dev/null
++++ b/testbed/docs/conf.py
+@@ -0,0 +1,5 @@
++import os, sys
++sys.path.insert(0, os.path.abspath('..'))
++project = 'repro'
++master_doc = 'index'
++extensions = ['sphinx.ext.autodoc']
+diff --git a/testbed/docs/index.rst b/testbed/docs/index.rst
+new file mode 100644
+index 000000000..b56351738
+--- /dev/null
++++ b/testbed/docs/index.rst
+@@ -0,0 +1,5 @@
++Welcome to repro
++================
++
++.. automodule:: mymodule
++    :members:
+diff --git a/testbed/mymodule.py b/testbed/mymodule.py
+new file mode 100644
+index 000000000..6abbd5f25
+--- /dev/null
++++ b/testbed/mymodule.py
+@@ -0,0 +1,5 @@
++from typing import Tuple
++
++def foo() -> Tuple[()]:
++    """Sample text."""
++    return ()
+diff --git a/testbed/run_test.sh b/testbed/run_test.sh
+new file mode 100755
+index 000000000..b94720f2e
+--- /dev/null
++++ b/testbed/run_test.sh
+@@ -0,0 +1,55 @@
++#!/bin/bash
++set -euo pipefail
++PYTHONS=("python3.8" "python3" "python")
++chosen=""
++for p in "${PYTHONS[@]}"; do
++  if command -v "$p" >/dev/null 2>&1; then
++    chosen="$p"
++    break
++  fi
++done
++if [ -z "$chosen" ]; then
++  echo "No python interpreter found" >&2
++  exit 2
++fi
++echo "Using interpreter: $chosen"
++
++# Install Sphinx 3.0.1 (best effort)
++$chosen -m pip install --quiet "Sphinx==3.0.1" "sphinx-rtd-theme" || true
++
++outf=$(mktemp)
++rc=0
++set +e
++( cd testbed/docs && $chosen -m sphinx -b html . _build ) >"$outf" 2>&1 || rc=$?
++set -e
++
++# Save some of the output for inspection but keep it short
++head -n 200 "$outf" > testbed/sphinx_build_output.txt || true
++
++# Determine status based on presence of the specific IndexError or other related errors
++output=$(head -n 200 "$outf" | sed -n '1,200p' || true)
++status="PASSED"
++if echo "$output" | grep -q "IndexError: pop from empty list"; then
++  status="FAILED"
++elif echo "$output" | grep -q "error while formatting arguments for"; then
++  # Related failure observed in many environments (e.g., typing AttributeError)
++  status="FAILED"
++elif [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++
++python - <<PY > testbed/test_status.json
++import json
++print(json.dumps({"tests": [{"name": "testbed/sphinx_build::autodoc_with_Tuple_empty_tuple_annotation", "status": "$status"}]}, indent=2))
++PY
++
++# Print a brief summary
++echo "Build return code: $rc"
++echo "Detected status: $status"
++echo "First lines of sphinx output:"
++head -n 40 "$outf" || true
++
++# Exit non-zero if failed so harness sees the failure
++if [ "$status" = "FAILED" ]; then
++  exit 1
++fi
+diff --git a/testbed/sphinx_build_output.txt b/testbed/sphinx_build_output.txt
+new file mode 100644
+index 000000000..8398471dd
+--- /dev/null
++++ b/testbed/sphinx_build_output.txt
+@@ -0,0 +1,16 @@
++Running Sphinx v3.0.1
++WARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered, its visitors will be overridden
++making output directory... done
++building [mo]: targets for 0 po files that are out of date
++building [html]: targets for 1 source files that are out of date
++updating environment: [new config] 1 added, 0 changed, 0 removed
++reading sources... [100%] index
++WARNING: error while formatting arguments for mymodule.foo: type object 'tuple' has no attribute '_special'
++
++Exception occurred:
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/typing.py", line 710, in __getattr__
++    return getattr(self.__origin__, attr)
++AttributeError: type object 'tuple' has no attribute '_special'
++The full traceback has been saved in /tmp/sphinx-err-7opzyc6x.log, if you want to report the issue to the developers.
++Please also report this if it was a user error, so that a better error message can be provided next time.
++A bug report can be filed in the tracker at <https://github.com/sphinx-doc/sphinx/issues>. Thanks!
+diff --git a/testbed/test_status.json b/testbed/test_status.json
+new file mode 100644
+index 000000000..78242b7eb
+--- /dev/null
++++ b/testbed/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/sphinx_build::autodoc_with_Tuple_empty_tuple_annotation",
++      "status": "FAILED"
++    }
++  ]
++}

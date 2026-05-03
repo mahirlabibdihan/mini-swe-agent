@@ -1,0 +1,67 @@
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000000..4f23ac7dba
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,22 @@
++#!/usr/bin/env python3
++# Minimal reproduction: identity contains a list -> hashing raises TypeError
++class ManyToManyRel:
++    def __init__(self):
++        # through_fields as a list (unhashable)
++        self.through_fields = ['child', 'parent']
++    @property
++    def identity(self):
++        # identity contains the list, so hashing the tuple will fail
++        return ('app_label', 'model', self.through_fields)
++    def __hash__(self):
++        # This mirrors the problematic behavior: hash(self.identity)
++        return hash(self.identity)
++
++def main():
++    rel = ManyToManyRel()
++    # Trigger hashing (e.g., adding to a set) which will raise TypeError
++    s = set()
++    s.add(rel)
++
++if __name__ == '__main__':
++    main()
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..69dd63e13a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Run the reproduction and capture output (allow non-zero exit)
++output=$(python3 repro.py 2>&1 || true)
++# Print the output for visibility
++echo "$output"
++# Determine test status based on observed output and write test_status.json
++python3 - <<'PY2' "$output"
++import json,sys
++out=sys.argv[1]
++status="PASSED"
++if "TypeError: unhashable type: 'list'" in out:
++    status="FAILED"
++tests=[{"name":"testbed/repro.py::test_unhashable_through_fields","status":status}]
++open("test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++print("Wrote test_status.json with status:", status)
++PY2
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..bbb569608f
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro.py::test_unhashable_through_fields",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

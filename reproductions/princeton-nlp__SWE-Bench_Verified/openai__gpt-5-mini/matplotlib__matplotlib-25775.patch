@@ -1,0 +1,78 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..cc937ea7dd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++# Run the test but always exit 0 so the harness sees the script executed;
++# still record the actual test outcome in /testbed/test_status.json.
++python /testbed/test_reproduction.py
++rc=$?
++if [ "$rc" -eq 0 ]; then
++  status="PASSED"
++elif [ "$rc" -eq 1 ]; then
++  status="FAILED"
++elif [ "$rc" -eq 2 ]; then
++  status="SKIPPED"
++else
++  status="ERROR"
++fi
++mkdir -p /testbed
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"test_reproduction.py::test_text_antialiased","status":"$status"}]}
++JSON
++echo "Wrote /testbed/test_status.json with status $status"
++# Always exit 0 so the runner doesn't treat this as a script execution failure.
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..e7d2ac50d1
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,38 @@
++#!/usr/bin/env python3
++import sys
++try:
++    import matplotlib
++    from matplotlib import rcParams
++    from matplotlib.text import Text
++except Exception as e:
++    print("SKIP: matplotlib not available:", e, file=sys.stderr)
++    sys.exit(2)
++
++orig = rcParams.get("text.antialiased", None)
++try:
++    rcParams["text.antialiased"] = False
++    t = Text(0, 0, "x")
++    try:
++        t.set_antialiased(True)
++    except AttributeError as e:
++        print("FAIL: Text.set_antialiased missing:", e, file=sys.stderr)
++        sys.exit(1)
++    try:
++        got = t.get_antialiased()
++    except AttributeError as e:
++        print("FAIL: Text.get_antialiased missing:", e, file=sys.stderr)
++        sys.exit(1)
++
++    print("rcParams['text.antialiased'] =", rcParams["text.antialiased"])
++    print("After t.set_antialiased(True), t.get_antialiased() ->", got)
++    if got is True:
++        print("Test PASSED: per-artist antialiased respected")
++        sys.exit(0)
++    else:
++        print("Test FAILED: Text prefers rcParams over per-artist setting", file=sys.stderr)
++        sys.exit(1)
++finally:
++    if orig is None:
++        rcParams.pop("text.antialiased", None)
++    else:
++        rcParams["text.antialiased"] = orig
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..a87db12594
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py::test_text_antialiased","status":"FAILED"}]}

@@ -1,0 +1,74 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..62d660bb5b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,10 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++python3 test_reproduction.py 2>&1 || true
++# Ensure the test status file exists (the python script writes it)
++if [ ! -f /testbed/test_status.json ]; then
++  echo '{"tests": [{"name": "test_reproduction.py::run", "status": "ERROR"}]}' > /testbed/test_status.json
++fi
++# Print the results for visibility
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..9888fade21
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,33 @@
++import sys, traceback, json
++OUT_PATH = "/testbed/test_status.json"
++tests = []
++try:
++    from django.utils.html import json_script
++except Exception as e:
++    # Could not import json_script; mark as ERROR for both tests and record the import error message
++    tests.append({"name": "test_reproduction.py::test_call_without_id", "status": "ERROR"})
++    tests.append({"name": "test_reproduction.py::test_call_with_none", "status": "ERROR"})
++    open(OUT_PATH, "w").write(json.dumps({"tests": tests}, indent=2))
++    print("IMPORT_ERROR:", str(e))
++    sys.exit(0)
++
++# Test 1: call without providing element_id
++try:
++    json_script({"a": 1})
++    tests.append({"name": "test_reproduction.py::test_call_without_id", "status": "PASSED"})
++    print("test_call_without_id: PASSED")
++except Exception as e:
++    print("test_call_without_id: FAILED with exception:", repr(e))
++    tests.append({"name": "test_reproduction.py::test_call_without_id", "status": "FAILED"})
++
++# Test 2: call with element_id explicitly set to None
++try:
++    json_script({"a": 1}, None)
++    tests.append({"name": "test_reproduction.py::test_call_with_none", "status": "PASSED"})
++    print("test_call_with_none: PASSED")
++except Exception as e:
++    print("test_call_with_none: FAILED with exception:", repr(e))
++    tests.append({"name": "test_reproduction.py::test_call_with_none", "status": "FAILED"})
++
++open(OUT_PATH, "w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE:", OUT_PATH)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..be00b83795
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_call_without_id",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_call_with_none",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,228 @@
+diff --git a/app/__init__.py b/app/__init__.py
+new file mode 100644
+index 0000000000..b9d56a44ca
+--- /dev/null
++++ b/app/__init__.py
+@@ -0,0 +1 @@
++# app package
+diff --git a/app/models.py b/app/models.py
+new file mode 100644
+index 0000000000..8a2bfd47c2
+--- /dev/null
++++ b/app/models.py
+@@ -0,0 +1,11 @@
++from django.db import models
++
++class Item(models.Model):
++    uid = models.AutoField(primary_key=True, editable=False)
++    f = models.BooleanField(default=False)
++    def reset(self):
++        self.uid = None
++        self.f = False
++
++class Derived(Item):
++    pass
+diff --git a/app/tests.py b/app/tests.py
+new file mode 100644
+index 0000000000..632e7c001c
+--- /dev/null
++++ b/app/tests.py
+@@ -0,0 +1,15 @@
++from django.test import TestCase
++from .models import Item, Derived
++
++class SaveTestCase(TestCase):
++    def setUp(self):
++        # create the first object
++        self.derived = Derived.objects.create(f=True)
++        item = Item.objects.get(pk=self.derived.pk)
++        obj1 = item.derived
++        obj1.reset()
++        obj1.save()  # the reported bug: this may overwrite the first object
++
++    def test_f_true(self):
++        obj = Item.objects.get(pk=self.derived.pk)
++        self.assertTrue(obj.f)
+diff --git a/manage.py b/manage.py
+new file mode 100755
+index 0000000000..8d55c46910
+--- /dev/null
++++ b/manage.py
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python
++import os, sys
++if __name__ == '__main__':
++    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'proj.settings')
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
+diff --git a/proj/__init__.py b/proj/__init__.py
+new file mode 100644
+index 0000000000..31be87831f
+--- /dev/null
++++ b/proj/__init__.py
+@@ -0,0 +1 @@
++# proj package
+diff --git a/proj/settings.py b/proj/settings.py
+new file mode 100644
+index 0000000000..5ee9fdda46
+--- /dev/null
++++ b/proj/settings.py
+@@ -0,0 +1,19 @@
++SECRET_KEY = 'test-secret'
++DEBUG = True
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'app',
++]
++MIDDLEWARE = []
++ROOT_URLCONF = ''
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': 'db.sqlite3',
++    }
++}
++# Disable migrations for the app to let tests create tables without migration files
++MIGRATION_MODULES = {
++    'app': None,
++}
++USE_TZ = False
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..09cd38d8f4
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -eu
++cd /testbed
++# Run tests but don't let a non-zero test result abort the script
++set +e
++output="$(python3 manage.py test app 2>&1)"
++rc=$?
++set -e
++echo "$output"
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++# Write machine-readable test result
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "app/tests.py::SaveTestCase::test_f_true", "status": "$status"}]}
++JSON
++# Exit 0 so the runner treats the script execution as successful (test result is recorded)
++exit 0
+diff --git a/setup_and_run.sh b/setup_and_run.sh
+new file mode 100644
+index 0000000000..ed3a402b29
+--- /dev/null
++++ b/setup_and_run.sh
+@@ -0,0 +1,101 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed/app /testbed/proj
++
++cat > /testbed/manage.py <<'PY'
++#!/usr/bin/env python
++import os, sys
++if __name__ == '__main__':
++    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'proj.settings')
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
++PY
++chmod +x /testbed/manage.py
++
++cat > /testbed/proj/__init__.py <<'PY'
++# proj package
++PY
++
++cat > /testbed/proj/settings.py <<'PY'
++SECRET_KEY = 'test-secret'
++DEBUG = True
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'app',
++]
++MIDDLEWARE = []
++ROOT_URLCONF = ''
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': 'db.sqlite3',
++    }
++}
++MIGRATION_MODULES = {
++    'app': None,
++}
++USE_TZ = False
++PY
++
++cat > /testbed/app/__init__.py <<'PY'
++# app package
++PY
++
++cat > /testbed/app/models.py <<'PY'
++from django.db import models
++
++class Item(models.Model):
++    uid = models.AutoField(primary_key=True, editable=False)
++    f = models.BooleanField(default=False)
++    def reset(self):
++        self.uid = None
++        self.f = False
++
++class Derived(Item):
++    pass
++PY
++
++cat > /testbed/app/tests.py <<'PY'
++from django.test import TestCase
++from .models import Item, Derived
++
++class SaveTestCase(TestCase):
++    def setUp(self):
++        # create the first object
++        self.derived = Derived.objects.create(f=True)
++        item = Item.objects.get(pk=self.derived.pk)
++        obj1 = item.derived
++        obj1.reset()
++        obj1.save()  # the reported bug: this may overwrite the first object
++
++    def test_f_true(self):
++        obj = Item.objects.get(pk=self.derived.pk)
++        self.assertTrue(obj.f)
++PY
++
++cat > /testbed/run_test.sh <<'PY'
++#!/bin/bash
++set -u
++cd /testbed
++# Run Django tests and capture output and exit code
++output=$(python3 manage.py test app 2>&1)
++rc=$?
++echo "$output"
++status="PASSED"
++if [ $rc -ne 0 ]; then
++  status="FAILED"
++fi
++# Write machine-readable test result
++cat > test_status.json <<JSON
++{"tests": [{"name": "app/tests.py::SaveTestCase::test_f_true", "status": "$status"}]}
++JSON
++exit $rc
++PY
++
++chmod +x /testbed/run_test.sh
++
++# Install Django 2.1.2 to match the report
++python3 -m pip install --quiet "Django==2.1.2"
++
++# Run the tests
++bash /testbed/run_test.sh
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..569811092a
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "app/tests.py::SaveTestCase::test_f_true", "status": "FAILED"}]}

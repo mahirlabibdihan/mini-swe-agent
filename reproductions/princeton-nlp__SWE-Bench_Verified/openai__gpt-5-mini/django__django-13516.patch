@@ -1,0 +1,87 @@
+diff --git a/manage_migrate_sim.py b/manage_migrate_sim.py
+new file mode 100644
+index 0000000000..7c841da091
+--- /dev/null
++++ b/manage_migrate_sim.py
+@@ -0,0 +1,24 @@
++import sys, io, time
++
++orig_err = sys.stderr
++buf = io.StringIO()
++sys.stderr = buf
++
++def w(s):
++    sys.stderr.write(s)
++    try:
++        sys.stderr.flush()
++        orig_err.write("[FLUSH CALLED]\n")
++    except Exception as e:
++        orig_err.write("[FLUSH FAILED: %r]\n" % (e,))
++
++w("Operations to perform:\n Apply all migrations: myapp\n")
++w("Running migrations:\n")
++# Simulate a long-running migration where intermediate writes (and flush calls) go to the buffer
++time.sleep(2)
++w(" Applying myapp.0002_auto_20200817_1030...")
++time.sleep(1)
++w(" OK\n")
++
++# At the end, emit the buffered content to the real stderr (simulating flush() not showing progress)
++orig_err.write(buf.getvalue())
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..47d48aa558
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,8 @@
++[FLUSH CALLED]
++[FLUSH CALLED]
++[FLUSH CALLED]
++[FLUSH CALLED]
++Operations to perform:
++ Apply all migrations: myapp
++Running migrations:
++ Applying myapp.0002_auto_20200817_1030... OK
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..48e6de1797
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++cd "."
++
++# Run the simulated management command and capture combined output to a file
++python manage_migrate_sim.py 2>&1 | tee run_output.txt || true
++
++# If the 'Applying' line appears after 'Running migrations:', that's the reproduced failure -> mark FAILED
++python - <<'PY'
++import json
++from pathlib import Path
++s = Path('run_output.txt').read_text()
++r = s.find('Running migrations:')
++a = s.find('Applying myapp.0002')
++if r >= 0 and a >= 0 and a > r:
++    status = 'FAILED'
++else:
++    status = 'PASSED'
++tests = [{'name': 'testbed/manage_migrate_sim.py::test_migration_flush', 'status': status}]
++Path('test_status.json').write_text(json.dumps({'tests': tests}, indent=2))
++print(s)
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..6721637636
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/manage_migrate_sim.py::test_migration_flush",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,102 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..4353f34e55
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++echo "$output"
++# If reproduction observed, mark the test as FAILED to indicate a bug exists (per CI requirement)
++if echo "$output" | grep -q "REPRODUCED"; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++python3 - <<PY "$output" "$status"
++import json, sys
++out=sys.argv[1]
++status=sys.argv[2]
++tests=[{"name":"/testbed/test_repro.py::test_extra_zero_allows_new_forms","status": status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print("WROTE /testbed/test_status.json with status", status)
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..5ea8d78e5c
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,57 @@
++#!/usr/bin/env python3
++import sys
++# Configure minimal Django settings before importing forms and initialize apps
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        SECRET_KEY='test-secret-key',
++        FORM_RENDERER='django.forms.renderers.DjangoTemplates',
++        TEMPLATES=[{
++            'BACKEND': 'django.template.backends.django.DjangoTemplates',
++            'APP_DIRS': True,
++            'OPTIONS': {},
++        }],
++        INSTALLED_APPS=[],
++        USE_I18N=True,
++        LANGUAGE_CODE='en-us',
++    )
++
++import django
++django.setup()
++
++from django import forms
++from django.forms import formset_factory
++
++def main():
++    ItemForm = type('ItemForm', (forms.Form,), {'name': forms.CharField()})
++    fs = formset_factory(ItemForm, extra=0)
++
++    data = {
++        'form-TOTAL_FORMS': '3',
++        'form-INITIAL_FORMS': '1',
++        'form-MIN_NUM_FORMS': '0',
++        'form-MAX_NUM_FORMS': '1000',
++        'form-0-name': 'existing updated',
++        'form-1-name': 'new1',
++        'form-2-name': 'new2',
++    }
++
++    formset = fs(data)
++    valid = formset.is_valid()
++    num_forms = len(formset)
++    print("is_valid:", valid)
++    print("num_forms:", num_forms)
++    if valid:
++        print("cleaned_data:", formset.cleaned_data)
++    else:
++        print("errors:", [f.errors for f in formset])
++
++    if valid and num_forms == 3:
++        print("REPRODUCED: extra=0 did not prevent additional submitted forms")
++        sys.exit(0)
++    else:
++        print("NOT_REPRODUCED")
++        sys.exit(1)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e49beaeee3
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_repro.py::test_extra_zero_allows_new_forms",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

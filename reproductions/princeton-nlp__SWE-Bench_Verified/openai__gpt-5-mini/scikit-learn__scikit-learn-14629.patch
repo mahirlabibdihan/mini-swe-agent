@@ -1,0 +1,71 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 000000000..e9e038341
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,45 @@
++#!/bin/bash
++# Creates the reproduction script, runs it, captures output, and writes /testbed/test_status.json.
++set -u
++mkdir -p /testbed
++
++cat > /testbed/test_reproduction.py <<'PY'
++import traceback
++try:
++    from sklearn.datasets import make_multilabel_classification
++    from sklearn.multioutput import MultiOutputClassifier
++    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
++    from sklearn.model_selection import cross_val_predict
++
++    X, Y = make_multilabel_classification(n_samples=100, n_features=20, n_classes=3, random_state=0)
++    mo_lda = MultiOutputClassifier(LinearDiscriminantAnalysis())
++    # baseline predict (should work)
++    pred = cross_val_predict(mo_lda, X, Y, cv=5)
++    print("predict OK, shape:", getattr(pred, "shape", None))
++    # This is the call reported to raise AttributeError in the PR description
++    pred_proba = cross_val_predict(mo_lda, X, Y, cv=5, method='predict_proba')
++    print("predict_proba OK, shape:", getattr(pred_proba, "shape", None))
++except Exception:
++    traceback.print_exc()
++    raise
++PY
++
++rc=0
++output=$(python /testbed/test_reproduction.py 2>&1) || rc=$?
++echo "$output"
++
++status="PASSED"
++if echo "$output" | grep -q "AttributeError" && echo "$output" | grep -q "MultiOutputClassifier" && echo "$output" | grep -q "classes_"; then
++  status="FAILED"
++elif [ "$rc" -ne 0 ]; then
++  status="ERROR"
++fi
++
++python - <<'PY' "$status"
++import json,sys
++status=sys.argv[1]
++from pathlib import Path
++result = {"tests": [{"name": "test_reproduction.py::test_cross_val_predict_multioutput_predict_proba", "status": status}]}
++Path("/testbed/test_status.json").write_text(json.dumps(result, indent=2))
++print("Wrote /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..e0e39b3e1
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,14 @@
++import traceback
++try:
++    from sklearn.datasets import make_multilabel_classification
++    from sklearn.multioutput import MultiOutputClassifier
++    from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
++    from sklearn.model_selection import cross_val_predict
++
++    X, Y = make_multilabel_classification(n_samples=100, n_features=20, n_classes=3, random_state=0)
++    mo_lda = MultiOutputClassifier(LinearDiscriminantAnalysis())
++    # baseline predict (should work)
++    pred = cross_val_predict(mo_lda, X, Y, cv=5)
++    print("predict OK, shape:", getattr(pred, "shape", None))
++    # This is the call reported to raise AttributeError in the PR description
++    pred_proba = cross_val_predict(mo_lda, X, Y, cv=5, method=predict_proba)\n    print(\"predict_proba OK, shape:\", getattr(pred_proba, \"shape\", None))\nexcept Exception:\n    traceback.print_exc()\n    raise\nPY\n\ncat > /testbed/run_test.sh <<SH\n#!/bin/bash\nset -euo pipefail\nmkdir -p /testbed\nrc=0\noutput= || rc=0\necho \"\"\nstatus=\"PASSED\"\nif echo \"\" | grep -q \"AttributeError\" && echo \"\" | grep -q \"MultiOutputClassifier\" && echo \"\" | grep -q \"classes_\"; then\n  status=\"FAILED\"\nelif [ \"\" -ne 0 ]; then\n  status=\"ERROR\"\nfi\npython - <<PY2 \"\"\nimport json,sys\nstatus=sys.argv[1]\nfrom pathlib import Path\nresult = {\"tests\": [{\"name\": \"test_reproduction.py::test_cross_val_predict_multioutput_predict_proba\", \"status\": status}]}\nPath(\"/testbed/test_status.json\").write_text(json.dumps(result, indent=2))\nprint(\"Wrote /testbed/test_status.json with status:\", status)\nPY2\nSH\n\nchmod +x /testbed/run_test.sh\n/testbed/run_test.sh

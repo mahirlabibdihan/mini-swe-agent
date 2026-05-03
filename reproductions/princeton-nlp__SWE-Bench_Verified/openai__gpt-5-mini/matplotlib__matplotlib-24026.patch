@@ -1,0 +1,87 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8ccd079df5
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction, capture output (allow non-zero exit)
++output=$(python3 testbed/repro_stackplot.py 2>&1 || true)
++echo "=== SCRIPT OUTPUT ==="
++echo "$output"
++echo "=== END OUTPUT ==="
++
++# Determine status from output (detect the specific ValueError message or any ValueError)
++status="PASSED"
++if echo "$output" | grep -q -e "Cannot put cycle reference" -e "ValueError"; then
++    status="FAILED"
++fi
++
++# Ensure testbed dir exists and write test_status.json (also attempt to write to /testbed for compatibility)
++mkdir -p testbed
++python3 - <<PY "$output" "$status"
++import json, sys, pathlib
++out = sys.argv[1]
++status = sys.argv[2]
++tests = [{"name": "testbed/repro_stackplot.py", "status": status}]
++p = pathlib.Path("testbed/test_status.json")
++p.write_text(json.dumps({"tests": tests}, indent=2))
++# Try to also write to /testbed/test_status.json if possible (ignore failures)
++try:
++    pathlib.Path("/testbed/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++except Exception:
++    pass
++print("WROTE testbed/test_status.json with content:")
++print(json.dumps({"tests": tests}, indent=2))
++PY
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..13894b4048
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro_stackplot.py",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testbed/repro_stackplot.py b/testbed/repro_stackplot.py
+new file mode 100644
+index 0000000000..4e401bed9b
+--- /dev/null
++++ b/testbed/repro_stackplot.py
+@@ -0,0 +1,13 @@
++import matplotlib
++matplotlib.use("Agg")
++import matplotlib.pyplot as plt
++from matplotlib.patches import Rectangle
++import numpy
++# Reproduction of the reported snippet
++my_data = numpy.array([[1, 1, 1], [1, 2, 3], [4, 3, 2]])
++fig, ax = plt.subplots()
++ax.plot([1, 3], [1, 3], color="C0")
++ax.add_patch(Rectangle(xy=(1.5, 1.5), width=0.5, height=0.5, facecolor="C1"))
++# This is the call that used to raise ValueError: Cannot put cycle reference (C2) in prop_cycler
++ax.stackplot([1, 2, 3], my_data, colors=["C2", "C3", "C4"])
++print("STACKPLOT_COMPLETED_NO_ERROR")
+diff --git a/testbed/test_status.json b/testbed/test_status.json
+new file mode 100644
+index 0000000000..13894b4048
+--- /dev/null
++++ b/testbed/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro_stackplot.py",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

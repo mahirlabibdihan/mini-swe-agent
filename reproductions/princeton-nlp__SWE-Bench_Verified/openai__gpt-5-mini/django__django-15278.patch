@@ -1,0 +1,210 @@
+diff --git a/db.sqlite3 b/db.sqlite3
+new file mode 100644
+index 0000000000..c7edd4a1e9
+Binary files /dev/null and b/db.sqlite3 differ
+diff --git a/manage.py b/manage.py
+new file mode 100755
+index 0000000000..81b10a3ede
+--- /dev/null
++++ b/manage.py
+@@ -0,0 +1,7 @@
++#!/usr/bin/env python
++import os
++import sys
++if __name__ == "__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "project.settings")
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
+diff --git a/migrate_output.txt b/migrate_output.txt
+new file mode 100644
+index 0000000000..03431b32c6
+--- /dev/null
++++ b/migrate_output.txt
+@@ -0,0 +1,59 @@
++Operations to perform:
++  Apply all migrations: contenttypes, oauth
++Running migrations:
++  Applying contenttypes.0001_initial... OK
++  Applying contenttypes.0002_remove_content_type_name... OK
++  Applying oauth.0001_initial... OK
++  Applying oauth.0002_add_source_refresh_token...Traceback (most recent call last):
++  File "/testbed/django/db/backends/utils.py", line 85, in _execute
++    return self.cursor.execute(sql, params)
++  File "/testbed/django/db/backends/sqlite3/base.py", line 334, in execute
++    return Database.Cursor.execute(self, query, params)
++sqlite3.OperationalError: Cannot add a UNIQUE column
++
++The above exception was the direct cause of the following exception:
++
++Traceback (most recent call last):
++  File "/testbed/manage.py", line 7, in <module>
++    execute_from_command_line(sys.argv)
++  File "/testbed/django/core/management/__init__.py", line 425, in execute_from_command_line
++    utility.execute()
++  File "/testbed/django/core/management/__init__.py", line 419, in execute
++    self.fetch_command(subcommand).run_from_argv(self.argv)
++  File "/testbed/django/core/management/base.py", line 363, in run_from_argv
++    self.execute(*args, **cmd_options)
++  File "/testbed/django/core/management/base.py", line 407, in execute
++    output = self.handle(*args, **options)
++  File "/testbed/django/core/management/base.py", line 88, in wrapped
++    res = handle_func(*args, **kwargs)
++  File "/testbed/django/core/management/commands/migrate.py", line 253, in handle
++    post_migrate_state = executor.migrate(
++  File "/testbed/django/db/migrations/executor.py", line 130, in migrate
++    state = self._migrate_all_forwards(state, plan, full_plan, fake=fake, fake_initial=fake_initial)
++  File "/testbed/django/db/migrations/executor.py", line 160, in _migrate_all_forwards
++    state = self.apply_migration(state, migration, fake=fake, fake_initial=fake_initial)
++  File "/testbed/django/db/migrations/executor.py", line 240, in apply_migration
++    state = migration.apply(state, schema_editor)
++  File "/testbed/django/db/migrations/migration.py", line 125, in apply
++    operation.database_forwards(self.app_label, schema_editor, old_state, project_state)
++  File "/testbed/django/db/migrations/operations/fields.py", line 100, in database_forwards
++    schema_editor.add_field(
++  File "/testbed/django/db/backends/sqlite3/schema.py", line 333, in add_field
++    super().add_field(model, field)
++  File "/testbed/django/db/backends/base/schema.py", line 532, in add_field
++    self.execute(sql, params)
++  File "/testbed/django/db/backends/base/schema.py", line 151, in execute
++    cursor.execute(sql, params)
++  File "/testbed/django/db/backends/utils.py", line 67, in execute
++    return self._execute_with_wrappers(sql, params, many=False, executor=self._execute)
++  File "/testbed/django/db/backends/utils.py", line 76, in _execute_with_wrappers
++    return executor(sql, params, many, context)
++  File "/testbed/django/db/backends/utils.py", line 85, in _execute
++    return self.cursor.execute(sql, params)
++  File "/testbed/django/db/utils.py", line 90, in __exit__
++    raise dj_exc_value.with_traceback(traceback) from exc_value
++  File "/testbed/django/db/backends/utils.py", line 85, in _execute
++    return self.cursor.execute(sql, params)
++  File "/testbed/django/db/backends/sqlite3/base.py", line 334, in execute
++    return Database.Cursor.execute(self, query, params)
++django.db.utils.OperationalError: Cannot add a UNIQUE column
+diff --git a/oauth/__init__.py b/oauth/__init__.py
+new file mode 100644
+index 0000000000..860043b057
+--- /dev/null
++++ b/oauth/__init__.py
+@@ -0,0 +1 @@
++default_app_config = "oauth.apps.OAuthConfig"
+diff --git a/oauth/apps.py b/oauth/apps.py
+new file mode 100644
+index 0000000000..09ae8c1fc4
+--- /dev/null
++++ b/oauth/apps.py
+@@ -0,0 +1,3 @@
++from django.apps import AppConfig
++class OAuthConfig(AppConfig):
++    name = "oauth"
+diff --git a/oauth/migrations/0001_initial.py b/oauth/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..0b8e4909a0
+--- /dev/null
++++ b/oauth/migrations/0001_initial.py
+@@ -0,0 +1,20 @@
++from django.db import migrations, models
++class Migration(migrations.Migration):
++    initial = True
++    dependencies = []
++    operations = [
++        migrations.CreateModel(
++            name='RefreshToken',
++            fields=[
++                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('token', models.CharField(max_length=50)),
++            ],
++        ),
++        migrations.CreateModel(
++            name='AccessToken',
++            fields=[
++                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('token', models.CharField(max_length=50)),
++            ],
++        ),
++    ]
+diff --git a/oauth/migrations/0002_add_source_refresh_token.py b/oauth/migrations/0002_add_source_refresh_token.py
+new file mode 100644
+index 0000000000..053299db46
+--- /dev/null
++++ b/oauth/migrations/0002_add_source_refresh_token.py
+@@ -0,0 +1,13 @@
++from django.db import migrations, models
++import django.db.models.deletion
++class Migration(migrations.Migration):
++    dependencies = [
++        ('oauth', '0001_initial'),
++    ]
++    operations = [
++        migrations.AddField(
++            model_name='accesstoken',
++            name='source_refresh_token',
++            field=models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to='oauth.RefreshToken', related_name='refreshed_access_token'),
++        ),
++    ]
+diff --git a/oauth/migrations/__init__.py b/oauth/migrations/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/oauth/models.py b/oauth/models.py
+new file mode 100644
+index 0000000000..909486d665
+--- /dev/null
++++ b/oauth/models.py
+@@ -0,0 +1,5 @@
++from django.db import models
++class RefreshToken(models.Model):
++    token = models.CharField(max_length=50)
++class AccessToken(models.Model):
++    token = models.CharField(max_length=50)
+diff --git a/project/__init__.py b/project/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/project/settings.py b/project/settings.py
+new file mode 100644
+index 0000000000..49caf7421a
+--- /dev/null
++++ b/project/settings.py
+@@ -0,0 +1,14 @@
++SECRET_KEY = "insecure"
++INSTALLED_APPS = [
++    "django.contrib.contenttypes",
++    "oauth",
++]
++DATABASES = {
++    "default": {
++        "ENGINE": "django.db.backends.sqlite3",
++        "NAME": "/testbed/db.sqlite3",
++    }
++}
++MIDDLEWARE = []
++ROOT_URLCONF = None
++DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..6a95554618
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,9 @@
++#!/bin/bash
++set -euo pipefail
++rm -f /testbed/db.sqlite3 /testbed/migrate_output.txt /testbed/test_status.json
++OUTPUT=$(python /testbed/manage.py migrate --noinput 2>&1 || true)
++echo "=== MIGRATE OUTPUT ==="
++echo "$OUTPUT"
++printf "%s\n" "$OUTPUT" > /testbed/migrate_output.txt
++python -c 'import sys,json; path=sys.argv[1]; text=open(path,"r",encoding="utf-8",errors="ignore").read(); status="FAILED" if ("Cannot add a UNIQUE column" in text) or ("OperationalError" in text) else "PASSED"; res={"tests":[{"name":"test_repro_add_unique_nullable_onetoone","status":status}]}; open("/testbed/test_status.json","w").write(json.dumps(res,indent=2)); print("WROTE /testbed/test_status.json ->",res)' /testbed/migrate_output.txt
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..17300fe3b2
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro_add_unique_nullable_onetoone",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

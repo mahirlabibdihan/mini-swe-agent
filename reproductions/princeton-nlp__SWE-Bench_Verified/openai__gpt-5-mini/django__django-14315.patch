@@ -1,0 +1,74 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..fc801836f7
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,9 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++# Run the reproduction script which writes /testbed/test_status.json.
++# Allow the script to fail without causing this wrapper to exit non-zero,
++# because test results are encoded in test_status.json.
++python3 test_repro.py || true
++# Always exit 0 so the harness sees the script as executed successfully.
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100755
+index 0000000000..8c9e4fa5ef
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,34 @@
++import os, subprocess, json, sys
++from pathlib import Path
++
++# Ensure we have the env var in the parent process.
++os.environ['MYVAR'] = 'hello'
++
++def run_check(env_arg):
++    # Run a shell command to echo the variable as seen by the child.
++    p = subprocess.run(['bash', '-c', 'echo $MYVAR'], capture_output=True, text=True, env=env_arg)
++    return p.stdout.strip()
++
++out_inherit = run_check(None)     # should inherit from os.environ
++out_empty = run_check({})         # simulates the buggy client returning {}
++
++tests = []
++tests.append({
++    "name": "test_repro.py::test_inherit_env",
++    "status": "PASSED" if out_inherit == "hello" else "FAILED"
++})
++tests.append({
++    "name": "test_repro.py::test_empty_env_bug",
++    "status": "PASSED" if out_empty == "hello" else "FAILED"
++})
++
++# Write the required test status JSON to /testbed/test_status.json
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++
++# Print concise results to stdout for visibility, and exit non-zero if any test failed.
++print("inherit output:", repr(out_inherit))
++print("empty-env output:", repr(out_empty))
++print("Wrote /testbed/test_status.json with results:", json.dumps({"tests": tests}, indent=2))
++if any(t["status"] == "FAILED" for t in tests):
++    sys.exit(1)
++sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..cc41c74d35
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_inherit_env",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro.py::test_empty_env_bug",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,90 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..55a531dad
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,35 @@
++    #!/bin/bash
++    set -euo pipefail
++    cd /testbed
++    # Create the reproduction Python file
++    cat > test_reproduction.py <<'PY'
++    #!/usr/bin/env python3
++    # Reproduction script: Symbol('m', even=True) and check is_finite
++    from sympy import Symbol
++    m = Symbol('m', even=True)
++    print("m.is_finite:", m.is_finite)
++    # PR expectation: being even implies finite; assert to reproduce failure if not True
++    assert m.is_finite is True, f"Expected is_finite True for even symbol, got {m.is_finite!r}"
++    PY
++    chmod +x test_reproduction.py
++
++    # Ensure sympy is available
++    python3 -m pip install sympy -q || true
++
++    # Run the reproduction script, capture output
++    python3 test_reproduction.py > test_run_output.txt 2>&1 || true
++    rc=$?
++    status="PASSED"
++    if [ $rc -ne 0 ]; then status="FAILED"; fi
++
++    # Write the required test status JSON (created by run_test.sh as required)
++    printf '{"tests":[{"name":"/testbed/test_reproduction.py::test_even_implies_finite","status":"%s"}]}
++' "$status" > test_status.json
++
++    # Print outputs for visibility
++    echo "=== test_run_output.txt ==="
++    cat test_run_output.txt || true
++    echo "=== /testbed/test_status.json ==="
++    cat test_status.json || true
++
++    exit $rc
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100755
+index 000000000..a41638c54
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,7 @@
++#!/usr/bin/env python3
++# Reproduction script for: Symbol('m', even=True).is_finite expected True but may be None
++from sympy import Symbol
++m = Symbol('m', even=True)
++print("m.is_finite:", m.is_finite)
++# PR expectation: even implies finite; assert to reproduce failure if not True
++assert m.is_finite is True, f"Expected is_finite True for even symbol, got {m.is_finite!r}"
+diff --git a/test_run_output.txt b/test_run_output.txt
+new file mode 100644
+index 000000000..de9874b8f
+--- /dev/null
++++ b/test_run_output.txt
+@@ -0,0 +1,15 @@
++m.is_finite: None
++/testbed/sympy/solvers/diophantine.py:3185: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if feasible is 1:  # it's prime and k == 2
++/testbed/sympy/plotting/plot.py:644: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if self.xscale is 'log':
++/testbed/sympy/plotting/plot.py:664: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if self.xscale is 'log':
++/testbed/sympy/plotting/plot.py:677: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if self.xscale is 'log':
++/testbed/sympy/plotting/plot.py:684: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if self.xscale is 'log':
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 7, in <module>
++    assert m.is_finite is True, f"Expected is_finite True for even symbol, got {m.is_finite!r}"
++AssertionError: Expected is_finite True for even symbol, got None
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..5d0249def
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::test_even_implies_finite",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

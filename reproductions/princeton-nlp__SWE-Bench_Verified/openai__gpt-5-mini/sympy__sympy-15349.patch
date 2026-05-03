@@ -1,0 +1,125 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..34e6dac5c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,66 @@
++#!/bin/bash
++set -euo pipefail
++# Create the Python reproduction script
++cat <<'PY' > test_reproduction.py
++import sys
++from sympy import symbols, cos, sin, trigsimp, Matrix, simplify
++from sympy.algebras.quaternion import Quaternion
++
++x = symbols('x')
++q = Quaternion(cos(x/2), sin(x/2), 0, 0)
++rot = trigsimp(q.to_rotation_matrix())
++expected = Matrix([[1, 0, 0],
++                   [0, cos(x), -sin(x)],
++                   [0, sin(x),  cos(x)]])
++diff = trigsimp(rot - expected)
++
++ok = True
++mismatches = []
++for i in range(3):
++    for j in range(3):
++        expr = simplify(diff[i, j])
++        # Try structural zero check, fallback to comparing to 0 symbolically
++        is_zero = False
++        try:
++            is_zero = expr == 0 or expr.equals(0)
++        except Exception:
++            is_zero = False
++        if not is_zero:
++            ok = False
++            mismatches.append(((i,j), expr))
++
++print("COMPUTED_ROTATION_MATRIX:")
++print(rot)
++print("EXPECTED_ROTATION_MATRIX:")
++print(expected)
++if ok:
++    print("RESULT: PASSED")
++else:
++    print("RESULT: FAILED")
++    print("MISMATCHES:")
++    for loc, e in mismatches:
++        print(loc, "->", e)
++# exit with non-zero on failure so run_test can capture differing exit if needed
++sys.exit(0 if ok else 2)
++PY
++
++# Run the reproduction and capture output
++mkdir -p /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++
++# Determine status from output
++status="FAILED"
++if echo "$output" | grep -q "RESULT: PASSED"; then
++  status="PASSED"
++fi
++
++# Write the required test_status.json
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_reproduction.py", "status": "$status"}]}
++JSON
++
++# Print outputs for inspection
++echo "----- TEST OUTPUT -----"
++echo "$output"
++echo "----- /testbed/test_status.json -----"
++nl -ba /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..4b9a1cd1e
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,40 @@
++import sys
++from sympy import symbols, cos, sin, trigsimp, Matrix, simplify
++from sympy.algebras.quaternion import Quaternion
++
++x = symbols('x')
++q = Quaternion(cos(x/2), sin(x/2), 0, 0)
++rot = trigsimp(q.to_rotation_matrix())
++expected = Matrix([[1, 0, 0],
++                   [0, cos(x), -sin(x)],
++                   [0, sin(x),  cos(x)]])
++diff = trigsimp(rot - expected)
++
++ok = True
++mismatches = []
++for i in range(3):
++    for j in range(3):
++        expr = simplify(diff[i, j])
++        # Try structural zero check, fallback to comparing to 0 symbolically
++        is_zero = False
++        try:
++            is_zero = expr == 0 or expr.equals(0)
++        except Exception:
++            is_zero = False
++        if not is_zero:
++            ok = False
++            mismatches.append(((i,j), expr))
++
++print("COMPUTED_ROTATION_MATRIX:")
++print(rot)
++print("EXPECTED_ROTATION_MATRIX:")
++print(expected)
++if ok:
++    print("RESULT: PASSED")
++else:
++    print("RESULT: FAILED")
++    print("MISMATCHES:")
++    for loc, e in mismatches:
++        print(loc, "->", e)
++# exit with non-zero on failure so run_test can capture differing exit if needed
++sys.exit(0 if ok else 2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..b652a4613
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_reproduction.py", "status": "FAILED"}]}

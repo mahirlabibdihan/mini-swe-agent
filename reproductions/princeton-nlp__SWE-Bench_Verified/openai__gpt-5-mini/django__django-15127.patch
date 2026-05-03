@@ -1,0 +1,87 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5df6d7d045
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,35 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Install Django (choose a stable release that may exhibit the behavior)
++python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
++python3 -m pip install "Django==2.2.24" >/dev/null 2>&1 || true
++
++output="$(python3 test_reproduction.py 2>&1 || true)"
++echo "$output"
++
++# Parse the output to determine test status
++initial_tag="$(echo "$output" | awk -F: '/^INITIAL_TAG:/ {print $2; exit}')"
++overridden_tag="$(echo "$output" | awk -F: '/^OVERRIDDEN_TAG:/ {print $2; exit}')"
++exc_line="$(echo "$output" | awk -F: '/^EXC:/ {print substr($0,5); exit}')"
++
++python3 - <<PYCODE
++import json, sys
++tests = []
++name = "test_reproduction.py::test_level_tags_override"
++output = """$output"""
++if "$exc_line":
++    # If there was an exception, mark as ERROR
++    tests.append({"name": name, "status": "ERROR"})
++else:
++    init = "$initial_tag"
++    over = "$overridden_tag"
++    # If overridden tag equals expected 'changed', mark PASSED, else FAILED (demonstrating the bug)
++    if over == "changed":
++        status = "PASSED"
++    else:
++        status = "FAILED"
++    tests.append({"name": name, "status": status})
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE /testbed/test_status.json")
++PYCODE
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..bbf42795d9
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,25 @@
++import sys
++from django.conf import settings
++from django.contrib import messages
++# Ensure settings configured with an initial MESSAGE_TAGS
++if not settings.configured:
++    settings.configure(MESSAGE_TAGS={messages.constants.ERROR: 'initial'})
++# Import the module that defines LEVEL_TAGS
++import django.contrib.messages.storage.base as base
++mconst = messages.constants
++initial_tag = base.LEVEL_TAGS.get(mconst.ERROR, '')
++from django.test.utils import override_settings
++
++@override_settings(MESSAGE_TAGS={mconst.ERROR: 'changed'})
++def run_check():
++    # Read LEVEL_TAGS again while settings are overridden
++    overridden_tag = base.LEVEL_TAGS.get(mconst.ERROR, '')
++    print("INITIAL_TAG:" + str(initial_tag))
++    print("OVERRIDDEN_TAG:" + str(overridden_tag))
++
++if __name__ == "__main__":
++    try:
++        run_check()
++    except Exception as e:
++        print("EXC:"+str(e))
++        sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..c5bba563a1
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_level_tags_override",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

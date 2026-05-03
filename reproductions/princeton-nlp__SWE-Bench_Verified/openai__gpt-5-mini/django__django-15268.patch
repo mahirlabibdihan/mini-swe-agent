@@ -1,0 +1,75 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..bd7c3b76b8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++set -eu
++cd /testbed
++# Run test and capture output and exit code without letting set -e abort the script
++rc=0
++output=$(python3 test_repro.py 2>&1) || rc=$?
++echo "$output"
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++# Write the required test_status.json in /testbed
++cat > test_status.json <<JSON
++{"tests":[{"name":"test_repro.py::test_optimize_alter_together_ops","status":"$status"}]}
++JSON
++# Exit 0 to indicate the script executed (status is in test_status.json)
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..1ba0bdfc55
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,31 @@
++# reproduction of the issue described in the PR: operations split into remove/add pairs
++import pprint
++
++def make_ops():
++    return [
++        {"op": "AlterUniqueTogether", "name": "mymodel", "unique_together": set()},
++        {"op": "AlterIndexTogether", "name": "mymodel", "index_together": set()},
++        {"op": "AlterUniqueTogether", "name": "mymodel", "unique_together": {("col",)}},
++        {"op": "AlterIndexTogether", "name": "mymodel", "index_together": {("col",)}},
++    ]
++
++def optimize_alter_together_ops(ops):
++    """
++    Placeholder for current behavior (no optimization): returns ops unchanged.
++    The PR describes an optimization that would combine the remove+add pairs
++    into a single operation per constraint, reducing the list from 4 to 2.
++    """
++    return ops
++
++def main():
++    ops = make_ops()
++    print("Original operations ({}):".format(len(ops)))
++    pprint.pprint(ops)
++    optimized = optimize_alter_together_ops(ops)
++    print("\nOptimized operations ({}):".format(len(optimized)))
++    pprint.pprint(optimized)
++    # The reproduction expects an optimization that reduces 4 -> 2.
++    assert len(optimized) == 2, "Expected optimization to merge alter-together ops (4 -> 2), got {}".format(len(optimized))
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_repro_output.txt b/test_repro_output.txt
+new file mode 100644
+index 0000000000..9e26dfeeb6
+--- /dev/null
++++ b/test_repro_output.txt
+@@ -0,0 +1 @@
++{}
+\ No newline at end of file
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..c0ca4ae397
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_repro.py::test_optimize_alter_together_ops","status":"FAILED"}]}

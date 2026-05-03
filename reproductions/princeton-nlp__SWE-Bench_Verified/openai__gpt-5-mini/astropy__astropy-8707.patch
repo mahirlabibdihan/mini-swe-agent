@@ -1,0 +1,71 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..40f6e5d21
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/bin/bash
++set -euo pipefail
++# Run the test without letting the script exit on failure so we can capture rc and output
++set +e
++output=$(python3 test_reproduction.py 2>&1)
++rc=$?
++set -e
++# Echo the test output
++echo "$output"
++# Determine status based on the actual exit code of the test process
++if [ "$rc" -eq 0 ]; then
++  status="PASSED"
++else
++  status="FAILED"
++fi
++# Write the required JSON file
++python3 - "$status" <<PY
++import json,sys
++from pathlib import Path
++status=sys.argv[1]
++Path("/testbed/test_status.json").write_text(json.dumps({"tests":[{"name":"test_reproduction.py::test_header_fromstring_bytes","status":status}]}, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..c53a34bae
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,21 @@
++# Reproduction script: call Header.fromstring with bytes on Python 3
++from __future__ import print_function
++import sys, traceback
++try:
++    from astropy.io.fits import Header
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    traceback.print_exc()
++    raise
++data = b"SIMPLE  =                    T / test header\nEND\n"
++print("Calling Header.fromstring with bytes object of type:", type(data))
++try:
++    h = Header.fromstring(data)
++    print("Header.fromstring returned:", type(h))
++    # Print a small summary
++    print("Header keys:", list(h.keys())[:10])
++except Exception:
++    print("EXCEPTION occurred during Header.fromstring:")
++    traceback.print_exc()
++    # Re-raise so run_test.sh can capture non-zero exit if desired
++    raise
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..961b4f5d9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_header_fromstring_bytes",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

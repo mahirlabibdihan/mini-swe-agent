@@ -1,0 +1,77 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..0f9351e9ac
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -euo pipefail
++
++# Embedded Python performs the reproduction and writes /testbed/test_status.json
++python3 - <<'PY2'
++import json, sys
++try:
++    from sympy import symbols, imageset, Lambda, I, Integers, Reals
++except Exception as e:
++    open('/testbed/test_status.json','w').write(json.dumps({
++        "tests":[{"name":"testbed/repro_sympy_imageset_is_subset_Reals.py::test_intersect_contains_2","status":"ERROR"}]
++    }, indent=2))
++    print(json.dumps({"observed":"sympy_import_failed","detail":str(e)}))
++    sys.exit(0)
++
++n = symbols('n', integer=True)
++S1 = imageset(Lambda(n, n + (n - 1)*(n + 1)*I), Integers)
++in_s1 = (2 in S1)
++in_intersect = (2 in S1.intersect(Reals))
++
++# Mark FAILED if the buggy behavior is observed (2 not in S1 but 2 in intersection)
++if isinstance(in_s1, bool) and isinstance(in_intersect, bool):
++    status = "FAILED" if (in_s1 is False and in_intersect is True) else "PASSED"
++else:
++    status = "ERROR"
++
++open('/testbed/test_status.json','w').write(json.dumps({
++    "tests":[{"name":"testbed/repro_sympy_imageset_is_subset_Reals.py::test_intersect_contains_2","status":status}]
++}, indent=2))
++
++print(json.dumps({"in_s1": in_s1, "in_intersect": in_intersect, "status": status}))
++PY2
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..254fa3e4e9
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,18 @@
++
++import json
++try:
++    from sympy import symbols, imageset, Lambda, I, Integers, Reals
++except Exception as e:
++    print(json.dumps({"error": "sympy_import_failed", "detail": str(e)}))
++    raise
++n = symbols('n', integer=True)
++S1 = imageset(Lambda(n, n + (n - 1)*(n + 1)*I), Integers)
++in_s1 = (2 in S1)
++in_intersect = (2 in S1.intersect(Reals))
++inter = S1.intersect(Reals)
++try:
++    inter_list = list(inter)
++    inter_serial = [str(x) for x in inter_list]
++except Exception:
++    inter_serial = str(inter)
++print(json.dumps({"in_s1": in_s1, "in_intersect": in_intersect, "intersection": inter_serial}))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..858bc4289e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro_sympy_imageset_is_subset_Reals.py::test_intersect_contains_2",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

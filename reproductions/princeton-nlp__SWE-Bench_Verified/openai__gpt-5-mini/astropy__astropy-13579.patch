@@ -1,0 +1,210 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..c5ba33465
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,85 @@
++#!/bin/bash
++set -euo pipefail
++python3 - <<'PY'
++import json, math, traceback, os
++import numpy as np
++from astropy.io import fits
++import astropy.wcs
++import astropy.units as u
++
++os.makedirs("/testbed", exist_ok=True)
++
++def to_float(x):
++    try:
++        return float(__import__("numpy").array(x).tolist())
++    except Exception:
++        return float(x)
++
++result = {"tests": [{"name": "testbed/test_reproduction.py::reproduce_world_to_pixel_inconsistency", "status": "ERROR"}]}
++details = {}
++try:
++    # Build header from PR
++    wcs_header = {
++        'WCSAXES': 3,
++        'CRPIX1': (100 + 1)/2,
++        'CRPIX2': (25 + 1)/2,
++        'CRPIX3': 1.0,
++        'PC1_1': 0.0,
++        'PC1_2': -1.0,
++        'PC1_3': 0.0,
++        'PC2_1': 1.0,
++        'PC2_2': 0.0,
++        'PC2_3': -1.0,
++        'CDELT1': 5,
++        'CDELT2': 5,
++        'CDELT3': 0.055,
++        'CUNIT1': 'arcsec',
++        'CUNIT2': 'arcsec',
++        'CUNIT3': 'Angstrom',
++        'CTYPE1': 'HPLN-TAN',
++        'CTYPE2': 'HPLT-TAN',
++        'CTYPE3': 'WAVE',
++        'CRVAL1': 0.0,
++        'CRVAL2': 0.0,
++        'CRVAL3': 1.05,
++    }
++    hdr = fits.Header()
++    for k, v in wcs_header.items():
++        hdr[k] = v
++    fits_wcs = astropy.wcs.WCS(header=hdr)
++
++    # Full WCS world_to_pixel (use quantity args)
++    full = fits_wcs.world_to_pixel(0*u.arcsec, 0*u.arcsec, 1.05*u.angstrom)
++    full_x = to_float(full[0]); full_y = to_float(full[1]); full_z = to_float(full[2]) if len(full)>2 else None
++    details["full_world_to_pixel"] = [full_x, full_y, full_z]
++
++    # Sliced WCS (slice 0 along spectral axis)
++    ll_sliced_wcs = astropy.wcs.wcsapi.SlicedLowLevelWCS(fits_wcs, 0)
++    hl_sliced_wcs = astropy.wcs.wcsapi.HighLevelWCSWrapper(ll_sliced_wcs)
++
++    # Compute world_to_pixel on sliced WCS (use quantity args)
++    sliced = hl_sliced_wcs.world_to_pixel(0*u.arcsec, 0*u.arcsec)
++    sliced_x = to_float(sliced[0]); sliced_y = to_float(sliced[1])
++    details["sliced_world_to_pixel"] = [sliced_x, sliced_y]
++
++    tol = 1e-6
++    if (not math.isfinite(sliced_x)) or (abs(sliced_x - full_x) > tol) or (not math.isfinite(sliced_y)) or (abs(sliced_y - full_y) > tol):
++        status = "FAILED"
++    else:
++        status = "PASSED"
++
++    result["tests"][0]["status"] = status
++    details["status"] = status
++
++except Exception:
++    details["traceback"] = traceback.format_exc()
++    result["tests"][0]["status"] = "ERROR"
++
++# Write outputs (run_test.sh must create test_status.json)
++with open("/testbed/test_status.json", "w") as f:
++    json.dump(result, f, indent=2)
++with open("/testbed/test_repro_details.json", "w") as f:
++    json.dump(details, f, indent=2)
++
++print(json.dumps({"result": result, "details": details}, indent=2))
++PY
+diff --git a/test_repro_details.json b/test_repro_details.json
+new file mode 100644
+index 000000000..a51472bd4
+--- /dev/null
++++ b/test_repro_details.json
+@@ -0,0 +1,12 @@
++{
++  "full_world_to_pixel": [
++    49.49999999999748,
++    12.0,
++    2.4424906541753444e-15
++  ],
++  "sliced_world_to_pixel": [
++    181818181848.59088,
++    12.0
++  ],
++  "status": "FAILED"
++}
+\ No newline at end of file
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..9bcbade92
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,79 @@
++import traceback
++try:
++    import math
++    import json
++    import numpy as np
++    from astropy.io import fits
++    import astropy.wcs
++    from astropy.coordinates import SkyCoord
++    import astropy.units as u
++
++    # Build header from PR
++    wcs_header = {
++        'WCSAXES': 3,
++        'CRPIX1': (100 + 1)/2,
++        'CRPIX2': (25 + 1)/2,
++        'CRPIX3': 1.0,
++        'PC1_1': 0.0,
++        'PC1_2': -1.0,
++        'PC1_3': 0.0,
++        'PC2_1': 1.0,
++        'PC2_2': 0.0,
++        'PC2_3': -1.0,
++        'CDELT1': 5,
++        'CDELT2': 5,
++        'CDELT3': 0.055,
++        'CUNIT1': 'arcsec',
++        'CUNIT2': 'arcsec',
++        'CUNIT3': 'Angstrom',
++        'CTYPE1': 'HPLN-TAN',
++        'CTYPE2': 'HPLT-TAN',
++        'CTYPE3': 'WAVE',
++        'CRVAL1': 0.0,
++        'CRVAL2': 0.0,
++        'CRVAL3': 1.05,
++    }
++
++    hdr = fits.Header()
++    for k, v in wcs_header.items():
++        hdr[k] = v
++
++    fits_wcs = astropy.wcs.WCS(header=hdr)
++
++    # Construct point as in PR
++    cel = astropy.wcs.utils.wcs_to_celestial_frame(fits_wcs)
++    pt = SkyCoord(Tx=0*u.arcsec, Ty=0*u.arcsec, frame=cel)
++
++    # Full WCS world_to_pixel
++    full_px, full_py, full_pz = fits_wcs.world_to_pixel(pt, 1.05*u.angstrom)
++    print("FULL world_to_pixel ->", full_px, full_py, full_pz)
++
++    # Sliced WCS world_to_pixel (slice 0 along spectral axis)
++    ll_sliced_wcs = astropy.wcs.wcsapi.SlicedLowLevelWCS(fits_wcs, 0)
++    hl_sliced_wcs = astropy.wcs.wcsapi.HighLevelWCSWrapper(ll_sliced_wcs)
++    sliced_px, sliced_py = hl_sliced_wcs.world_to_pixel(pt)
++    print("SLICED world_to_pixel ->", sliced_px, sliced_py)
++
++    # Determine status: expect sliced_px approximately equal to full_px
++    try:
++        full_x = float(np.array(full_px).tolist())
++        sliced_x = float(np.array(sliced_px).tolist())
++    except Exception:
++        full_x = float(full_px)
++        sliced_x = float(sliced_px)
++
++    tol = 1e-6
++    if math.isfinite(sliced_x) and abs(sliced_x - full_x) <= tol:
++        status = "PASSED"
++    else:
++        status = "FAILED"
++
++    print("TEST_STATUS:", status)
++    print(json.dumps({
++        "full_world_to_pixel": [full_x, float(np.array(full_py).tolist()), float(np.array(full_pz).tolist())],
++        "sliced_world_to_pixel": [sliced_x, float(np.array(sliced_py).tolist())],
++        "status": status
++    }))
++except Exception:
++    traceback.print_exc()
++    print("TEST_STATUS: ERROR")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..6501006d2
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_reproduction.py::reproduce_world_to_pixel_inconsistency",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

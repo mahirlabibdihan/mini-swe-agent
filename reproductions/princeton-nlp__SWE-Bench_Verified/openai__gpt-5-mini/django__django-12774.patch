@@ -1,0 +1,136 @@
+diff --git a/reproduction_out.txt b/reproduction_out.txt
+new file mode 100644
+index 0000000000..e894d41a11
+--- /dev/null
++++ b/reproduction_out.txt
+@@ -0,0 +1,8 @@
++Traceback (most recent call last):
++  File "test_repro.py", line 29, in <module>
++    objs = Article.objects.in_bulk(field_name='slug')
++  File "/testbed/django/db/models/manager.py", line 85, in manager_method
++    return getattr(self.get_queryset(), name)(*args, **kwargs)
++  File "/testbed/django/db/models/query.py", line 693, in in_bulk
++    raise ValueError("in_bulk()'s field_name must be a unique field but %r isn't." % field_name)
++ValueError: in_bulk()'s field_name must be a unique field but 'slug' isn't.
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..e894d41a11
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,8 @@
++Traceback (most recent call last):
++  File "test_repro.py", line 29, in <module>
++    objs = Article.objects.in_bulk(field_name='slug')
++  File "/testbed/django/db/models/manager.py", line 85, in manager_method
++    return getattr(self.get_queryset(), name)(*args, **kwargs)
++  File "/testbed/django/db/models/query.py", line 693, in in_bulk
++    raise ValueError("in_bulk()'s field_name must be a unique field but %r isn't." % field_name)
++ValueError: in_bulk()'s field_name must be a unique field but 'slug' isn't.
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8ad6c6bbfa
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/bin/bash
++set -euo pipefail
++# Allow the reproducer to fail without terminating this script
++set +e
++PYTHONPATH=/testbed python3 test_repro.py > reproduction_out.txt 2>&1
++rc=$?
++set -e
++
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++
++# Write machine-readable test results
++cat > /testbed/test_status.json <<EOF
++{"tests":[{"name":"test_reproduction.py","status":"$status"}]}
++EOF
++
++# Print the captured output for visibility
++cat reproduction_out.txt
++
++# Ensure the runner sees this script executed successfully (exit 0)
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..c2be2c1aaa
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,35 @@
++import sys
++import traceback
++from django.conf import settings
++
++# Minimal settings for an in-memory Django setup
++settings.configure(
++    INSTALLED_APPS=['testapp.apps.TestappConfig'],
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++)
++
++import django
++django.setup()
++
++from django.apps import apps
++from django.db import connection
++
++Article = apps.get_model('testapp', 'Article')
++
++# Create the table for the model without migrations
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Article)
++
++# Create one instance
++Article.objects.create(slug='a')
++
++# This should raise the ValueError described in the PR when using a field that is unique via UniqueConstraint
++try:
++    objs = Article.objects.in_bulk(field_name='slug')
++    print("in_bulk returned:", objs)
++    sys.exit(0)
++except Exception:
++    traceback.print_exc()
++    # Exit with non-zero to indicate the reproducer encountered the exception
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..beaee7bb36
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py","status":"FAILED"}]}
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testapp/apps.py b/testapp/apps.py
+new file mode 100644
+index 0000000000..40c0170434
+--- /dev/null
++++ b/testapp/apps.py
+@@ -0,0 +1,3 @@
++from django.apps import AppConfig
++class TestappConfig(AppConfig):
++    name = 'testapp'
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..5938910932
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,9 @@
++from django.db import models
++
++class Article(models.Model):
++    slug = models.CharField(max_length=255)
++
++    class Meta:
++        constraints = [
++            models.UniqueConstraint(fields=['slug'], name='testapp_article_slug_unq')
++        ]

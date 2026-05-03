@@ -1,0 +1,100 @@
+diff --git a/last_run.txt b/last_run.txt
+new file mode 100644
+index 0000000000..fd622d27d2
+--- /dev/null
++++ b/last_run.txt
+@@ -0,0 +1,16 @@
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 4, in <module>
++    S2 = G.sylow_subgroup(p=2)
++  File "/testbed/sympy/combinatorics/perm_groups.py", line 4354, in sylow_subgroup
++    blocks = self.minimal_blocks()
++  File "/testbed/sympy/combinatorics/perm_groups.py", line 2201, in minimal_blocks
++    del num_blocks[i], blocks[i]
++IndexError: list assignment index out of range
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 4, in <module>
++    S2 = G.sylow_subgroup(p=2)
++  File "/testbed/sympy/combinatorics/perm_groups.py", line 4354, in sylow_subgroup
++    blocks = self.minimal_blocks()
++  File "/testbed/sympy/combinatorics/perm_groups.py", line 2201, in minimal_blocks
++    del num_blocks[i], blocks[i]
++IndexError: list assignment index out of range
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..6825139fd0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,42 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Create the reproduction Python script
++cat > test_reproduction.py <<'PY'
++from sympy.combinatorics import DihedralGroup
++G = DihedralGroup(18)
++try:
++    S2 = G.sylow_subgroup(p=2)
++    print("No exception, sylow_subgroup returned:", type(S2), S2)
++except Exception:
++    import traceback
++    traceback.print_exc()
++    raise
++PY
++
++# Try to install the targeted sympy version (best-effort)
++pip install sympy==1.6.1 -q || true
++
++# Run the reproduction script and capture output (don't fail the shell on python exception)
++output=$(python test_reproduction.py 2>&1 || true)
++echo "$output" > /testbed/last_run.txt
++
++# Determine status based on presence of the reported IndexError and function name
++status="PASSED"
++if printf '%s' "$output" | grep -q "IndexError" && printf '%s' "$output" | grep -q "sylow_subgroup"; then
++  status="FAILED"
++fi
++
++# Write test_status.json to /testbed
++python - "$status" <<'PY2'
++import json,sys
++status = sys.argv[1]
++report = {"tests":[{"name":"test_reproduction.py::test_sylow_subgroup_indexerror","status": status}]}
++open("/testbed/test_status.json","w").write(json.dumps(report, indent=2))
++print(json.dumps(report, indent=2))
++PY2
++
++# Also show the captured output for debugging
++echo "---- Captured run output ----"
++sed -n '1,200p' /testbed/last_run.txt || true
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..665cc40408
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,9 @@
++from sympy.combinatorics import DihedralGroup
++G = DihedralGroup(18)
++try:
++    S2 = G.sylow_subgroup(p=2)
++    print("No exception, sylow_subgroup returned:", type(S2), S2)
++except Exception:
++    import traceback
++    traceback.print_exc()
++    raise
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..f0fd5e8c2f
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_sylow_subgroup_indexerror",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

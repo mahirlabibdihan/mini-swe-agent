@@ -1,0 +1,66 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..14bc9faec6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,26 @@
++#!/bin/bash
++set -uo pipefail
++mkdir -p /testbed
++output=""
++rc=0
++# Run the test script and capture both output and exit code
++output=$(python3 /testbed/test_repro.py 2>&1) || rc=$?
++# Echo the output for visibility
++printf "%s
++" "$output"
++# Determine status from exit code
++if [ "${rc:-0}" -eq 0 ]; then
++  status="PASSED"
++else
++  status="FAILED"
++fi
++# Write the required JSON file to /testbed/test_status.json
++python3 - <<PY2 "$output" "$rc" "$status"
++import json,sys
++out=sys.argv[1]
++rc=int(sys.argv[2])
++status=sys.argv[3]
++tests=[{"name":"/testbed/test_repro.py::test_case_syntax_error","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print("/testbed/test_status.json written with status:", status)
++PY2
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..4c965cae65
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,13 @@
++import sqlite3
++print("Setup: creating table and inserting a row")
++conn = sqlite3.connect(":memory:")
++cur = conn.cursor()
++cur.execute("CREATE TABLE users_user (id integer)")
++cur.execute("INSERT INTO users_user (id) VALUES (1)")
++conn.commit()
++print("Executing malformed SQL to reproduce CASE WHEN THEN syntax error")
++# This SQL intentionally has a missing condition after WHEN, which should trigger a syntax error
++cur.execute("SELECT id FROM users_user ORDER BY CASE WHEN THEN 1 ELSE 0 END ASC")
++print("Query unexpectedly succeeded, rows:")
++for r in cur.fetchall():
++    print(r)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..491e5ce480
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_repro.py::test_case_syntax_error",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

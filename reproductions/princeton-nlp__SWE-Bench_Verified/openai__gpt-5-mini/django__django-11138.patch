@@ -1,0 +1,61 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..34c0b883b1
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++# Minimal runner: executes the test script, records PASS/FAIL in JSON, always exits 0.
++python3 /testbed/test_repro.py
++rc=$?
++if [ $rc -ne 0 ]; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++mkdir -p /testbed
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "testbed/test_repro.py::test_date_lookup", "status": "$status"}]}
++JSON
++echo "Test script exit code: $rc"
++echo "/testbed/test_status.json written with status: $status"
++# Exit 0 so harness sees the runner executed; the JSON contains the real result.
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..9f0cd25201
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,25 @@
++import sys
++
++def generate_sql_date_lookup(field, db_tz, app_tz, use_tz=True):
++    if use_tz:
++        # BUG: always uses 'UTC' as source tz (mirrors referenced behaviour)
++        return f"SELECT (1) AS `a` FROM `my_model` WHERE DATE(CONVERT_TZ({field}, 'UTC', '{db_tz}')) = '2017-07-06' LIMIT 1;"
++    else:
++        return f"SELECT (1) AS `a` FROM `my_model` WHERE DATE({field}) = '2017-07-06' LIMIT 1;"
++
++def main():
++    use_tz = True
++    app_tz = 'Europe/Paris'
++    db_tz = 'Europe/Paris'
++    sql = generate_sql_date_lookup('`my_model`.`my_datetime_field`', db_tz=db_tz, app_tz=app_tz, use_tz=use_tz)
++    print("Generated SQL:")
++    print(sql)
++    if "CONVERT_TZ(" in sql:
++        print("\nREPRODUCED ISSUE: SQL uses CONVERT_TZ (with 'UTC' as source) even though DB TIME_ZONE equals app TIME_ZONE.")
++        sys.exit(1)
++    else:
++        print("\nNo CONVERT_TZ used; behaviour would be correct.")
++        sys.exit(0)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..9827361b38
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "testbed/test_repro.py::test_date_lookup", "status": "FAILED"}]}

@@ -1,0 +1,104 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..1af7bc0b33
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,63 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++# Create the reproduction Python script
++cat > test_repro.py <<'PYRE'
++# Reproduction of confusing colormap name handling
++import matplotlib
++matplotlib.use('Agg')  # non-interactive backend
++from matplotlib import cm
++from matplotlib.colors import LinearSegmentedColormap
++import matplotlib.pyplot as plt
++
++print("matplotlib version:", matplotlib.__version__)
++my_cmap_data = [
++    [1.5e-03, 4.7e-04, 1.4e-02],
++    [2.3e-03, 1.3e-03, 1.8e-02],
++    [3.3e-03, 2.3e-03, 2.4e-02]
++]
++# internal name differs from registered name
++my_cmap = LinearSegmentedColormap.from_list('some_cmap_name', my_cmap_data)
++cm.register_cmap(name='my_cmap_name', cmap=my_cmap)
++
++plt.set_cmap('my_cmap_name')
++print("set_cmap succeeded, now calling imshow...")
++plt.imshow([[1, 1], [2, 2]])
++plt.savefig('out.png')
++print("imshow and save completed")
++PYRE
++
++# Run the reproduction and capture output + exit code without aborting the script
++set +e
++output=$(python3 test_repro.py 2>&1)
++rc=$?
++set -e
++
++# Decide status based on observed output:
++# - If matplotlib missing -> SKIPPED
++# - If reproduction observed (either original or observed variant) -> FAILED (we want a failing test)
++# - If some other non-zero -> ERROR
++# - If no error -> SKIPPED (didn't reproduce)
++if echo "$output" | grep -q "ModuleNotFoundError\|No module named matplotlib"; then
++  status="SKIPPED"
++elif [ "$rc" -ne 0 ] && ( echo "$output" | grep -q "Colormap some_cmap_name is not recognized" || echo "$output" | grep -q "'some_cmap_name' is not a valid value for cmap" || echo "$output" | grep -q "some_cmap_name' is not a valid value for cmap" ); then
++  status="FAILED"
++elif [ "$rc" -ne 0 ]; then
++  status="ERROR"
++else
++  status="SKIPPED"
++fi
++
++# Write the required JSON file (always write so harness can read it)
++cat > test_status.json <<JSON
++{"tests":[{"name":"testbed/test_repro.py::test_colormap_name_handling","status":"$status"}]}
++JSON
++
++# Emit output and status for visibility
++echo "---- SCRIPT OUTPUT ----"
++echo "$output"
++echo "---- TEST STATUS: $status ----"
++
++# Always exit 0 so harness sees the runner executed; actual result is in test_status.json
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..4f7658f06a
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,22 @@
++# Reproduction of confusing colormap name handling
++import matplotlib
++matplotlib.use('Agg')  # non-interactive backend
++from matplotlib import cm
++from matplotlib.colors import LinearSegmentedColormap
++import matplotlib.pyplot as plt
++
++print("matplotlib version:", matplotlib.__version__)
++my_cmap_data = [
++    [1.5e-03, 4.7e-04, 1.4e-02],
++    [2.3e-03, 1.3e-03, 1.8e-02],
++    [3.3e-03, 2.3e-03, 2.4e-02]
++]
++# internal name differs from registered name
++my_cmap = LinearSegmentedColormap.from_list('some_cmap_name', my_cmap_data)
++cm.register_cmap(name='my_cmap_name', cmap=my_cmap)
++
++plt.set_cmap('my_cmap_name')
++print("set_cmap succeeded, now calling imshow...")
++plt.imshow([[1, 1], [2, 2]])
++plt.savefig('out.png')
++print("imshow and save completed")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..bd18a1252b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"testbed/test_repro.py::test_colormap_name_handling","status":"FAILED"}]}

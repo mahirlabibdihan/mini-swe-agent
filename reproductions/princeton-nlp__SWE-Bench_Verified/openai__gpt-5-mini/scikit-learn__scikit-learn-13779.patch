@@ -1,0 +1,79 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..2440466de
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -euo pipefail
++# Execute the test and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "---- TEST OUTPUT ----"
++echo "$output"
++echo "---------------------"
++
++# Determine status based on observed output
++status="ERROR"
++if echo "$output" | grep -q "AttributeError: 'NoneType' object has no attribute 'fit'"; then
++  status="FAILED"
++elif echo "$output" | grep -q "RUN_COMPLETE: No exception raised"; then
++  status="PASSED"
++else
++  # If traceback present but not the specific message, mark ERROR
++  if echo "$output" | grep -q "Traceback (most recent call last)"; then
++    status="ERROR"
++  else
++    # Unexpected: no traceback and no RUN_COMPLETE marker -> mark ERROR
++    status="ERROR"
++  fi
++fi
++
++python3 - <<PY
++import json
++from pathlib import Path
++result = {"tests": [{"name": "test_reproduction.py::test_voting_sample_weight_none_estimator", "status": "$status"}]}
++Path("/testbed/test_status.json").write_text(json.dumps(result, indent=2))
++print("Wrote /testbed/test_status.json with status:", "$status")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..bd48a0552
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,21 @@
++import traceback
++try:
++    import numpy as np
++    from sklearn.datasets import load_iris
++    from sklearn.ensemble import VotingClassifier, RandomForestClassifier
++    from sklearn.linear_model import LogisticRegression
++
++    X, y = load_iris(return_X_y=True)
++    voter = VotingClassifier(
++        estimators=[('lr', LogisticRegression()), ('rf', RandomForestClassifier())]
++    )
++    # First fit should work
++    voter.fit(X, y, sample_weight=np.ones(y.shape))
++    # Set one estimator to None and fit again with sample_weight
++    voter.set_params(lr=None)
++    voter.fit(X, y, sample_weight=np.ones(y.shape))
++    print("RUN_COMPLETE: No exception raised")
++except Exception:
++    traceback.print_exc()
++    # Re-raise to ensure non-zero exit if desired; but for capturing we'll let it exit non-zero
++    raise
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..48156c901
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_voting_sample_weight_none_estimator",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

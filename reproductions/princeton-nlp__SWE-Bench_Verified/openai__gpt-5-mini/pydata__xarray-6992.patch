@@ -1,0 +1,141 @@
+diff --git a/out.txt b/out.txt
+new file mode 100644
+index 00000000..86c212d3
+--- /dev/null
++++ b/out.txt
+@@ -0,0 +1,4 @@
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 13, in <module>
++    print(len(dv))
++ValueError: __len__() should return >= 0
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..daef9a2d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Run the reproduction script, capture output
++python test_reproduction.py > out.txt 2>&1 || true
++out=$(cat out.txt || true)
++
++status="PASSED"
++if echo "$out" | grep -q "ValueError: __len__() should return >= 0"; then
++  status="FAILED"
++elif [ -z "$out" ] || echo "$out" | grep -q "NO_EXCEPTION"; then
++  status="PASSED"
++else
++  status="ERROR"
++fi
++
++# Use Python to write a valid JSON file to the required absolute path
++STATUS="$status" python - <<'PY'
++import json, os
++status = os.environ["STATUS"]
++data = {"tests":[{"name":"testbed/test_reproduction.py","status": status}]}
++with open("/testbed/test_status.json","w") as f:
++    json.dump(data, f)
++print(json.dumps(data))
++PY
++
++echo "Wrote /testbed/test_status.json"
++echo "===== OUTPUT ====="
++sed -n '1,200p' out.txt
++echo "===== STATUS: $status ====="
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..ecd6a459
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,13 @@
++from xarray.core.dataset import DataVariables
++
++class Inner:
++    def __init__(self, variables, coord_names):
++        self._variables = variables
++        self._coord_names = coord_names
++
++# 1 variable, 2 coord names -> __len__ returns -1 and should raise ValueError
++inner = Inner({'var1': 0}, {'c1', 'c2'})
++dv = DataVariables(inner)
++
++# This call should trigger the ValueError
++print(len(dv))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..9e694be8
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "testbed/test_reproduction.py", "status": "FAILED"}]}
+\ No newline at end of file
+diff --git a/testbed/out.txt b/testbed/out.txt
+new file mode 100644
+index 00000000..c6a6471a
+--- /dev/null
++++ b/testbed/out.txt
+@@ -0,0 +1,4 @@
++Traceback (most recent call last):
++  File "/testbed/testbed/test_reproduction.py", line 14, in <module>
++    print(len(dv))
++ValueError: __len__() should return >= 0
+diff --git a/testbed/run_test.sh b/testbed/run_test.sh
+new file mode 100755
+index 00000000..a431ddf2
+--- /dev/null
++++ b/testbed/run_test.sh
+@@ -0,0 +1,24 @@
++#!/bin/bash
++set -euo pipefail
++cd testbed
++python test_reproduction.py > out.txt 2>&1 || true
++out=$(cat out.txt)
++status="PASSED"
++if echo "$out" | grep -q "ValueError: __len__() should return >= 0"; then
++  status="FAILED"
++elif [ -z "$out" ]; then
++  status="PASSED"
++else
++  # If python exited non-zero but not the expected ValueError, mark ERROR
++  if ! echo "$out" | grep -q "Traceback"; then
++    status="PASSED"
++  else
++    status="ERROR"
++  fi
++fi
++cat > test_status.json <<JSON
++{"tests":[{"name":"testbed/test_reproduction.py","status":"$status"}]}
++JSON
++echo "===== OUTPUT ====="
++sed -n '1,200p' out.txt
++echo "===== STATUS: $status ====="
+diff --git a/testbed/test_reproduction.py b/testbed/test_reproduction.py
+new file mode 100644
+index 00000000..91e5b7a2
+--- /dev/null
++++ b/testbed/test_reproduction.py
+@@ -0,0 +1,14 @@
++from xarray.core.dataset import DataVariables
++
++class Inner:
++    def __init__(self, variables, coord_names):
++        self._variables = variables
++        self._coord_names = coord_names
++
++# 1 variable, 2 coord names -> __len__ returns -1 and Python should raise ValueError
++inner = Inner({'var1': 0}, {'c1', 'c2'})
++dv = DataVariables(inner)
++
++# This call should trigger the ValueError "ValueError: __len__() should return >= 0"
++# and print a full traceback to stderr.
++print(len(dv))
+diff --git a/testbed/test_status.json b/testbed/test_status.json
+new file mode 100644
+index 00000000..468fd2f1
+--- /dev/null
++++ b/testbed/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"testbed/test_reproduction.py","status":"PASSED"}]}

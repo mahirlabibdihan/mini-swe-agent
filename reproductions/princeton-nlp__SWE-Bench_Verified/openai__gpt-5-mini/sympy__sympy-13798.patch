@@ -1,0 +1,69 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..018461db8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,29 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++python3 - "$output" <<'PY'
++import json,sys,re
++out=sys.argv[1]
++tests=[]
++# Test 1: custom mul_symbol
++if "ERROR_CUSTOM_MUL:" in out:
++    status="FAILED"
++elif "CUSTOM_OUTPUT:" in out:
++    m=re.search(r"CUSTOM_OUTPUT:(.*)\n", out)
++    s=m.group(1).strip() if m else ""
++    status="PASSED" if "\\\\" in s and "\\," in s else ("PASSED" if "\\," in s else "FAILED")
++else:
++    status="ERROR"
++tests.append({"name":"test_reproduction.py::test_custom_mul_symbol","status":status})
++# Test 2: integral thin space
++if "INTEGRAL_OUTPUT:" in out:
++    m=re.search(r"INTEGRAL_OUTPUT:(.*)\n?", out)
++    s=m.group(1).strip() if m else ""
++    status2="PASSED" if "\\," in s else "FAILED"
++else:
++    status2="ERROR"
++tests.append({"name":"test_reproduction.py::test_integral_thin_space","status":status2})
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++print(out)
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..6df693799
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,9 @@
++from sympy import symbols, latex, Integral
++x, y = symbols('x y')
++try:
++    s = latex(3*x**2*y, mul_symbol='\\,')
++except Exception as e:
++    print("ERROR_CUSTOM_MUL:", type(e).__name__, str(e))
++else:
++    print("CUSTOM_OUTPUT:", s)
++print("INTEGRAL_OUTPUT:", latex(Integral(2*x**2*y, x)))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..ee1d640c5
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_custom_mul_symbol",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_integral_thin_space",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

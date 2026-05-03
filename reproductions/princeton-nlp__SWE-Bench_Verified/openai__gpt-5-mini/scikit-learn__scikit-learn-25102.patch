@@ -1,0 +1,108 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..88b8b1fe6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,62 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the reproduction Python script
++cat > /testbed/test_repro.py <<'PY'
++import numpy as np
++import json
++from sklearn.datasets import load_iris
++from sklearn.feature_selection import SelectKBest, chi2
++
++X, y = load_iris(return_X_y=True, as_frame=True)
++X = X.astype({
++    "petal width (cm)": np.float16,
++    "petal length (cm)": np.float16,
++})
++X["cat"] = y.astype("category")
++
++selector = SelectKBest(chi2, k=2)
++selector.set_output(transform="pandas")
++X_out = selector.fit_transform(X, y)
++
++orig = {col: str(dtype) for col, dtype in X.dtypes.items()}
++out = {col: str(dtype) for col, dtype in X_out.dtypes.items()}
++print("ORIGINAL_DTYPES:" + json.dumps(orig))
++print("OUTPUT_DTYPES:" + json.dumps(out))
++PY
++
++# Run the reproduction and capture output (allow failures)
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++printf "%s\n" "$output"
++
++# Extract JSON strings
++orig_json=$(printf "%s\n" "$output" | sed -n "s/^ORIGINAL_DTYPES://p" | tr -d "\r")
++out_json=$(printf "%s\n" "$output" | sed -n "s/^OUTPUT_DTYPES://p" | tr -d "\r")
++
++status="ERROR"
++if [[ -n "$orig_json" && -n "$out_json" ]]; then
++  status=$(python3 - <<'PYCMP' "$orig_json" "$out_json"
++import json,sys
++try:
++    a=json.loads(sys.argv[1])
++    b=json.loads(sys.argv[2])
++    print("PASSED" if a==b else "FAILED")
++except Exception:
++    print("ERROR")
++PYCMP
++)
++fi
++
++# Write required test_status.json
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "/testbed/test_repro.py",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++echo "WROTE /testbed/test_status.json with status: $status"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..5e3949ee2
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,20 @@
++import numpy as np
++import json
++from sklearn.datasets import load_iris
++from sklearn.feature_selection import SelectKBest, chi2
++
++X, y = load_iris(return_X_y=True, as_frame=True)
++X = X.astype({
++    "petal width (cm)": np.float16,
++    "petal length (cm)": np.float16,
++})
++X["cat"] = y.astype("category")
++
++selector = SelectKBest(chi2, k=2)
++selector.set_output(transform="pandas")
++X_out = selector.fit_transform(X, y)
++
++orig = {col: str(dtype) for col, dtype in X.dtypes.items()}
++out = {col: str(dtype) for col, dtype in X_out.dtypes.items()}
++print("ORIGINAL_DTYPES:" + json.dumps(orig))
++print("OUTPUT_DTYPES:" + json.dumps(out))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..d9e2157fb
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_repro.py",
++      "status": "FAILED"
++    }
++  ]
++}

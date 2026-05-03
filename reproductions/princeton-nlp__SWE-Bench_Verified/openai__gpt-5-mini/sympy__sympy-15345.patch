@@ -1,0 +1,71 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..42b88d188
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,39 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# create the reproduction Python script
++cat > test_reproduction.py <<'PY'
++from sympy import symbols, Max
++from sympy.printing.mathematica import mathematica_code
++x = symbols('x')
++out = mathematica_code(Max(x, 2))
++print(out)
++PY
++
++# run the reproduction script and capture output and exit code
++output="$(python3 test_reproduction.py 2>&1)" || true
++exit_code=$?
++
++# compare to expected mathematica output
++expected='Max[x,2]'
++status="ERROR"
++if [ "$exit_code" -ne 0 ]; then
++  status="ERROR"
++else
++  if [ "$output" = "$expected" ]; then
++    status="PASSED"
++  else
++    status="FAILED"
++  fi
++fi
++
++# write the test status JSON
++mkdir -p /testbed
++python3 - <<PY "$output" "$status"
++import json,sys
++actual = sys.argv[1]
++status = sys.argv[2]
++tests = [{"name":"test_reproduction.py::test_mathematica_Max","status": status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print(actual)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..7929a062d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,5 @@
++from sympy import symbols, Max
++from sympy.printing.mathematica import mathematica_code
++x = symbols('x')
++out = mathematica_code(Max(x, 2))
++print(out)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..104bd7fff
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_mathematica_Max",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

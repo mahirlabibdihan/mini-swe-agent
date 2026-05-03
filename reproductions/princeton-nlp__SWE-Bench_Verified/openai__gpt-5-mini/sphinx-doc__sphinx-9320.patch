@@ -1,0 +1,102 @@
+diff --git a/repro/conf.py b/repro/conf.py
+new file mode 100644
+index 000000000..749a5dd2e
+--- /dev/null
++++ b/repro/conf.py
+@@ -0,0 +1,2 @@
++# minimal conf
++project = "test"
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..5fef4294d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,54 @@
++#!/bin/bash
++set -euo pipefail
++REPRO_DIR=./repro
++mkdir -p "$REPRO_DIR"
++cd "$REPRO_DIR"
++
++# Create an existing conf.py to mimic the report scenario
++cat > conf.py <<PY
++# minimal conf
++project = "test"
++PY
++
++OUTPUT_FILE=../sphinx_output.txt
++
++# Try to ensure sphinx-quickstart is available
++if ! command -v sphinx-quickstart >/dev/null 2>&1; then
++  echo "sphinx-quickstart not found, attempting to pip install sphinx==3.2.1"
++  # try installing specific version, fall back to latest; ignore errors but continue
++  pip install --user sphinx==3.2.1 -q || pip install --user sphinx -q || true
++  hash -r || true
++fi
++
++# Run sphinx-quickstart with a single Enter. Use timeout to avoid hanging.
++set +e
++OUTPUT=$(timeout 6s bash -lc 'printf "\n" | sphinx-quickstart 2>&1' 2>&1)
++RC=$?
++set -e
++
++echo "$OUTPUT" > "$OUTPUT_FILE"
++
++# Determine test status based on actual output and command availability
++if ! command -v sphinx-quickstart >/dev/null 2>&1; then
++  STATUS="SKIPPED"
++elif echo "$OUTPUT" | grep -q "Please enter a valid path name"; then
++  # The bug reported: pressing Enter prints "Please enter a valid path name" instead of exiting
++  STATUS="FAILED"
++elif [ $RC -eq 124 ]; then
++  # timeout expired -> likely hung (also a failure to exit)
++  STATUS="FAILED"
++else
++  STATUS="PASSED"
++fi
++
++python3 - <<PY
++import json, pathlib, sys
++status = "$STATUS"
++out = pathlib.Path("$OUTPUT_FILE").read_text()
++tests = [{"name": "test_repro::sphinx_quickstart_exit", "status": status}]
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print("==== RUN SUMMARY ====")
++print("Test status:", status)
++print("Captured output:")
++print(out)
++PY
+diff --git a/sphinx_output.txt b/sphinx_output.txt
+new file mode 100644
+index 000000000..da4547726
+--- /dev/null
++++ b/sphinx_output.txt
+@@ -0,0 +1,13 @@
++Welcome to the Sphinx 4.1.0 quickstart utility.
++
++Please enter values for the following settings (just press Enter to
++accept a default value, if one is given in brackets).
++
++Selected root path: .
++
++Error: an existing conf.py has been found in the selected root path.
++sphinx-quickstart will not overwrite existing Sphinx projects.
++
++> Please enter a new root path (or just Enter to exit) []: * Please enter a valid path name.
++> Please enter a new root path (or just Enter to exit) []: 
++[Interrupted.]
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..4ea2be3e8
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro::sphinx_quickstart_exit",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

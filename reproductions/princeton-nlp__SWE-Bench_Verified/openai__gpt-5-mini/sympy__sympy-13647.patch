@@ -1,0 +1,152 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..e252b2258
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,78 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Create the reproduction Python script
++cat > test_repro.py <<'PY'
++import sympy as sm
++M = sm.eye(6)
++V = 2 * sm.ones(6, 2)
++R = M.col_insert(3, V)
++R_list = [[int(e) for e in row] for row in R.tolist()]
++
++expected_buggy = [
++    [1,0,0,2,2,1,0,0],
++    [0,1,0,2,2,0,1,0],
++    [0,0,1,2,2,0,0,1],
++    [0,0,0,2,2,0,0,0],
++    [0,0,0,2,2,0,0,0],
++    [0,0,0,2,2,0,0,0],
++]
++
++expected_correct = [
++    [1,0,0,2,2,0,0,0],
++    [0,1,0,2,2,0,0,0],
++    [0,0,1,2,2,0,0,0],
++    [0,0,0,2,2,1,0,0],
++    [0,0,0,2,2,0,1,0],
++    [0,0,0,2,2,0,0,1],
++]
++
++print("sympy_version:", sm.__version__)
++if R_list == expected_buggy:
++    print("BUGGY")
++elif R_list == expected_correct:
++    print("CORRECT")
++else:
++    print("UNKNOWN")
++print("result_matrix:", R_list)
++PY
++
++# Try to ensure sympy==1.1.1 is installed (best-effort)
++python - <<'PY' || true
++import sys, subprocess
++try:
++    import sympy as sm
++    v = sm.__version__
++except Exception:
++    v = None
++if v != '1.1.1':
++    try:
++        subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'sympy==1.1.1'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
++    except Exception as e:
++        print('pip install sympy==1.1.1 failed:', e)
++else:
++    print('sympy==1.1.1 already present')
++PY
++
++# Run the reproduction and capture output
++python test_repro.py 2>&1 | tee test_repro_output.txt || true
++output=$(cat test_repro_output.txt)
++
++# Derive test status and write required JSON files
++python - <<'PY' "$output"
++import json, sys
++out = sys.argv[1]
++if "BUGGY" in out:
++    status = "FAILED"
++elif "CORRECT" in out:
++    status = "PASSED"
++elif "UNKNOWN" in out:
++    status = "ERROR"
++else:
++    status = "ERROR"
++tests = [{"name": "test_repro.py::test_col_insert", "status": status}]
++open("test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print(json.dumps({"tests": tests}, indent=2))
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..27a883d83
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,32 @@
++import sympy as sm
++M = sm.eye(6)
++V = 2 * sm.ones(6, 2)
++R = M.col_insert(3, V)
++R_list = [[int(e) for e in row] for row in R.tolist()]
++
++expected_buggy = [
++    [1,0,0,2,2,1,0,0],
++    [0,1,0,2,2,0,1,0],
++    [0,0,1,2,2,0,0,1],
++    [0,0,0,2,2,0,0,0],
++    [0,0,0,2,2,0,0,0],
++    [0,0,0,2,2,0,0,0],
++]
++
++expected_correct = [
++    [1,0,0,2,2,0,0,0],
++    [0,1,0,2,2,0,0,0],
++    [0,0,1,2,2,0,0,0],
++    [0,0,0,2,2,1,0,0],
++    [0,0,0,2,2,0,1,0],
++    [0,0,0,2,2,0,0,1],
++]
++
++print("sympy_version:", sm.__version__)
++if R_list == expected_buggy:
++    print("BUGGY")
++elif R_list == expected_correct:
++    print("CORRECT")
++else:
++    print("UNKNOWN")
++print("result_matrix:", R_list)
+diff --git a/test_repro_output.txt b/test_repro_output.txt
+new file mode 100644
+index 000000000..a738d2690
+--- /dev/null
++++ b/test_repro_output.txt
+@@ -0,0 +1,9 @@
++/testbed/sympy/core/basic.py:3: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
++  from collections import Mapping, defaultdict
++/testbed/sympy/core/containers.py:271: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
++  class OrderedSet(collections.MutableSet):
++/testbed/sympy/plotting/plot.py:28: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
++  from collections import Callable
++sympy_version: 1.1.2.dev
++BUGGY
++result_matrix: [[1, 0, 0, 2, 2, 1, 0, 0], [0, 1, 0, 2, 2, 0, 1, 0], [0, 0, 1, 2, 2, 0, 0, 1], [0, 0, 0, 2, 2, 0, 0, 0], [0, 0, 0, 2, 2, 0, 0, 0], [0, 0, 0, 2, 2, 0, 0, 0]]
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..d8889ab89
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_col_insert",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

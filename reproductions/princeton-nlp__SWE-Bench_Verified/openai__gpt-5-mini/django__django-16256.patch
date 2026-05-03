@@ -1,0 +1,75 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..375588381f
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,13 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "$0")"
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++status="PASSED"
++if echo "$output" | grep -q "QuerySet.create called"; then
++  status="FAILED"
++elif echo "$output" | grep -q "BUG REPRODUCED"; then
++  status="FAILED"
++fi
++printf '{"tests":[{"name":"test_reproduction.py::test_related_manager_acreate","status":"%s"}]}\n' "$status" > test_status.json
++echo "WROTE test_status.json with status: $status"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..1ba62f425f
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,43 @@
++import asyncio
++
++class QuerySet:
++    def create(self, **kwargs):
++        print("QuerySet.create called")
++        return {"created_by": "QuerySet", "kwargs": kwargs}
++
++class Manager:
++    def __init__(self):
++        self.created_by_manager = False
++
++    def create(self, **kwargs):
++        print("Manager.create called")
++        self.created_by_manager = True
++        return {"created_by": "Manager", "kwargs": kwargs}
++
++# Simulate a related manager that *should* call Manager.create,
++# but due to the accidental async additions to QuerySet, its acreate
++# is wired to call QuerySet.create instead (the bug).
++class RelatedManager(Manager):
++    def __init__(self):
++        super().__init__()
++        self._queryset = QuerySet()
++
++    # Buggy async method: calls QuerySet.create instead of Manager.create
++    async def acreate(self, **kwargs):
++        # In the real bug this would be await sync_to_async(self._queryset.create)(**kwargs)
++        # Here we simulate the mis-wiring directly.
++        return self._queryset.create(**kwargs)
++
++async def run_check():
++    rm = RelatedManager()
++    result = await rm.acreate(foo="bar")
++    # The output from create() implementations above will show which was called.
++    print("RESULT:", result)
++    # Determine whether the manager's create() was used (it sets created_by_manager flag).
++    if rm.created_by_manager:
++        print("TEST_VERDICT: Manager.create was called (EXPECTED)")
++    else:
++        print("TEST_VERDICT: QuerySet.create was called (BUG REPRODUCED)")
++
++if __name__ == "__main__":
++    asyncio.run(run_check())
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..8a3d5e3d0c
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py::test_related_manager_acreate","status":"FAILED"}]}

@@ -1,0 +1,105 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 000000000..672afa1c9
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,12 @@
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 11, in <module>
++    ts.remove_column("flux")
++  File "/testbed/astropy/timeseries/core.py", line 31, in wrapper
++    result = method(self, *args, **kwargs)
++  File "/testbed/astropy/table/table.py", line 2636, in remove_column
++    self.remove_columns([name])
++  File "/testbed/astropy/timeseries/core.py", line 32, in wrapper
++    self._check_required_columns()
++  File "/testbed/astropy/timeseries/core.py", line 79, in _check_required_columns
++    raise ValueError("{} object is invalid - expected '{}' "
++ValueError: TimeSeries object is invalid - expected 'time' as the first columns but found 'time'
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..02456bef9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,49 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Ensure reproduction script exists (should already be present)
++if [ ! -f test_reproduction.py ]; then
++  cat > test_reproduction.py <<'PY'
++import numpy as np
++from astropy.time import Time
++from astropy.timeseries import TimeSeries
++
++time = Time(np.arange(100000, 100003), format='jd')
++ts = TimeSeries(time=time, data={"flux": [99.9, 99.8, 99.7]})
++ts._required_columns = ["time", "flux"]
++ts.remove_column("flux")
++PY
++fi
++
++# Run the reproduction script, but do not exit the runner on its failure.
++set +e
++python3 test_reproduction.py > run_output.txt 2>&1
++rc=$?
++set -e
++
++output=$(cat run_output.txt)
++
++# Determine status based on actual output
++if [ $rc -eq 0 ]; then
++  status="PASSED"
++else
++  if echo "$output" | grep -q "TimeSeries object is invalid"; then
++    status="FAILED"
++  else
++    status="ERROR"
++  fi
++fi
++
++# Write the test_status.json based on actual run and print captured output
++python3 - "$output" "$rc" "$status" <<'PY2'
++import json,sys
++out=sys.argv[1]
++rc=int(sys.argv[2])
++status_arg=sys.argv[3]
++tests=[{"name":"testbed/test_reproduction.py::test_remove_required_column","status": status_arg}]
++open("test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print(out)
++PY2
++
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..f7e458c41
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,11 @@
++
++import numpy as np
++from astropy.time import Time
++from astropy.timeseries import TimeSeries
++
++# Reproduce the situation from the PR description
++time = Time(np.arange(100000, 100003), format='jd')
++ts = TimeSeries(time=time, data={"flux": [99.9, 99.8, 99.7]})
++ts._required_columns = ["time", "flux"]
++# This should raise the misleading ValueError described in the PR
++ts.remove_column("flux")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..2441ad9ce
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_reproduction.py::test_remove_required_column",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

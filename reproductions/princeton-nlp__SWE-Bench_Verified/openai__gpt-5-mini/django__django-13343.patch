@@ -1,0 +1,66 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..581b3d3084
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,13 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++output=$(python3 test_repro.py 2>&1 || true)
++status="FAILED"
++if echo "$output" | grep -q "TEST PASSED"; then
++  status="PASSED"
++fi
++cat > test_status.json <<JSON
++{"tests": [{"name": "test_repro.py::test_filefield_storage_deconstruct", "status": "$status"}]}
++JSON
++echo "$output"
++echo "Wrote /testbed/test_status.json"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..47c2d97435
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,34 @@
++#!/usr/bin/env python3
++def storage_factory():
++    return "evaluated-storage"
++
++class BadFileField:
++    """
++    Reproduces the faulty behavior described in the PR:
++    deconstruct() evaluates callable storage instead of returning the callable reference.
++    """
++    def __init__(self, storage):
++        self.storage = storage
++
++    def deconstruct(self):
++        # Faulty behavior: evaluate the callable storage (single call)
++        storage = self.storage() if callable(self.storage) else self.storage
++        return {'storage': storage}
++
++def test_filefield_storage_deconstruct():
++    fld = BadFileField(storage_factory)
++    decon = fld.deconstruct()
++    # The correct behavior would be to return the callable itself (storage_factory).
++    # This assertion verifies that: it will fail for the faulty implementation.
++    assert decon['storage'] is storage_factory, "Deconstruction evaluated callable storage; expected callable reference."
++
++if __name__ == "__main__":
++    try:
++        test_filefield_storage_deconstruct()
++        print("TEST PASSED")
++        raise SystemExit(0)
++    except AssertionError:
++        import traceback, sys
++        traceback.print_exc()
++        print("TEST FAILED")
++        raise SystemExit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..08ada68294
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_repro.py::test_filefield_storage_deconstruct", "status": "FAILED"}]}

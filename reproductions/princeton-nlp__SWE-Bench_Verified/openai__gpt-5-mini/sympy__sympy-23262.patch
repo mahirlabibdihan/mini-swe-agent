@@ -1,0 +1,47 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..7e7eaa4d18
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,14 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction script and capture output
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++# If bug reproduced (missing comma), mark as FAILED; otherwise PASSED
++if [[ "$output" == *$'return (1)\n'* && "$output" != *$'return (1,)\n'* ]]; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"testbed/test_reproduction.py::test_singleton_tuple_code_printer","status":"$status"}]}
++JSON
++printf "%s\nTEST_STATUS_WRITTEN: %s\n" "$output" "$status"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..013061bdf5
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,14 @@
++import inspect
++from sympy import lambdify
++# Generate source for singleton tuple
++src_single = inspect.getsource(lambdify([], tuple([1])))
++# Generate source for two-element tuple for comparison
++src_double = inspect.getsource(lambdify([], tuple([1, 2])))
++print("===SINGLE_SOURCE_START===")
++print(repr(src_single))
++print(src_single)
++print("===SINGLE_SOURCE_END===\n")
++print("===DOUBLE_SOURCE_START===")
++print(repr(src_double))
++print(src_double)
++print("===DOUBLE_SOURCE_END===")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..4f9d2fea2a
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"testbed/test_reproduction.py::test_singleton_tuple_code_printer","status":"FAILED"}]}

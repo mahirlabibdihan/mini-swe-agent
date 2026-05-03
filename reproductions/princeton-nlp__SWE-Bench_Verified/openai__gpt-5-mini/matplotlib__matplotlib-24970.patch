@@ -1,0 +1,58 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..3d6657ea8b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++# Ensure packages are available (install specific versions if needed)
++python - <<PY2
++import sys, subprocess
++try:
++    import matplotlib, numpy
++except Exception:
++    subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "matplotlib==3.6.2", "numpy==1.24.0"])
++PY2
++
++# Run the reproduction and capture combined stdout+stderr
++output="$(python test_reproduction.py 2>&1 || true)"
++echo "$output"
++
++# If DeprecationWarning is found, that indicates the bug, so mark as FAILED.
++if echo "$output" | grep -q "DeprecationWarning"; then
++    status="FAILED"
++else
++    status="PASSED"
++fi
++
++# Write required test_status.json
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_repro/test_deprecation.py::test_numpy_1_24_warnings", "status": "$status"}]}
++JSON
++
++# Print the test status for visibility
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..ba0b006b05
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,8 @@
++import warnings
++warnings.simplefilter("always", DeprecationWarning)
++import matplotlib.pyplot as plt
++import numpy as np
++
++# Reproduction from PR description
++plt.get_cmap()(np.empty((0,), dtype=np.uint8))
++print("REPRODUCTION_DONE")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..cffb02e440
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_repro/test_deprecation.py::test_numpy_1_24_warnings", "status": "FAILED"}]}

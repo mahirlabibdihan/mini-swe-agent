@@ -1,0 +1,94 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..7fc32d11a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,37 @@
++#!/usr/bin/env bash
++# run_test.sh - run the reproduction and mark FAILED when the bug is reproduced
++OUTFILE=/testbed/test_status.json
++PY_OUTPUT=$(/usr/bin/env python3 /testbed/test_reproduction.py 2>&1)
++PY_RC=$?
++echo "=== PYTHON OUTPUT ==="
++echo "$PY_OUTPUT"
++status="ERROR"
++if [ "$PY_RC" -eq 2 ]; then
++  status="ERROR"
++elif [ "$PY_RC" -eq 3 ]; then
++  status="ERROR"
++else
++  if echo "$PY_OUTPUT" | grep -q "REPRODUCED"; then
++    # The bug is reproduced -> record as FAILED (failing test case)
++    status="FAILED"
++  elif echo "$PY_OUTPUT" | grep -q "NOT_REPRODUCED"; then
++    status="PASSED"
++  else
++    status="ERROR"
++  fi
++fi
++
++cat > "$OUTFILE" <<JSON
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++echo "WROTE $OUTFILE"
++echo "Test status: $status"
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..5c08d0396
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,31 @@
++import warnings
++import sys
++try:
++    import pandas as pd
++    from sklearn.ensemble import IsolationForest
++except Exception as e:
++    print("IMPORT_ERROR:" + str(e))
++    sys.exit(2)
++
++warnings.simplefilter("always")
++warn_msgs = []
++try:
++    X = pd.DataFrame({"a": [-1.1, 0.3, 0.5, 100]})
++    with warnings.catch_warnings(record=True) as w:
++        warnings.simplefilter("always")
++        clf = IsolationForest(random_state=0, contamination=0.05)
++        clf.fit(X)
++        for wi in w:
++            warn_msgs.append(str(wi.message))
++except Exception as e:
++    print("EXCEPTION:" + str(e))
++    sys.exit(3)
++
++for m in warn_msgs:
++    print("WARN:" + m)
++if any("X does not have valid feature names" in m for m in warn_msgs):
++    print("REPRODUCED")
++    sys.exit(0)
++else:
++    print("NOT_REPRODUCED")
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..ea08f3727
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py",
++      "status": "FAILED"
++    }
++  ]
++}

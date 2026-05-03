@@ -1,0 +1,106 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..f195570a9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,5 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction script. It will write /testbed/test_status.json
++python3 test_reproduction.py
++echo "run_test.sh completed"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..f5d4b242e
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,54 @@
++#!/usr/bin/env python3
++import json
++from pathlib import Path
++# Attempt to import sympy; if not present, fail with a clear message.
++try:
++    from sympy import Symbol
++    from sympy.physics.quantum import TensorProduct as tp
++    from sympy.physics.quantum import tensor_product_simp as tps
++    from sympy.physics.paulialgebra import Pauli
++except Exception as e:
++    # Write an error test status if sympy is unavailable
++    Path("/testbed/test_status.json").write_text(json.dumps({
++        "tests": [
++            {"name": "test_repro/import_sympy", "status": "ERROR"}
++        ]
++    }, indent=2))
++    print("ERROR importing sympy:", e)
++    raise
++
++a = Symbol('a', commutative=False)
++
++# Prepare cases from the PR description
++t1 = tp(1,1)*tp(1,1)
++t1_tps = str(tps(t1))
++t1_expand = str(t1.expand(tensorproduct=True))
++t1_subs = str(tps(tp(1,1)*tp(1,a)).subs(a, 1))
++
++t2 = tp(1, Pauli(3))*tp(1, Pauli(3))
++t2_tps = str(tps(t2))
++t2_expand = str(t2.expand(tensorproduct=True))
++t2_subs = str(tps(tp(1,Pauli(3))*tp(1,a)).subs(a, Pauli(3)))
++
++expected1 = str(tp(1,1))         # expected simplified form "1x1"
++expected2 = str(tp(1, Pauli(3))) # expected simplified form "1xsigma3"
++
++# Build tests: we expect simplification to the "expected" values (this is what should happen; if it doesn't, the test will FAIL and thus reproduce the bug)
++tests = []
++
++def add_test(name, actual, expected):
++    status = "PASSED" if actual == expected else "FAILED"
++    tests.append({"name": name, "status": status})
++    print(f"{name}: actual='{actual}' expected='{expected}' -> {status}")
++
++add_test("test_repro/tensor_power_commutative_tps", t1_tps, expected1)
++add_test("test_repro/tensor_power_commutative_expand", t1_expand, expected1)
++add_test("test_repro/tensor_power_commutative_subs", t1_subs, expected1)
++
++add_test("test_repro/tensor_power_pauli_tps", t2_tps, expected2)
++add_test("test_repro/tensor_power_pauli_expand", t2_expand, expected2)
++add_test("test_repro/tensor_power_pauli_subs", t2_subs, expected2)
++
++out = {"tests": tests}
++Path("/testbed/test_status.json").write_text(json.dumps(out, indent=2))
++print("\nWrote /testbed/test_status.json with results.")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..cc5f3c077
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,28 @@
++{
++  "tests": [
++    {
++      "name": "test_repro/tensor_power_commutative_tps",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro/tensor_power_commutative_expand",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro/tensor_power_commutative_subs",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro/tensor_power_pauli_tps",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro/tensor_power_pauli_expand",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro/tensor_power_pauli_subs",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

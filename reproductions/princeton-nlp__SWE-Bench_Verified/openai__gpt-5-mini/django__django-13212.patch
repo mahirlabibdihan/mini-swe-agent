@@ -1,0 +1,83 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..668d4d4a3a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++set -euo pipefail
++# Ensure Django 3.0 is installed (fallback)
++python3 -m pip install --quiet Django==3.0 || python3 -m pip install --quiet Django
++
++output_file="/tmp/test_output.txt"
++
++# Run the test but don't let errexit stop the script; capture the exit code
++set +e
++python3 /testbed/test_reproduction.py 2>&1 | tee "$output_file"
++ret=$?
++set -e
++
++# Print captured output
++cat "$output_file" || true
++
++# Determine status
++status="PASSED"
++if [ "$ret" -ne 0 ]; then
++  status="FAILED"
++fi
++
++# Write test_status.json in required schema
++python3 - <<PY "$ret" "$status"
++import sys, json
++ret = int(sys.argv[1])
++status = sys.argv[2]
++test_name = "test_reproduction.py::test_email_validator_includes_value"
++open("/testbed/test_status.json", "w").write(json.dumps({"tests":[{"name": test_name, "status": status}]}, indent=2))
++print("WROTE /testbed/test_status.json with status", status)
++PY
++
++# Exit zero so the harness sees the script executed successfully
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..122dda078d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,22 @@
++#!/usr/bin/env python3
++from django.core.validators import EmailValidator
++from django.core.exceptions import ValidationError
++
++v = EmailValidator(message="%(value)s is not a valid email.")
++test_value = "blah"
++try:
++    v(test_value)
++    print("NO_ERROR_RAISED")
++    raise SystemExit(1)
++except ValidationError as e:
++    msgs = e.messages
++    params = getattr(e, 'params', None)
++    print("CAUGHT_MESSAGES:", msgs)
++    print("PARAMS:", params)
++    # check if any message contains the test_value
++    if any(test_value in str(m) for m in msgs):
++        print("VALUE_PRESENT")
++        raise SystemExit(0)
++    else:
++        print("VALUE_MISSING")
++        raise SystemExit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..05be594986
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_email_validator_includes_value",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

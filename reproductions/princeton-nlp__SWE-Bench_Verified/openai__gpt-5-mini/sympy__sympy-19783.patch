@@ -1,0 +1,72 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..c24e2929ea
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,30 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 test_reproduction.py 2>&1 || true)
++python3 - "$output" <<'PY'
++import sys, json
++out = sys.argv[1]
++lines = out.splitlines()
++prod1_line = next((l for l in lines if l.startswith("prod1:")), "")
++prod2_line = next((l for l in lines if l.startswith("prod2:")), "")
++prod1 = prod1_line.partition("prod1:")[2].strip()
++prod2 = prod2_line.partition("prod2:")[2].strip()
++
++tests = []
++# Test 1: A * I should simplify to A
++status1 = "PASSED" if prod1 == "A" else "FAILED"
++tests.append({"name":"test_reproduction.py::A_times_Identity","status":status1})
++
++# Test 2: Dagger(A) * I should ideally simplify to Dagger(A).
++# According to the reported issue, it remains unsimplified and contains I/Identity. Mark FAILED if it still contains I.
++if prod2 == "":
++    status2 = "ERROR"
++elif ("I" in prod2) or ("Identity" in prod2):
++    status2 = "FAILED"
++else:
++    status2 = "PASSED"
++tests.append({"name":"test_reproduction.py::DaggerA_times_Identity","status":status2})
++
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print(out)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..5f5d4b9ad4
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,11 @@
++from sympy.physics.quantum import Dagger
++from sympy.physics.quantum.operator import Operator, IdentityOperator
++
++A = Operator('A')
++I = IdentityOperator()
++
++prod1 = A * I
++prod2 = Dagger(A) * I
++
++print("prod1:", str(prod1))
++print("prod2:", str(prod2))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..6258007dae
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::A_times_Identity",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::DaggerA_times_Identity",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

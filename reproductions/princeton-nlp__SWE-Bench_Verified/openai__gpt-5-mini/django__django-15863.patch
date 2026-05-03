@@ -1,0 +1,80 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..2280bc2c5b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,42 @@
++#!/bin/bash
++set -euo pipefail
++
++# Ensure Django is available
++pip install --quiet "Django>=4.2"
++
++# Create reproduction script
++cat > /testbed/test_repro.py <<'PY'
++from decimal import Decimal
++from django import setup
++from django.conf import settings
++from django.template import Template, Context
++
++settings.configure(TEMPLATES=[{'BACKEND': 'django.template.backends.django.DjangoTemplates'}])
++setup()
++
++t = Template('{{ value|floatformat:20 }}')
++c = Context({'value': Decimal('42.12345678901234567890')})
++print(t.render(c))
++PY
++
++# Run the reproduction script and capture output
++output="$(python3 /testbed/test_repro.py 2>&1 || true)"
++output="$(echo -n "$output")"
++
++# Expected output if Decimal precision preserved
++expected='42.12345678901234567890'
++status="FAILED"
++if [ "$output" = "$expected" ]; then
++  status="PASSED"
++fi
++
++# Write test status JSON to /testbed/test_status.json
++python3 - "$output" "$status" <<'PY2'
++import json,sys
++output=sys.argv[1]
++status=sys.argv[2]
++report = {"tests":[{"name":"test_repro.py::floatformat_decimal_precision","status": status}]}
++open("/testbed/test_status.json","w").write(json.dumps(report,indent=2))
++# Also print the observed output for visibility
++print(output)
++PY2
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..931282f7f0
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,11 @@
++from decimal import Decimal
++from django import setup
++from django.conf import settings
++from django.template import Template, Context
++
++settings.configure(TEMPLATES=[{'BACKEND': 'django.template.backends.django.DjangoTemplates'}])
++setup()
++
++t = Template('{{ value|floatformat:20 }}')
++c = Context({'value': Decimal('42.12345678901234567890')})
++print(t.render(c))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..d2f2a516a9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::floatformat_decimal_precision",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

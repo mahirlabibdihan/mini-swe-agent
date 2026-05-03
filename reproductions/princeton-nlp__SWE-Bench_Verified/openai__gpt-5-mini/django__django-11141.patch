@@ -1,0 +1,70 @@
+diff --git a/proj/migrations/0001_initial.py b/proj/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..8398839936
+--- /dev/null
++++ b/proj/migrations/0001_initial.py
+@@ -0,0 +1 @@
++print("migration module loaded")
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a0a94406d3
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,20 @@
++#!/usr/bin/env bash
++cd /testbed
++OUTPUT=$(python3 simulate_migrate.py 2>&1)
++EXIT_CODE=$?
++echo "==== simulate_migrate.py output ===="
++echo "$OUTPUT"
++echo "Exit code: $EXIT_CODE"
++if [ "$EXIT_CODE" -eq 0 ]; then
++  STATUS="PASSED"
++else
++  STATUS="FAILED"
++fi
++python3 - <<PY "$OUTPUT" "$STATUS"
++import json, sys, pathlib
++output = sys.argv[1]
++status = sys.argv[2]
++result = {"tests": [{"name": "simulate_migrate.py::test_namespace_package_migrations", "status": status}]}
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps(result, indent=2))
++print("Wrote /testbed/test_status.json with status:", status)
++PY
+diff --git a/simulate_migrate.py b/simulate_migrate.py
+new file mode 100644
+index 0000000000..9a30f50a1e
+--- /dev/null
++++ b/simulate_migrate.py
+@@ -0,0 +1,16 @@
++# Simulate the migrate command check for __file__ on the migrations package.
++import importlib, sys
++try:
++    mod = importlib.import_module('proj.migrations')
++    # Show some diagnostics
++    print("Imported proj.migrations as:", mod)
++    if not hasattr(mod, '__file__'):
++        print("ERROR: migrations package has no __file__ attribute (namespace package).")
++        # Exit non-zero to indicate the migrate check failed (this reproduces the bug).
++        sys.exit(2)
++    else:
++        print("OK: migrations package has __file__:", getattr(mod, '__file__', None))
++except Exception as e:
++    print("EXCEPTION during import:", type(e).__name__, e)
++    sys.exit(3)
++sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..18eff99292
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "simulate_migrate.py::test_namespace_package_migrations",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

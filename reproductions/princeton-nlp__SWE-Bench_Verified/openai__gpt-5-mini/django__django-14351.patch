@@ -1,0 +1,141 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..c9c4881165
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,7 @@
++=== SQL for agent__property_groups__in=property_groups ===
++SELECT "testapp_thing"."id", "testapp_thing"."agent_id", COUNT("testapp_managementagentpropertygroup"."property_group_id") AS "agent__property_groups__count" FROM "testapp_thing" INNER JOIN "testapp_managementagent" ON ("testapp_thing"."agent_id" = "testapp_managementagent"."id") LEFT OUTER JOIN "testapp_managementagentpropertygroup" ON ("testapp_managementagent"."id" = "testapp_managementagentpropertygroup"."management_agent_id") LEFT OUTER JOIN "testapp_managementagentpropertygroup" T5 ON ("testapp_managementagent"."id" = T5."management_agent_id") GROUP BY "testapp_thing"."id", "testapp_thing"."agent_id", T5."property_group_id", (SELECT "testapp_propertygroup"."id", "testapp_propertygroup"."created", "testapp_propertygroup"."name" FROM "testapp_propertygroup") HAVING (T5."property_group_id" IN (SELECT "testapp_propertygroup"."id" FROM "testapp_propertygroup") OR COUNT("testapp_managementagentpropertygroup"."property_group_id") = 0)
++
++=== SQL for agent__property_groups__id__in=property_groups.values_list(...) ===
++SELECT "testapp_thing"."id", "testapp_thing"."agent_id", COUNT("testapp_managementagentpropertygroup"."property_group_id") AS "agent__property_groups__count" FROM "testapp_thing" INNER JOIN "testapp_managementagent" ON ("testapp_thing"."agent_id" = "testapp_managementagent"."id") LEFT OUTER JOIN "testapp_managementagentpropertygroup" ON ("testapp_managementagent"."id" = "testapp_managementagentpropertygroup"."management_agent_id") LEFT OUTER JOIN "testapp_managementagentpropertygroup" T5 ON ("testapp_managementagent"."id" = T5."management_agent_id") GROUP BY "testapp_thing"."id", "testapp_thing"."agent_id", T5."property_group_id", (SELECT U0."id" FROM "testapp_propertygroup" U0) HAVING (T5."property_group_id" IN (SELECT U0."id" FROM "testapp_propertygroup" U0) OR COUNT("testapp_managementagentpropertygroup"."property_group_id") = 0)
++
++REPRODUCED_BUG: False
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..91f3856ea0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,33 @@
++#!/bin/bash
++set -euo pipefail
++
++# Ensure Django 3.2 is available (best-effort)
++python3 -m pip install -q 'Django==3.2' || true
++
++# Run reproduction script to produce run_output.txt
++python3 /testbed/test_reproduction.py > /testbed/run_output.txt 2>&1 || true
++
++# Use Python to detect multi-column subquery patterns and write test_status.json
++python3 - <<'PY'
++import json, pathlib
++p = pathlib.Path('/testbed/run_output.txt')
++txt = p.read_text() if p.exists() else ''
++
++# Simple substrings indicating a multi-column subquery selecting multiple columns from the propertygroup table
++patterns = [
++    '"testapp_propertygroup"."id",',               # unaliased multi-column select
++    'SELECT U0."id", U0."created"',               # aliased multi-column select
++    'SELECT "testapp_propertygroup"."id", "testapp_propertygroup"."created"'
++]
++reproduced = any(pat in txt for pat in patterns)
++status = 'FAILED' if reproduced else 'PASSED'
++out = {'tests': [{'name': 'test/repro::test_q_in_subquery', 'status': status}]}
++pathlib.Path('/testbed/test_status.json').write_text(json.dumps(out, indent=2))
++print('DETECTED_MULTI_COLUMN_SUBQUERY=', reproduced)
++PY
++
++# Print diagnostics
++echo '===== RUN OUTPUT ====='
++cat /testbed/run_output.txt || true
++echo '===== TEST STATUS ====='
++cat /testbed/test_status.json || true
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..c941ba4bb9
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,40 @@
++import django, re, sys
++from django.conf import settings
++
++# Minimal Django settings to allow query compilation
++settings.configure(
++    INSTALLED_APPS=['testapp'],
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    SECRET_KEY='repro-secret',
++)
++django.setup()
++
++from testapp.models import PropertyGroup, Thing
++from django.db.models import Count, Q
++
++# Build the two query variants described in the PR.
++property_groups = PropertyGroup.objects.all()
++qs = Thing.objects.annotate(Count('agent__property_groups'))
++
++q_in_queryset = qs.filter(
++    Q(agent__property_groups__in=property_groups) | Q(agent__property_groups__count=0)
++)
++q_in_ids = qs.filter(
++    Q(agent__property_groups__id__in=property_groups.values_list('id', flat=True)) | Q(agent__property_groups__count=0)
++)
++
++sql_in_qs = str(q_in_queryset.query)
++sql_in_ids = str(q_in_ids.query)
++
++print('=== SQL for agent__property_groups__in=property_groups ===')
++print(sql_in_qs)
++print('\n=== SQL for agent__property_groups__id__in=property_groups.values_list(...) ===')
++print(sql_in_ids)
++
++# Detect whether the first SQL contains a multi-column subquery selecting multiple U0 columns (e.g., U0.id, U0.created)
++multi_col_pattern = re.compile(r'SELECT\s+U0\."id"\s*,\s*U0\."created"', re.IGNORECASE)
++reproduced = bool(multi_col_pattern.search(sql_in_qs))
++
++print('\nREPRODUCED_BUG:', reproduced)
++# Exit non-zero if reproduced (to mirror a failing reproduction)
++sys.exit(1 if reproduced else 0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..84f149e53b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test/repro::test_q_in_subquery",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..575da6c855
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,15 @@
++from django.db import models
++
++class PropertyGroup(models.Model):
++    created = models.DateTimeField(auto_now_add=True)
++    name = models.CharField(max_length=100)
++
++class ManagementAgent(models.Model):
++    property_groups = models.ManyToManyField('PropertyGroup', through='ManagementAgentPropertyGroup', related_name='agents')
++
++class ManagementAgentPropertyGroup(models.Model):
++    management_agent = models.ForeignKey(ManagementAgent, on_delete=models.CASCADE)
++    property_group = models.ForeignKey(PropertyGroup, on_delete=models.CASCADE)
++
++class Thing(models.Model):
++    agent = models.ForeignKey(ManagementAgent, on_delete=models.CASCADE)

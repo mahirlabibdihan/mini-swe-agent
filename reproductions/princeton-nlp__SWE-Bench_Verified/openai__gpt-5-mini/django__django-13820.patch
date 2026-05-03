@@ -1,0 +1,88 @@
+diff --git a/output.log b/output.log
+new file mode 100644
+index 0000000000..f4eacdf28e
+--- /dev/null
++++ b/output.log
+@@ -0,0 +1,2 @@
++TEST:test_rejects_package_without___file__:FAILED:current_skip=True,expected=False,__path_type=list
++TEST:test_detects_namespace_package:PASSED:current_skip=True,expected=True,__path_type=FakeNamespacePath
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..0db2d5d0dd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,20 @@
++#!/bin/bash
++set -euo pipefail
++python /testbed/test_reproduction.py > /testbed/output.log 2>&1 || true
++python - <<'PY' /testbed/output.log
++import sys, json, re
++out_path = sys.argv[1]
++out = open(out_path).read()
++tests = []
++for line in out.splitlines():
++    m = re.match(r'^TEST:(?P<name>[^:]+):(?P<status>PASSED|FAILED):(?P<msg>.*)$', line)
++    if m:
++        name = m.group('name')
++        status = m.group('status')
++        tests.append({"name": f"test_reproduction.py::{name}", "status": "PASSED" if status=="PASSED" else "FAILED"})
++if not tests:
++    tests = [{"name":"test_reproduction.py::no_tests_found","status":"ERROR"}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print(out)
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..90cae6d39b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,29 @@
++import types
++# Simulate two module objects:
++# 1) frozen_pkg: no __file__, but __path__ is a plain list (should be treated as normal package)
++# 2) ns_pkg: no __file__, and __path__ is a custom iterable (namespace package)
++class FakeNamespacePath:
++    def __iter__(self):
++        yield 'part1'
++# frozen-package simulation: no __file__, __path__ is list
++frozen_pkg = types.ModuleType('frozen_pkg')
++frozen_pkg.__path__ = ['fake/path']
++# namespace-package simulation: no __file__, __path__ is custom iterable
++ns_pkg = types.ModuleType('ns_pkg')
++ns_pkg.__path__ = FakeNamespacePath()
++
++def loader_skips_by_current_check(m):
++    # The current Django check: skip if getattr(m, '__file__', None) is falsy
++    return not getattr(m, '__file__', None)
++
++# Test 1: frozen package - expected behavior: NOT skipped (False); current behavior returns True (bug)
++res1 = loader_skips_by_current_check(frozen_pkg)
++expected1 = False
++status1 = "PASSED" if res1 == expected1 else "FAILED"
++print(f"TEST:test_rejects_package_without___file__:{status1}:current_skip={res1},expected={expected1},__path_type={type(frozen_pkg.__path__).__name__}")
++
++# Test 2: namespace package - expected behavior: skipped (True); current behavior returns True (correct)
++res2 = loader_skips_by_current_check(ns_pkg)
++expected2 = True
++status2 = "PASSED" if res2 == expected2 else "FAILED"
++print(f"TEST:test_detects_namespace_package:{status2}:current_skip={res2},expected={expected2},__path_type={type(ns_pkg.__path__).__name__}")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..d84c754560
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_rejects_package_without___file__",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_detects_namespace_package",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,69 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..1d7b09e608
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++status="ERROR"
++if echo "$output" | grep -q '^IMPORT_ERROR:'; then
++  status="ERROR"
++elif echo "$output" | grep -q '^BUG:'; then
++  # If the bug is observed, the reproduction should be marked FAILED
++  status="FAILED"
++elif echo "$output" | grep -q '^NO_BUG:'; then
++  # If no bug observed, mark as PASSED
++  status="PASSED"
++else
++  status="ERROR"
++fi
++python3 - <<PY2
++import json, sys
++d = {"tests": [{"name": "/testbed/test_reproduction.py", "status": "$status"}]}
++open("/testbed/test_status.json", "w").write(json.dumps(d, indent=2))
++print("""--- SCRIPT OUTPUT START ---
++$output
++--- SCRIPT OUTPUT END ---""")
++PY2
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..523e2c3a86
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,19 @@
++#!/usr/bin/env python3
++import sys
++try:
++    from sympy import ring, ZZ, symbols
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    sys.exit(0)
++
++R, x, y, z = ring("x,y,z", ZZ)
++f = 3*x**2*y - x*y*z + 7*z**3 + 1
++U, V, W = symbols("u,v,w")
++expr = f.as_expr(U, V, W)
++s = str(expr)
++print("EXPR:", s)
++# Determine whether provided symbols were used
++if any(sym in s for sym in ("u", "v", "w")):
++    print("NO_BUG: as_expr respected provided symbols")
++else:
++    print("BUG: as_expr ignored provided symbols")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..84ba323ebc
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

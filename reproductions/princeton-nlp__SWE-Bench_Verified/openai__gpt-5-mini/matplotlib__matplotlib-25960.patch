@@ -1,0 +1,113 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..453f4bbb2e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++output="$(python3 /testbed/test_repro.py 2>&1 || true)"
++if echo "$output" | grep -q "^REPRODUCED"; then
++  status="FAILED"
++elif echo "$output" | grep -q "^NOT_REPRODUCED"; then
++  status="PASSED"
++elif echo "$output" | grep -q "^ERROR"; then
++  status="ERROR"
++else
++  status="ERROR"
++fi
++# Write the canonical JSON status file
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "testbed/test_repro.py::test_subfig_spaces",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++# Print reproduction output for diagnostic purposes
++printf "%s\n" "$output"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..9501591c27
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,62 @@
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++import numpy as np
++import traceback
++
++def get_norm_bboxes(nrows, ncols, wspace, hspace):
++    fig = plt.figure()
++    try:
++        subfigs = fig.subfigures(nrows, ncols, wspace=wspace, hspace=hspace)
++    except Exception as e:
++        plt.close(fig)
++        raise
++    # create one axes per subfigure
++    for sub in subfigs.flat:
++        sub.subplots()  # create a single axes inside subfigure
++
++    # draw and obtain renderer
++    fig.canvas.draw()
++    renderer = fig.canvas.get_renderer()
++    W, H = fig.canvas.get_width_height()
++
++    bboxes = []
++    for sub in subfigs.flat:
++        # axes created inside subfigure should be in sub.axes
++        if not getattr(sub, "axes", None):
++            raise RuntimeError("Subfigure has no axes attribute or it's empty")
++        ax = sub.axes[0]
++        bbox = ax.get_window_extent(renderer)
++        bboxes.append((bbox.x0 / W, bbox.y0 / H, bbox.x1 / W, bbox.y1 / H))
++    plt.close(fig)
++    return bboxes
++
++def compare(b0, b1, tol=1e-3):
++    if len(b0) != len(b1):
++        return False, "different number of boxes: {} vs {}".format(len(b0), len(b1))
++    maxdiff = 0.0
++    for a, b in zip(b0, b1):
++        diffs = [abs(ai - bi) for ai, bi in zip(a, b)]
++        maxdiff = max(maxdiff, max(diffs))
++    return maxdiff <= tol, "maxdiff={:.6f}".format(maxdiff)
++
++def main():
++    try:
++        b0 = get_norm_bboxes(2, 2, wspace=0, hspace=0)
++        b1 = get_norm_bboxes(2, 2, wspace=0.5, hspace=0.5)
++        same, info = compare(b0, b1)
++        if same:
++            print("REPRODUCED: subfigure positions are effectively identical. " + info)
++            # Also print the bboxes for inspection
++            print("BBOXES (wspace=0):", b0)
++            print("BBOXES (wspace=0.5):", b1)
++        else:
++            print("NOT_REPRODUCED: subfigure positions differ. " + info)
++            print("BBOXES (wspace=0):", b0)
++            print("BBOXES (wspace=0.5):", b1)
++    except Exception as e:
++        print("ERROR during reproduction:")
++        traceback.print_exc()
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..3d1fd42841
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_repro.py::test_subfig_spaces",
++      "status": "FAILED"
++    }
++  ]
++}

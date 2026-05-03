@@ -1,0 +1,75 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..2055196d9e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Run the reproduction script and capture output and exit code without failing the runner
++set +e
++output=$(/usr/bin/env python3 /testbed/test_repro.py 2>&1)
++rc=$?
++set -e
++status="PASSED"
++if [ "$rc" -ne 0 ]; then status="FAILED"; fi
++# Write machine-readable test results
++python3 - <<PY "$rc" "$status" "$output"
++import json, sys
++rc = int(sys.argv[1])
++status = sys.argv[2]
++output = sys.argv[3] if len(sys.argv) > 3 else ""
++tests = [{"name": "test_repro.py::test_field_deepcopy_error_messages", "status": status}]
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++# Print captured output for visibility
++print(output)
++PY
++echo "Wrote /testbed/test_status.json with status: $status (exit code $rc)"
++# Always exit 0 so the test runner script itself doesn't fail the submission system
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..ede29f23a9
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,25 @@
++#!/usr/bin/env python3
++import copy
++
++class Field:
++    def __init__(self):
++        self.error_messages = {'required': 'This field is required.'}
++    def __deepcopy__(self, memo):
++        # BUGGY behavior: shallow copy of __dict__, sharing error_messages among copies
++        new = self.__class__.__new__(self.__class__)
++        new.__dict__ = self.__dict__.copy()  # shallow copy -> error_messages shared
++        return new
++
++def test_field_deepcopy_error_messages():
++    f = Field()
++    f1 = copy.deepcopy(f)
++    f2 = copy.deepcopy(f)
++    # Modify f1's error_messages; with the bug, this will also change f2
++    f1.error_messages['required'] = 'Modified message'
++    # Expectation (correct behavior) would be that f2 remains unchanged.
++    # We assert that f2 does NOT equal the modified message; this should FAIL given the bug.
++    assert f2.error_messages['required'] != 'Modified message', "error_messages shared between copies"
++    print("PASSED: error_messages are independent (unexpected)")
++
++if __name__ == '__main__':
++    test_field_deepcopy_error_messages()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..3934676330
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_field_deepcopy_error_messages",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,101 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..dd86f94fbd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,61 @@
++#!/bin/bash
++set -euo pipefail
++
++# Ensure the reproduction script exists (create/update)
++cat <<'PY' > test_reproduction.py
++import sympy as sp
++from sympy.physics.secondquant import B, Bd, Commutator
++
++a = sp.Symbol('0')
++expr = Commutator(Bd(a)**2, B(a))
++
++print("REPR:", repr(expr))
++print("STR:", str(expr))
++try:
++    latex_str = sp.latex(expr)
++    print("LATEX:", latex_str)
++except Exception as e:
++    print("LATEX_ERROR:", repr(e))
++PY
++
++# Run the reproduction and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++
++# Ensure testbed directory exists
++mkdir -p /testbed
++
++# Analyze output and write JSON result file expected by the harness.
++python3 - "$output" <<'PY_EOF'
++import json, sys, os
++
++execution_output = sys.argv[1]
++
++test_name = "test_reproduction.py::test_latex_double_superscript"
++
++# Use raw strings to represent backslashes exactly as they appear in printed output
++buggy = r"b^\dagger_{0}^{2}"
++fixed = r"{b^\dagger_{0}}^{2}"
++
++if "ModuleNotFoundError" in execution_output or "ImportError" in execution_output:
++    status = "ERROR"
++elif buggy in execution_output:
++    # Observing the buggy LaTeX form means the reproduction shows the issue -> mark FAILED
++    status = "FAILED"
++elif fixed in execution_output:
++    # Corrected form observed -> test passes (no bug)
++    status = "PASSED"
++else:
++    status = "SKIPPED"
++
++result_path = "/testbed/test_status.json"
++with open(result_path, "w") as f:
++    json.dump({"tests": [{"name": test_name, "status": status}]}, f, indent=2)
++
++# Echo for visibility
++print(execution_output)
++print("WROTE", result_path, "status", status)
++PY_EOF
++
++# Print summary for the runner
++echo "Wrote /testbed/test_status.json"
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..995861a82c
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,13 @@
++import sympy as sp
++from sympy.physics.secondquant import B, Bd, Commutator
++
++a = sp.Symbol('0')
++expr = Commutator(Bd(a)**2, B(a))
++
++print("REPR:", repr(expr))
++print("STR:", str(expr))
++try:
++    latex_str = sp.latex(expr)
++    print("LATEX:", latex_str)
++except Exception as e:
++    print("LATEX_ERROR:", repr(e))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..febe7a3a06
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_latex_double_superscript",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

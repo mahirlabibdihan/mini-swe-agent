@@ -1,0 +1,205 @@
+diff --git a/current_output.txt b/current_output.txt
+new file mode 100644
+index 00000000..4199d252
+--- /dev/null
++++ b/current_output.txt
+@@ -0,0 +1,21 @@
++.                                                                        [100%]
++=============================== warnings summary ===============================
++xarray/__init__.py:1
++  /testbed/xarray/__init__.py:1: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
++    import pkg_resources
++
++xarray/core/dask_array_compat.py:61
++xarray/core/dask_array_compat.py:61
++  /testbed/xarray/core/dask_array_compat.py:61: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
++    if LooseVersion(dask_version) > LooseVersion("2.9.0"):
++
++xarray/core/pdcompat.py:45
++  /testbed/xarray/core/pdcompat.py:45: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
++    if LooseVersion(pd.__version__) < "0.25.0":
++
++../opt/miniconda3/envs/testbed/lib/python3.10/site-packages/setuptools/_distutils/version.py:345
++  /opt/miniconda3/envs/testbed/lib/python3.10/site-packages/setuptools/_distutils/version.py:345: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
++    other = LooseVersion(other)
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++1 passed, 5 warnings in 1.87s
+diff --git a/preserve_output.txt b/preserve_output.txt
+new file mode 100644
+index 00000000..dfa9d0b7
+--- /dev/null
++++ b/preserve_output.txt
+@@ -0,0 +1,38 @@
++F                                                                        [100%]
++=================================== FAILURES ===================================
++________________________________ test_preserve _________________________________
++
++    def test_preserve():
++        good_indexed, bad_indexed = xr.DataArray([None]), xr.DataArray([None])
++        class HasValues(object):
++            values = 5
++        good_indexed.loc[{'dim_0': 0}] = set()
++        bad_indexed.loc[{'dim_0': 0}] = HasValues()
++        # This asserts the desired behavior (which, per the report, is NOT happening)
++>       assert isinstance(bad_indexed.values[0], HasValues)
++E       AssertionError: assert False
++E        +  where False = isinstance(5, <class 'test_preserve.test_preserve.<locals>.HasValues'>)
++
++/testbed/test_preserve.py:10: AssertionError
++=============================== warnings summary ===============================
++xarray/__init__.py:1
++  /testbed/xarray/__init__.py:1: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
++    import pkg_resources
++
++xarray/core/dask_array_compat.py:61
++xarray/core/dask_array_compat.py:61
++  /testbed/xarray/core/dask_array_compat.py:61: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
++    if LooseVersion(dask_version) > LooseVersion("2.9.0"):
++
++xarray/core/pdcompat.py:45
++  /testbed/xarray/core/pdcompat.py:45: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
++    if LooseVersion(pd.__version__) < "0.25.0":
++
++../opt/miniconda3/envs/testbed/lib/python3.10/site-packages/setuptools/_distutils/version.py:345
++  /opt/miniconda3/envs/testbed/lib/python3.10/site-packages/setuptools/_distutils/version.py:345: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
++    other = LooseVersion(other)
++
++-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
++=========================== short test summary info ============================
++FAILED test_preserve.py::test_preserve - AssertionError: assert False
++1 failed, 5 warnings in 2.60s
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..a75ef6c8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++# Optionally try to install implicated version; non-fatal
++pip3 install -q xarray==0.10.1 || true
++
++# Run each test individually and record status
++rc1=0
++rc2=0
++pytest -q test_preserve.py::test_preserve > preserve_output.txt 2>&1 || rc1=$?
++pytest -q test_current.py::test_current > current_output.txt 2>&1 || rc2=$?
++
++status1="PASSED"
++status2="PASSED"
++if [ "$rc1" -ne 0 ]; then status1="FAILED"; fi
++if [ "$rc2" -ne 0 ]; then status2="FAILED"; fi
++
++python3 - <<PY
++import json, pathlib
++p = pathlib.Path("test_status.json")
++p.write_text(json.dumps({"tests": [
++  {"name": "test_preserve.py::test_preserve", "status": "$status1"},
++  {"name": "test_current.py::test_current", "status": "$status2"}
++]}, indent=2))
++print("WROTE", p.resolve())
++PY
++
++echo "===== preserve test output ====="
++sed -n '1,200p' preserve_output.txt || true
++echo "===== current test output ====="
++sed -n '1,200p' current_output.txt || true
++echo "======================="
++exit 0
+diff --git a/test_current.py b/test_current.py
+new file mode 100644
+index 00000000..45df179e
+--- /dev/null
++++ b/test_current.py
+@@ -0,0 +1,10 @@
++import xarray as xr
++
++def test_current():
++    good_indexed, bad_indexed = xr.DataArray([None]), xr.DataArray([None])
++    class HasValues(object):
++        values = 5
++    good_indexed.loc[{'dim_0': 0}] = set()
++    bad_indexed.loc[{'dim_0': 0}] = HasValues()
++    # This asserts the observed (buggy) behavior
++    assert not isinstance(bad_indexed.values[0], HasValues)
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 00000000..a7b712c8
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,4 @@
++xarray version: 0.16.3.dev122+g7c4e2ac83
++good_indexed.values[0]: set() type: <class 'set'>
++bad_indexed.values[0]: 5 type: <class 'int'>
++BUG_REPRODUCED: RHS was coerced on assignment.
+diff --git a/test_preserve.py b/test_preserve.py
+new file mode 100644
+index 00000000..4ff13a04
+--- /dev/null
++++ b/test_preserve.py
+@@ -0,0 +1,10 @@
++import xarray as xr
++
++def test_preserve():
++    good_indexed, bad_indexed = xr.DataArray([None]), xr.DataArray([None])
++    class HasValues(object):
++        values = 5
++    good_indexed.loc[{'dim_0': 0}] = set()
++    bad_indexed.loc[{'dim_0': 0}] = HasValues()
++    # This asserts the desired behavior (which, per the report, is NOT happening)
++    assert isinstance(bad_indexed.values[0], HasValues)
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..5f4e88e8
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,27 @@
++import sys
++import xarray as xr
++
++# Prepare DataArrays
++good_indexed = xr.DataArray([None])
++bad_indexed = xr.DataArray([None])
++
++class HasValues(object):
++    values = 5
++
++# Perform assignments
++good_indexed.loc[{'dim_0': 0}] = set()
++bad_indexed.loc[{'dim_0': 0}] = HasValues()
++
++# Output introspection
++print("xarray version:", xr.__version__)
++print("good_indexed.values[0]:", good_indexed.values[0], "type:", type(good_indexed.values[0]))
++print("bad_indexed.values[0]:", bad_indexed.values[0], "type:", type(bad_indexed.values[0]))
++
++# Determine if bug observed:
++# According to the issue, bad_indexed.values[0] is coerced (e.g., numpy scalar/array) instead of the HasValues instance.
++if isinstance(bad_indexed.values[0], HasValues):
++    print("NO_BUG: RHS preserved as HasValues instance.")
++    sys.exit(1)
++else:
++    print("BUG_REPRODUCED: RHS was coerced on assignment.")
++    sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..bd924990
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_preserve.py::test_preserve",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_current.py::test_current",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,109 @@
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000000..430bf61269
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,53 @@
++import sys, traceback
++from django.conf import settings
++# Minimal settings with the app registered
++settings.configure(
++    DEBUG=True,
++    SECRET_KEY='dummy',
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    INSTALLED_APPS=['repro_app'],
++    TIME_ZONE='UTC',
++    USE_TZ=True,
++)
++import django
++django.setup()
++from django.db import models, connection
++from django.db.models import Sum
++from django.apps import apps
++import pickle
++
++class Toy(models.Model):
++    name = models.CharField(max_length=16)
++    material = models.CharField(max_length=16)
++    price = models.PositiveIntegerField()
++    class Meta:
++        app_label = 'repro_app'
++
++# Register model with the app registry so pickling/unpickling can resolve it
++try:
++    apps.register_model('repro_app', Toy)
++except Exception:
++    # ignore re-registration warnings/errors in repeated runs
++    pass
++
++# Create table without migrations
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Toy)
++
++try:
++    Toy.objects.create(name='foo', price=10, material='wood')
++    Toy.objects.create(name='bar', price=20, material='plastic')
++    Toy.objects.create(name='baz', price=100, material='wood')
++
++    prices = Toy.objects.values('material').annotate(total_price=Sum('price'))
++    print("prices:", list(prices))
++    print("type(prices[0]):", type(prices[0]))
++
++    prices2 = Toy.objects.all()
++    prices2.query = pickle.loads(pickle.dumps(prices.query))
++    print("type(prices2[0]):", type(prices2[0]))
++    print("prices2:", list(prices2))
++    print("NO_EXCEPTION")
++except Exception:
++    traceback.print_exc()
++    sys.exit(1)
+diff --git a/repro_app/__init__.py b/repro_app/__init__.py
+new file mode 100644
+index 0000000000..abccd2c3c3
+--- /dev/null
++++ b/repro_app/__init__.py
+@@ -0,0 +1 @@
++# repro_app package for test
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..49c73aefe5
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Run the reproduction
++rm -f /testbed/test_status.json
++output=""
++rc=0
++if ! output=$(python3 repro.py 2>&1); then rc=$?; fi
++echo "$output"
++status="PASSED"
++if echo "$output" | grep -q "AttributeError: 'NoneType' object has no attribute 'attname'"; then
++  status="FAILED"
++elif [ "$rc" -ne 0 ]; then
++  status="ERROR"
++fi
++python3 - <<PY "$status"
++import json, sys
++status = sys.argv[1]
++entry = {"name": "testbed/repro.py::test_pickled_values_annotate", "status": status}
++open("/testbed/test_status.json","w").write(json.dumps({"tests":[entry]}, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..c02501771d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro.py::test_pickled_values_annotate",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

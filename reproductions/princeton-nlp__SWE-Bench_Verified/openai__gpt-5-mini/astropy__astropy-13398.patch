@@ -1,0 +1,85 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..ead9da820
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,26 @@
++#!/bin/bash
++set -euo pipefail
++rc=0
++# Try to install astropy; if it fails, mark rc nonzero but continue to emit JSON
++pip install -q astropy || rc=2
++
++if [ $rc -eq 0 ]; then
++  python /testbed/test_itrs_altaz.py > /testbed/test_output.txt 2>&1 || rc=$?
++else
++  echo "pip install failed; cannot run test" > /testbed/test_output.txt
++fi
++
++if [ $rc -eq 0 ]; then status="PASSED"; else status="FAILED"; fi
++
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_itrs_altaz.py::test_overhead_transform", "status": "$status"}]}
++JSON
++
++# Print outputs for visibility
++echo "---- test output ----"
++cat /testbed/test_output.txt || true
++echo "---- test_status.json ----"
++cat /testbed/test_status.json
++
++# Always exit zero so the harness considers the script executed successfully
++exit 0
+diff --git a/test_itrs_altaz.py b/test_itrs_altaz.py
+new file mode 100644
+index 000000000..fcf433742
+--- /dev/null
++++ b/test_itrs_altaz.py
+@@ -0,0 +1,30 @@
++from astropy.time import Time
++from astropy.coordinates import EarthLocation, SkyCoord, AltAz, ITRS
++import astropy.units as u
++import sys
++
++t = Time('2023-01-01T00:00:00', scale='utc')
++loc = EarthLocation(lat=45*u.deg, lon=10*u.deg, height=0*u.m)
++altaz = AltAz(obstime=t, location=loc)
++
++# Create a point that is nominally straight overhead at 1000 m distance
++orig = SkyCoord(alt=90*u.deg, az=0*u.deg, distance=1000*u.m, frame=altaz)
++
++# Transform to ITRS and back
++itrs = orig.transform_to(ITRS(obstime=t))
++back = itrs.transform_to(altaz)
++
++diff_arcsec = (back.alt - orig.alt).to(u.arcsec).value
++
++print(f"orig.alt = {orig.alt.to(u.deg).value:.12f} deg")
++print(f"back.alt = {back.alt.to(u.deg).value:.12f} deg")
++print(f"diff = {diff_arcsec:.12f} arcsec")
++
++# Consider any non-zero diff (beyond tiny numerical noise) a failure for this reproduction.
++threshold = 1e-6  # arcsec
++if abs(diff_arcsec) > threshold:
++    print("TEST_RESULT: FAILED")
++    sys.exit(1)
++else:
++    print("TEST_RESULT: PASSED")
++    sys.exit(0)
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 000000000..51009f72d
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,4 @@
++orig.alt = 90.000000000000 deg
++back.alt = 89.999999621323 deg
++diff = -0.001363238226 arcsec
++TEST_RESULT: FAILED
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..324db72cf
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_itrs_altaz.py::test_overhead_transform", "status": "FAILED"}]}

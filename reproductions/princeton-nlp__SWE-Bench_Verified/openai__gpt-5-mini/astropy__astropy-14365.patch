@@ -1,0 +1,78 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 000000000..0301ca388
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,57 @@
++#!/bin/bash
++set -uo pipefail
++
++mkdir -p /testbed
++
++# Create the QDP file with lowercase command as in the report
++cat > test.qdp <<'EOF'
++read serr 1 2
++1 0.5 1 0.5
++EOF
++
++# Run Python to attempt reading the QDP, capture output and exit code
++python3 - <<'PY' > /tmp/py_output.txt 2>&1
++from __future__ import print_function
++try:
++    from astropy.table import Table
++except Exception as e:
++    import traceback
++    traceback.print_exc()
++    raise
++try:
++    t = Table.read('test.qdp', format='ascii.qdp')
++    print("TABLE_READ_SUCCESS")
++    print(repr(t))
++except Exception:
++    import traceback
++    traceback.print_exc()
++    raise
++PY
++rc=$?
++
++# Read captured output
++output="$(cat /tmp/py_output.txt || true)"
++
++# Determine status based on output and exit code
++if [ "$rc" -ne 0 ]; then
++  if printf '%s' "$output" | grep -q "Unrecognized QDP line: read serr 1 2"; then
++    status="FAILED"
++  elif printf '%s' "$output" | grep -E -q "ModuleNotFoundError|ImportError"; then
++    status="SKIPPED"
++  else
++    status="ERROR"
++  fi
++else
++  status="PASSED"
++fi
++
++# Write test status file required by the harness
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_reproduction.py", "status": "$status"}]}
++JSON
++
++# Print outputs for visibility
++printf '%s\n' "=== PYTHON OUTPUT ==="
++printf '%s\n' "$output"
++printf '%s\n' "=== /testbed/test_status.json ==="
++cat /testbed/test_status.json
+diff --git a/test.qdp b/test.qdp
+new file mode 100644
+index 000000000..b5750561d
+--- /dev/null
++++ b/test.qdp
+@@ -0,0 +1,2 @@
++read serr 1 2
++1 0.5 1 0.5
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..b652a4613
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_reproduction.py", "status": "FAILED"}]}

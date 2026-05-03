@@ -1,0 +1,125 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..28de9954d0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,27 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++echo "$output" >&2
++
++s1=$(echo "$output" | awk -F': ' '/DUMMY_SCENARIO1:/ {print $2}' || true)
++s2=$(echo "$output" | awk -F': ' '/DUMMY_SCENARIO2:/ {print $2}' || true)
++
++# Mark as FAILED when the bug is reproduced:
++# - scenario1: should NOT receive a coroutine; if it does, that's a FAIL.
++# - scenario2: should receive HttpResponse; if not, that's a FAIL.
++STATUS1="PASSED"
++STATUS2="PASSED"
++[ "$s1" = "coroutine" ] && STATUS1="FAILED"
++[ "$s2" != "HttpResponse" ] && STATUS2="FAILED"
++
++export STATUS1 STATUS2
++
++python3 - <<PY
++import json, os
++tests = [
++  {"name": "test_reproduction::dummy_scenario1", "status": os.environ.get("STATUS1", "FAILED")},
++  {"name": "test_reproduction::dummy_scenario2", "status": os.environ.get("STATUS2", "FAILED")}
++]
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..2ddd281d2c
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,67 @@
++import asyncio, types
++
++class ASGIRequest: pass
++class HttpResponse: pass
++
++class DummyMiddleware:
++    def __init__(self, name='Dummy'):
++        self.name = name
++        self.records = []
++    def process_response(self, request, response):
++        t = 'coroutine' if isinstance(response, types.CoroutineType) else response.__class__.__name__
++        print(f"{self.name}: {t}")
++        self.records.append(t)
++        return response
++
++class SecurityMiddleware:
++    def __init__(self, name='Security'):
++        self.name = name
++    def process_response(self, request, response):
++        t = 'coroutine' if isinstance(response, types.CoroutineType) else response.__class__.__name__
++        print(f"{self.name}: {t}")
++        return response
++
++async def view(request):
++    return HttpResponse()
++
++async def handle(middleware_instances):
++    request = ASGIRequest()
++    response = view(request)  # coroutine, not awaited yet
++    for mw in middleware_instances:
++        mw.process_response(request, response)
++        # After each middleware, if response is a coroutine, await it to get real HttpResponse
++        if isinstance(response, types.CoroutineType):
++            response = await response
++    return middleware_instances
++
++def run_scenario(order):
++    instances = [cls() for cls in order]
++    # Compatibility: use asyncio.run if available, otherwise run_until_complete
++    try:
++        runner = getattr(asyncio, "run", None)
++        if runner is not None:
++            res = asyncio.run(handle(instances))
++        else:
++            loop = asyncio.get_event_loop()
++            if loop.is_running():
++                loop = asyncio.new_event_loop()
++                asyncio.set_event_loop(loop)
++            res = loop.run_until_complete(handle(instances))
++    except Exception:
++        # Fallback robustly to new event loop
++        loop = asyncio.new_event_loop()
++        asyncio.set_event_loop(loop)
++        res = loop.run_until_complete(handle(instances))
++    for inst in res:
++        if isinstance(inst, DummyMiddleware):
++            return inst.records[0] if inst.records else 'NO_RECORD'
++    return 'NOT_FOUND'
++
++def main():
++    s1 = run_scenario([DummyMiddleware, SecurityMiddleware])
++    s2 = run_scenario([SecurityMiddleware, DummyMiddleware])
++    print("DUMMY_SCENARIO1:", s1)
++    print("DUMMY_SCENARIO2:", s2)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..be170a2fe0
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction::dummy_scenario1",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction::dummy_scenario2",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

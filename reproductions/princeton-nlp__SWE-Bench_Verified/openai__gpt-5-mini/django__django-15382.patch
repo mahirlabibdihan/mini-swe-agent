@@ -1,0 +1,309 @@
+diff --git a/manage.py b/manage.py
+new file mode 100755
+index 0000000000..e6b6de8cf5
+--- /dev/null
++++ b/manage.py
+@@ -0,0 +1,21 @@
++#!/usr/bin/env python
++"""Django's command-line utility for administrative tasks."""
++import os
++import sys
++
++
++def main():
++    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'proj.settings')
++    try:
++        from django.core.management import execute_from_command_line
++    except ImportError as exc:
++        raise ImportError(
++            "Couldn't import Django. Are you sure it's installed and "
++            "available on your PYTHONPATH environment variable? Did you "
++            "forget to activate a virtual environment?"
++        ) from exc
++    execute_from_command_line(sys.argv)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/myapp/__init__.py b/myapp/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/myapp/admin.py b/myapp/admin.py
+new file mode 100644
+index 0000000000..8c38f3f3da
+--- /dev/null
++++ b/myapp/admin.py
+@@ -0,0 +1,3 @@
++from django.contrib import admin
++
++# Register your models here.
+diff --git a/myapp/apps.py b/myapp/apps.py
+new file mode 100644
+index 0000000000..c34fb20eb6
+--- /dev/null
++++ b/myapp/apps.py
+@@ -0,0 +1,6 @@
++from django.apps import AppConfig
++
++
++class MyappConfig(AppConfig):
++    default_auto_field = 'django.db.models.BigAutoField'
++    name = 'myapp'
+diff --git a/myapp/migrations/__init__.py b/myapp/migrations/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/myapp/models.py b/myapp/models.py
+new file mode 100644
+index 0000000000..e99cf770f5
+--- /dev/null
++++ b/myapp/models.py
+@@ -0,0 +1,5 @@
++from django.db import models
++class MyModel(models.Model):
++    name = models.CharField(max_length=100)
++    def __str__(self):
++        return self.name
+diff --git a/myapp/tests.py b/myapp/tests.py
+new file mode 100644
+index 0000000000..7ce503c2dd
+--- /dev/null
++++ b/myapp/tests.py
+@@ -0,0 +1,3 @@
++from django.test import TestCase
++
++# Create your tests here.
+diff --git a/myapp/views.py b/myapp/views.py
+new file mode 100644
+index 0000000000..91ea44a218
+--- /dev/null
++++ b/myapp/views.py
+@@ -0,0 +1,3 @@
++from django.shortcuts import render
++
++# Create your views here.
+diff --git a/run_summary.txt b/run_summary.txt
+new file mode 100644
+index 0000000000..5fa0b22a18
+--- /dev/null
++++ b/run_summary.txt
+@@ -0,0 +1,28 @@
++=== Testing Django 2.2.24 ===
++QS_REPR_LINE_START
++<QuerySet []>
++QS_QUERY_LINE_START
++Query <django.db.models.sql.query.Query object at 0x7ffff5f76700>
++QS_LINES_END
++No match for Django 2.2.24
++=== Testing Django 3.1.14 ===
++QS_REPR_LINE_START
++<QuerySet []>
++QS_QUERY_LINE_START
++Query <django.db.models.sql.query.Query object at 0x7ffff5f76700>
++QS_LINES_END
++No match for Django 3.1.14
++=== Testing Django 3.2.20 ===
++QS_REPR_LINE_START
++<QuerySet []>
++QS_QUERY_LINE_START
++Query <django.db.models.sql.query.Query object at 0x7ffff5f76700>
++QS_LINES_END
++No match for Django 3.2.20
++=== Testing Django 4.0.10 ===
++QS_REPR_LINE_START
++<QuerySet []>
++QS_QUERY_LINE_START
++Query <django.db.models.sql.query.Query object at 0x7ffff5f76700>
++QS_LINES_END
++No match for Django 4.0.10
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..2df633f5d2
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,74 @@
++#!/bin/bash
++set -euo pipefail
++# Prepare minimal app model
++mkdir -p /testbed/myapp
++cat > /testbed/myapp/models.py <<'PY'
++from django.db import models
++class MyModel(models.Model):
++    name = models.CharField(max_length=100)
++    def __str__(self):
++        return self.name
++PY
++
++# Create the expectation script: it should FAIL under the buggy behavior
++cat > /testbed/test_expectation.py <<'PY'
++import sys
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=['django.contrib.contenttypes','myapp'],
++        DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++        SECRET_KEY='test-secret',
++        USE_TZ=False,
++    )
++import django
++django.setup()
++from django.apps import apps
++from django.db import connection
++MyModel = apps.get_model('myapp','MyModel')
++# Create the model table
++try:
++    with connection.schema_editor() as editor:
++        editor.create_model(MyModel)
++except Exception as e:
++    print("CREATE_MODEL_EXCEPTION", type(e).__name__, repr(e))
++# Seed data
++MyModel.objects.all().delete()
++MyModel.objects.create(name='other')
++from django.db import models
++qs = MyModel.objects.filter(~models.Exists(MyModel.objects.none()), name='test')
++
++# Try to get the query string and assert it contains the name predicate.
++try:
++    q_str = str(qs.query)
++    print("QS_QUERY_STR:", q_str)
++except Exception as e:
++    print("QS_QUERY_EXCEPTION", type(e).__name__, repr(e))
++    # Indicate missing/exceptional query (this is the buggy behavior)
++    sys.exit(0)
++# If we reach here, check for expected predicate presence
++if "test" in q_str or "name" in q_str:
++    print("QS_CONTAINS_NAME_PREDICATE: YES")
++else:
++    print("QS_CONTAINS_NAME_PREDICATE: NO")
++PY
++
++# Run the expectation script and decide pass/fail: we expect the correct behavior (predicate present).
++OUT=$(/usr/bin/env python /testbed/test_expectation.py 2>&1 || true)
++echo "$OUT"
++
++# Decide status: mark FAILED if the query raised exception or the predicate is missing (i.e., bug reproduced).
++STATUS="PASSED"
++if echo "$OUT" | grep -q "QS_QUERY_EXCEPTION"; then
++  STATUS="FAILED"
++elif echo "$OUT" | grep -q "QS_CONTAINS_NAME_PREDICATE: NO"; then
++  STATUS="FAILED"
++fi
++
++# Write machine-readable test results to required path
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"test_expectation.py::test_query_contains_name_predicate","status":"$STATUS"}]}
++JSON
++
++echo "WROTE /testbed/test_status.json with status $STATUS"
++exit 0
+diff --git a/run_versions_log.txt b/run_versions_log.txt
+new file mode 100644
+index 0000000000..98aeb688cf
+--- /dev/null
++++ b/run_versions_log.txt
+@@ -0,0 +1,11 @@
++=== Testing Django 2.0.13 ===
++WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable.It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
++Traceback (most recent call last):
++  File "<stdin>", line 3, in <module>
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/pathlib.py", line 1266, in read_text
++    with self.open(mode='r', encoding=encoding, errors=errors) as f:
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/pathlib.py", line 1252, in open
++    return io.open(self, mode, buffering, encoding, errors, newline,
++  File "/opt/miniconda3/envs/testbed/lib/python3.9/pathlib.py", line 1120, in _opener
++    return self._accessor.open(self, flags, mode)
++FileNotFoundError: [Errno 2] No such file or directory: 'proj/settings.py'
+diff --git a/test_expectation.py b/test_expectation.py
+new file mode 100644
+index 0000000000..540f7a0b29
+--- /dev/null
++++ b/test_expectation.py
+@@ -0,0 +1,39 @@
++import sys
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=['django.contrib.contenttypes','myapp'],
++        DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++        SECRET_KEY='test-secret',
++        USE_TZ=False,
++    )
++import django
++django.setup()
++from django.apps import apps
++from django.db import connection
++MyModel = apps.get_model('myapp','MyModel')
++# Create the model table
++try:
++    with connection.schema_editor() as editor:
++        editor.create_model(MyModel)
++except Exception as e:
++    print("CREATE_MODEL_EXCEPTION", type(e).__name__, repr(e))
++# Seed data
++MyModel.objects.all().delete()
++MyModel.objects.create(name='other')
++from django.db import models
++qs = MyModel.objects.filter(~models.Exists(MyModel.objects.none()), name='test')
++
++# Try to get the query string and assert it contains the name predicate.
++try:
++    q_str = str(qs.query)
++    print("QS_QUERY_STR:", q_str)
++except Exception as e:
++    print("QS_QUERY_EXCEPTION", type(e).__name__, repr(e))
++    # Indicate missing/exceptional query (this is the buggy behavior)
++    sys.exit(0)
++# If we reach here, check for expected predicate presence
++if "test" in q_str or "name" in q_str:
++    print("QS_CONTAINS_NAME_PREDICATE: YES")
++else:
++    print("QS_CONTAINS_NAME_PREDICATE: NO")
+diff --git a/test_repro_standalone.py b/test_repro_standalone.py
+new file mode 100644
+index 0000000000..21bdb737ee
+--- /dev/null
++++ b/test_repro_standalone.py
+@@ -0,0 +1,37 @@
++import sys
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=['django.contrib.contenttypes','myapp'],
++        DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++        SECRET_KEY='test-secret',
++        USE_TZ=False,
++    )
++import django
++django.setup()
++from django.apps import apps
++from django.db import connection
++MyModel = apps.get_model('myapp', 'MyModel')
++# Create model table in the in-memory DB
++try:
++    with connection.schema_editor() as editor:
++        editor.create_model(MyModel)
++except Exception as e:
++    print("CREATE_MODEL_EXCEPTION", type(e).__name__, repr(e))
++# Ensure known state and insert a non-matching row
++MyModel.objects.all().delete()
++MyModel.objects.create(name='other')
++from django.db import models
++qs = MyModel.objects.filter(~models.Exists(MyModel.objects.none()), name='test')
++print("QS_REPR:", repr(qs))
++print("QS_QUERY_START")
++try:
++    q = qs.query
++    try:
++        print("QS_QUERY_STR:", str(q))
++    except Exception as e2:
++        print("QS_QUERY_STR_EXCEPTION", type(e2).__name__, repr(e2))
++    print("QS_QUERY_REPR:", repr(q))
++except Exception as e:
++    print("QS_QUERY_EXCEPTION:", type(e).__name__, repr(e))
++print("QS_QUERY_END")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..de0a28a2e7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_expectation.py::test_query_contains_name_predicate","status":"FAILED"}]}

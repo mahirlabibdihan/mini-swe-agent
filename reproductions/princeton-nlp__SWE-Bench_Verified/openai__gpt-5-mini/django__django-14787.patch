@@ -1,0 +1,75 @@
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000000..5a7964b0ff
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,25 @@
++from functools import wraps, partial
++
++def logger(func):
++    @wraps(func)
++    def inner(*args, **kwargs):
++        try:
++            result = func(*args, **kwargs)
++        except Exception as e:
++            result = str(e)
++        finally:
++            # Attempting to access func.__name__ will fail if func is a functools.partial
++            print(f"{func.__name__} called with args: {args} and kwargs: {kwargs} resulting: {result}")
++        return result
++    return inner
++
++def hello_world(self):
++    return "hello"
++
++# Simulate method_decorator scenario by creating a functools.partial and passing it to logger.
++# According to the issue, this should raise: AttributeError: 'functools.partial' object has no attribute '__name__'
++if __name__ == "__main__":
++    partial_func = partial(hello_world, object())
++    # This call should trigger the AttributeError when wraps tries to read __name__ from the partial.
++    wrapped = logger(partial_func)
++    wrapped()
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8b95a02037
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++# Run repro while allowing it to fail so we can capture its exit code
++set +e
++output=$(python3 repro.py 2>&1)
++rc=$?
++set -e
++echo "$output"
++status="PASSED"
++if [ $rc -ne 0 ]; then
++  status="FAILED"
++fi
++# Write test_status.json reflecting actual result
++python3 - <<PY "$output" "$rc" "$status"
++import json,sys
++out=sys.argv[1]
++rc=int(sys.argv[2])
++status=sys.argv[3]
++tests=[{"name":"repro.py::logger_with_partial","status": status}]
++open("test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..4e52e83e22
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "repro.py::logger_with_partial",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

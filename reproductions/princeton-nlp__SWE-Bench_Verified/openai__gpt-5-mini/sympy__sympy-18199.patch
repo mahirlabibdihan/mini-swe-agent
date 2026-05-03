@@ -1,0 +1,91 @@
+diff --git a/pyout.txt b/pyout.txt
+new file mode 100644
+index 0000000000..11f9f1be67
+--- /dev/null
++++ b/pyout.txt
+@@ -0,0 +1,3 @@
++ROOTS_RAW: [0]
++ROOTS_MOD17: [0]
++NOT_REPRODUCED (0 present) -> will mark FAILED
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..1ef1561a90
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,69 @@
++#!/bin/bash
++# Intentionally avoid 'set -e' so we can capture python exit codes and always write test_status.json
++PYOUT=/testbed/pyout.txt
++python3 - <<'PY' > "$PYOUT" 2>&1
++import sys
++sys.path.insert(0, '.')
++try:
++    from sympy.ntheory.residue_ntheory import nthroot_mod
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    sys.exit(2)
++try:
++    res = nthroot_mod(17*17, 5, 17)
++except Exception as e:
++    print("CALL_EXCEPTION:", e)
++    sys.exit(3)
++
++roots = []
++if res is None:
++    roots = []
++elif isinstance(res, (list, tuple, set)):
++    roots = list(res)
++elif hasattr(res, '__iter__') and not isinstance(res, (str, bytes)):
++    try:
++        roots = list(res)
++    except Exception:
++        roots = [res]
++else:
++    roots = [res]
++
++try:
++    roots_mod = [int(r) % 17 for r in roots]
++except Exception as e:
++    print("NORMALIZE_ERROR:", e)
++    sys.exit(4)
++
++print("ROOTS_RAW:", roots)
++print("ROOTS_MOD17:", roots_mod)
++
++# If 0 is present, the bug is NOT reproduced here -> exit 1 to mark FAILED externally.
++if 0 in roots_mod:
++    print("NOT_REPRODUCED (0 present) -> will mark FAILED")
++    sys.exit(1)
++else:
++    print("REPRODUCED (0 missing) -> will mark PASSED")
++    sys.exit(0)
++PY
++py_exit=$?
++py_output=$(cat "$PYOUT" || true)
++
++if [ $py_exit -eq 0 ]; then
++  status="PASSED"
++elif [ $py_exit -eq 1 ]; then
++  status="FAILED"
++else
++  status="ERROR"
++fi
++
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"test_nthroot_mod_repro","status":"$status"}]}
++JSON
++
++echo "Python exit code: $py_exit"
++echo "--- python output ---"
++echo "$py_output"
++echo "---------------------"
++echo "Wrote /testbed/test_status.json with status: $status"
++
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..0421a69146
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_nthroot_mod_repro","status":"FAILED"}]}

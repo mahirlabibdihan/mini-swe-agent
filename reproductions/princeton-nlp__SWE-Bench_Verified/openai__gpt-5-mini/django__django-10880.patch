@@ -1,0 +1,117 @@
+diff --git a/reproduce_django_count_distinct_case.py b/reproduce_django_count_distinct_case.py
+new file mode 100644
+index 0000000000..2c71c74c5a
+--- /dev/null
++++ b/reproduce_django_count_distinct_case.py
+@@ -0,0 +1,50 @@
++import sys
++from django.conf import settings
++settings.configure(
++    INSTALLED_APPS=['django.contrib.contenttypes','testapp.apps.TestappConfig'],
++    DATABASES={'default': {'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++    USE_TZ=True,
++)
++import django
++django.setup()
++from django.db import models, connection
++from django.db.models import Count, Case, When, IntegerField, Value
++
++class MyModel(models.Model):
++    flag = models.BooleanField(default=False)
++    class Meta:
++        app_label = 'testapp'
++
++# Create table
++with connection.schema_editor() as se:
++    se.create_model(MyModel)
++
++# Create some rows
++MyModel.objects.create(flag=True)
++MyModel.objects.create(flag=False)
++
++# Build queryset that should trigger the DISTINCT + Case combination
++qs = MyModel.objects.annotate(
++    cnt=Count(
++        Case(
++            When(flag=True, then=Value(1)),
++            output_field=IntegerField()
++        ),
++        distinct=True
++    )
++)
++
++print("Generated SQL (qs.query):")
++try:
++    print(str(qs.query))
++except Exception as e:
++    print("Error generating SQL string:", e)
++
++print("\nEvaluating queryset (this may raise the SQL error):")
++try:
++    results = list(qs)
++    print("Query executed successfully, results:", results)
++    sys.exit(0)
++except Exception as e:
++    print("EXCEPTION_RAISED:", type(e).__name__, str(e))
++    sys.exit(2)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..f861bd396d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/bin/bash
++set -euo pipefail
++PYTHON_OUTPUT="$(python /testbed/reproduce_django_count_distinct_case.py 2>&1 || true)"
++echo "$PYTHON_OUTPUT"
++status="PASSED"
++if echo "$PYTHON_OUTPUT" | grep -q "^EXCEPTION_RAISED:" ; then
++  status="FAILED"
++fi
++if echo "$PYTHON_OUTPUT" | tr -d '\r' | grep -q -i "DISTINCTCASE"; then
++  status="FAILED"
++fi
++
++python - <<PY /testbed/test_status.json "$PYTHON_OUTPUT" "$status"
++import json, sys
++out_path = sys.argv[1]
++py_output = sys.argv[2]
++status = sys.argv[3]
++tests = []
++test_name = "reproduce_django_count_distinct_case.py::test_count_distinct_case"
++tests.append({"name": test_name, "status": "FAILED" if status!="PASSED" else "PASSED"})
++open(out_path, "w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE", out_path)
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..b919c54956
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "reproduce_django_count_distinct_case.py::test_count_distinct_case",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..4664623055
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# minimal testapp package
+diff --git a/testapp/apps.py b/testapp/apps.py
+new file mode 100644
+index 0000000000..5de0eb198b
+--- /dev/null
++++ b/testapp/apps.py
+@@ -0,0 +1,4 @@
++from django.apps import AppConfig
++
++class TestappConfig(AppConfig):
++    name = 'testapp'

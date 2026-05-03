@@ -1,0 +1,70 @@
+diff --git a/isort_output.txt b/isort_output.txt
+new file mode 100644
+index 0000000000..1b544b8349
+--- /dev/null
++++ b/isort_output.txt
+@@ -0,0 +1 @@
++ERROR: /testbed/migrations/0001_initial.py Imports are incorrectly sorted and/or formatted.
+diff --git a/migrations/0001_initial.py b/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..b52cf4df94
+--- /dev/null
++++ b/migrations/0001_initial.py
+@@ -0,0 +1,3 @@
++import datetime
++from django.db import migrations, models
++import time
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..2973a432c0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,33 @@
++#!/bin/bash
++set -euo pipefail
++PYTHON=python3
++
++# Ensure isort is available; allow pip install to fail non-fatally
++$PYTHON -m pip install --quiet isort || $PYTHON -m pip install --user --quiet isort || true
++
++MIG=/testbed/migrations/0001_initial.py
++mkdir -p "$(dirname "$MIG")"
++cat > "$MIG" <<'PY'
++import datetime
++from django.db import migrations, models
++import time
++PY
++
++# Run isort in check-only mode; capture exit code without causing script to fail
++set +e
++isort --check-only "$MIG" > /testbed/isort_output.txt 2>&1
++rc=$?
++set -e
++
++# Write test_status.json reflecting the actual result
++python3 - <<PY
++import json, sys
++rc = $rc
++status = "PASSED" if rc == 0 else "FAILED"
++result = {"tests": [{"name": "/testbed/migrations/0001_initial.py::isort_check", "status": status}]}
++open("/testbed/test_status.json", "w").write(json.dumps(result, indent=2))
++print("isort rc:", rc, "-> status written as", status)
++PY
++
++# Always exit 0 so the runner considers the script executed successfully
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..3ba4d1e8a9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/migrations/0001_initial.py::isort_check",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

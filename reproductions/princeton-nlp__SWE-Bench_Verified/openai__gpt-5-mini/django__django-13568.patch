@@ -1,0 +1,106 @@
+diff --git a/check_output.txt b/check_output.txt
+new file mode 100644
+index 0000000000..0f9e2183a0
+--- /dev/null
++++ b/check_output.txt
+@@ -0,0 +1 @@
++auth.E003: 'User.username' must be unique because it is named as the 'USERNAME_FIELD'. (level=40)
+diff --git a/myapp/__init__.py b/myapp/__init__.py
+new file mode 100644
+index 0000000000..58fa0ba3bd
+--- /dev/null
++++ b/myapp/__init__.py
+@@ -0,0 +1 @@
++# myapp package
+diff --git a/myapp/models.py b/myapp/models.py
+new file mode 100644
+index 0000000000..c0be0be37d
+--- /dev/null
++++ b/myapp/models.py
+@@ -0,0 +1,13 @@
++from django.db import models
++from django.contrib.auth.base_user import AbstractBaseUser
++
++class User(AbstractBaseUser):
++    username = models.CharField(max_length=30)
++    USERNAME_FIELD = "username"
++    REQUIRED_FIELDS = []
++    objects = models.Manager()
++
++    class Meta:
++        constraints = [
++            models.UniqueConstraint(fields=["username"], name="user_username_unq")
++        ]
+diff --git a/run_check.py b/run_check.py
+new file mode 100644
+index 0000000000..d7b54ff031
+--- /dev/null
++++ b/run_check.py
+@@ -0,0 +1,28 @@
++import sys
++from django.conf import settings
++
++settings.configure(
++    INSTALLED_APPS=[
++        "django.contrib.auth",
++        "django.contrib.contenttypes",
++        "myapp",
++    ],
++    SECRET_KEY="insecure-secret",
++    AUTH_USER_MODEL="myapp.User",
++    DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
++    USE_I18N=False,
++    USE_L10N=False,
++    USE_TZ=False,
++)
++import django
++django.setup()
++
++from django.core.checks import run_checks, ERROR
++msgs = run_checks()
++if not msgs:
++    print("NO_ERRORS")
++else:
++    for m in msgs:
++        print(f"{getattr(m, 'id', None)}: {getattr(m, 'msg', str(m))} (level={getattr(m, 'level', None)})")
++if any(getattr(m, "level", None) == ERROR for m in msgs):
++    sys.exit(2)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..b6c5ee2e3c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++set -euo pipefail
++export PYTHONPATH=/testbed
++python /testbed/run_check.py > /testbed/check_output.txt 2>&1 || true
++OUT=$(cat /testbed/check_output.txt || true)
++STATUS="PASSED"
++if echo "$OUT" | grep -q "auth.E003" || echo "$OUT" | grep -q "E003"; then
++  STATUS="FAILED"
++fi
++python - <<'PY2' "$STATUS"
++import json,sys
++status = sys.argv[1]
++result = {"tests": [{"name": "repro/auth_e003.py::test_username_field_unique_constraint", "status": status}]}
++open("/testbed/test_status.json", "w").write(json.dumps(result, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PY2
++echo "=== CHECK OUTPUT ==="
++cat /testbed/check_output.txt || true
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..61d512ffb2
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "repro/auth_e003.py::test_username_field_unique_constraint",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

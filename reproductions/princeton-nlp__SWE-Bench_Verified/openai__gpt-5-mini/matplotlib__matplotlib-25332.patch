@@ -1,0 +1,103 @@
+diff --git a/repro/run_test.sh b/repro/run_test.sh
+new file mode 100755
+index 0000000000..60c0d43c1a
+--- /dev/null
++++ b/repro/run_test.sh
+@@ -0,0 +1,23 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++printf "%s\n" "$output" > /tmp/repro_output.txt
++
++python3 - <<'PY'
++import json, pathlib
++out = pathlib.Path("/tmp/repro_output.txt").read_text()
++name = "testbed/repro/test_reproduction.py::test_pickle_after_align_labels"
++if "ModuleNotFoundError: No module named 'matplotlib'" in out or "No module named 'matplotlib'" in out:
++    status = "SKIPPED"
++elif "cannot pickle 'weakref.ReferenceType' object" in out:
++    status = "PASSED"
++elif "PICKLE_SUCCESS" in out:
++    status = "FAILED"
++else:
++    status = "ERROR"
++result = {"tests": [{"name": name, "status": status}]}
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps(result, indent=2))
++print(json.dumps(result, indent=2))
++PY
+diff --git a/repro/test_reproduction.py b/repro/test_reproduction.py
+new file mode 100644
+index 0000000000..87ca60b43a
+--- /dev/null
++++ b/repro/test_reproduction.py
+@@ -0,0 +1,23 @@
++import matplotlib
++import matplotlib.pyplot as plt
++import pickle, sys, traceback
++
++fig = plt.figure()
++ax1 = fig.add_subplot(211)
++ax2 = fig.add_subplot(212)
++time=[0,1,2,3,4]
++speed=[40000,4300,4500,4700,4800]
++acc=[10,11,12,13,14]
++ax1.plot(time,speed)
++ax1.set_ylabel('speed')
++ax2.plot(time,acc)
++ax2.set_ylabel('acc')
++
++try:
++    fig.align_labels()  # line reported to cause pickling error
++    pickle.dumps(fig)
++    print("PICKLE_SUCCESS")
++except Exception:
++    traceback.print_exc()
++    print("PICKLE_EXCEPTION_MARKER")
++    sys.exit(1)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a5ad6c3e18
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,24 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction script (created earlier under /testbed/repro)
++output=$(python3 /testbed/repro/test_reproduction.py 2>&1 || true)
++echo "$output"
++printf "%s\n" "$output" > /tmp/repro_output.txt
++
++python3 - <<'PY'
++import json, pathlib
++out = pathlib.Path("/tmp/repro_output.txt").read_text()
++name = "testbed/repro/test_reproduction.py::test_pickle_after_align_labels"
++# Map observed outputs to statuses. Treat the TypeError as a FAILED test (bug reproduced).
++if "ModuleNotFoundError: No module named 'matplotlib'" in out or "No module named 'matplotlib'" in out:
++    status = "SKIPPED"
++elif "cannot pickle 'weakref.ReferenceType' object" in out:
++    status = "FAILED"
++elif "PICKLE_SUCCESS" in out:
++    status = "PASSED"
++else:
++    status = "ERROR"
++result = {"tests":[{"name": name, "status": status}]}
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps(result, indent=2))
++print(pathlib.Path("/testbed/test_status.json").read_text())
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..28568749a7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro/test_reproduction.py::test_pickle_after_align_labels",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

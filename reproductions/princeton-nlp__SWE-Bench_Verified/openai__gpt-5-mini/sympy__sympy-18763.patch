@@ -1,0 +1,39 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..e2feb4814b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,14 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++echo "$output"
++
++status="PASSED"
++if echo "$output" | grep -Fq "\\left. -"; then
++  status="FAILED"
++fi
++
++printf '%s\n' "{\"tests\": [{\"name\": \"test_repro.py::test_subs_latex_parenthesis\", \"status\": \"${status}\"}]}" > /testbed/test_status.json
++echo "Wrote /testbed/test_status.json with status: ${status}"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..949028751f
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,6 @@
++import sympy as sp
++from sympy.abc import x, y
++
++expr = 3 * sp.Subs(-x + y, (x,), (1,))
++latex_str = sp.latex(expr)
++print(latex_str)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..0b9794cb2e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_repro.py::test_subs_latex_parenthesis", "status": "FAILED"}]}

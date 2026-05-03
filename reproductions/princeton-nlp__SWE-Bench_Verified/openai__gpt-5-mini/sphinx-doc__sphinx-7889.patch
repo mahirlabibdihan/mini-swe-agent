@@ -1,0 +1,131 @@
+diff --git a/repro/docs/source/conf.py b/repro/docs/source/conf.py
+new file mode 100644
+index 000000000..3e12893f4
+--- /dev/null
++++ b/repro/docs/source/conf.py
+@@ -0,0 +1,5 @@
++import os, sys
++sys.path.insert(0, os.path.abspath('../..'))
++project = "repro"
++extensions = ["sphinx.ext.autodoc"]
++master_doc = "index"
+diff --git a/repro/docs/source/index.rst b/repro/docs/source/index.rst
+new file mode 100644
+index 000000000..766371fff
+--- /dev/null
++++ b/repro/docs/source/index.rst
+@@ -0,0 +1,5 @@
++repro
++====
++
++.. automodule:: mymodule
++    :members:
+diff --git a/repro/mymodule.py b/repro/mymodule.py
+new file mode 100644
+index 000000000..23151f6f7
+--- /dev/null
++++ b/repro/mymodule.py
+@@ -0,0 +1,8 @@
++from typing import TypeVar, Generic
++
++T = TypeVar('T')
++
++class Foo(Generic[T]):
++    """A simple generic class for repro."""
++    def __init__(self, value: T) -> None:
++        self.value = value
+diff --git a/repro/run_test.sh b/repro/run_test.sh
+new file mode 100755
+index 000000000..2a0b2be08
+--- /dev/null
++++ b/repro/run_test.sh
+@@ -0,0 +1,31 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++# Install the Sphinx version reported in the issue (allow failure)
++pip install -q sphinx==3.1.1 typing_extensions || true
++
++BUILD_OUT="$(mktemp)"
++# Run sphinx-build and capture output (allow non-zero exit to inspect output)
++sphinx-build -b html docs/source docs/build >"$BUILD_OUT" 2>&1 || true
++EXIT_CODE=$?
++
++OUTPUT="$(cat "$BUILD_OUT")"
++STATUS="PASSED"
++# Consider it failed if build exit code non-zero or TypeError appears in output (as reported)
++if [ "$EXIT_CODE" -ne 0 ] || echo "$OUTPUT" | grep -q "TypeError"; then
++  STATUS="FAILED"
++fi
++
++# Write the required /testbed/test_status.json
++python3 - <<PY2
++import json, os
++s = os.environ.get("STATUS", "ERROR")
++open("/testbed/test_status.json","w").write(json.dumps({"tests":[{"name":"test_repro/sphinx_build","status":s}]}, indent=2))
++print("WROTE /testbed/test_status.json with status:", s)
++PY2
++
++echo "---- SPHINX BUILD OUTPUT ----"
++cat "$BUILD_OUT"
++echo "---- END BUILD OUTPUT ----"
++exit 0
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..4e1ffa03b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,36 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Ensure the Sphinx version reported in the issue is installed
++pip install -q sphinx==3.1.1 typing_extensions || true
++
++# Run a Python snippet that imports the mock module explicitly and calls _make_subclass with a TypeVar
++python3 - <<'PY'
++import importlib, json, traceback
++from pathlib import Path
++
++out = {"tests":[{"name":"test_repro/mock_make_subclass_call","status":"ERROR"}]}
++try:
++    mod = importlib.import_module("sphinx.ext.autodoc.mock")
++    from typing import TypeVar
++    TV = TypeVar("T_REPRO")
++    try:
++        # Call with a TypeVar as the 'name' argument to reproduce possible TypeError from "module + '.' + name"
++        mod._make_subclass(TV, "mymodule")
++        out["tests"][0]["status"] = "PASSED"
++        out["tests"][0]["note"] = "_make_subclass did not raise TypeError when called with TypeVar"
++    except TypeError as te:
++        out["tests"][0]["status"] = "FAILED"
++        out["tests"][0]["exception"] = "".join(traceback.format_exception_only(type(te), te)).strip()
++    except Exception as e:
++        out["tests"][0]["status"] = "ERROR"
++        out["tests"][0]["exception"] = "".join(traceback.format_exception_only(type(e), e)).strip()
++except Exception as e:
++    out["tests"][0]["status"] = "ERROR"
++    out["tests"][0]["exception"] = "".join(traceback.format_exception_only(type(e), e)).strip()
++
++Path("/testbed/test_status.json").write_text(json.dumps(out, indent=2))
++print(json.dumps(out, indent=2))
++PY
++
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..fad4d85ae
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,9 @@
++{
++  "tests": [
++    {
++      "name": "test_repro/mock_make_subclass_call",
++      "status": "FAILED",
++      "exception": "TypeError: can only concatenate str (not \"TypeVar\") to str"
++    }
++  ]
++}
+\ No newline at end of file

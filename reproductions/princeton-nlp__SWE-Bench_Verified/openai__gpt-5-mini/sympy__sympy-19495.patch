@@ -1,0 +1,118 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..67dd2cc21a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,46 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Ensure SymPy is installed
++python3 - <<'PY'
++import importlib, sys, subprocess
++try:
++    importlib.import_module('sympy')
++except Exception:
++    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "sympy"])
++PY
++
++# Run the reproduction script (it should write /tmp/repro_results.json)
++python3 /testbed/test_reproduction.py || true
++
++# Build /testbed/test_status.json from the actual reproduction results
++python3 - <<'PY' > /testbed/test_status.json
++import json, os
++p = "/tmp/repro_results.json"
++tests = []
++if not os.path.exists(p):
++    tests = [
++        {"name":"test_reproduction.py::test_finset_subs","status":"ERROR"},
++        {"name":"test_reproduction.py::test_imageset_conditionset_subs.subs","status":"ERROR"},
++        {"name":"test_reproduction.py::test_imageset_conditionset_subs.xreplace","status":"ERROR"},
++        {"name":"test_reproduction.py::test_imageset_conditionset_subs.subs_simultaneous","status":"ERROR"},
++    ]
++else:
++    d = json.load(open(p))
++    tests.append({
++        "name":"test_reproduction.py::test_finset_subs",
++        "status":"PASSED" if d.get("finite_sub_eq_expected") == "True" else "FAILED"
++    })
++    tests.append({
++        "name":"test_reproduction.py::test_imageset_conditionset_subs.subs",
++        "status":"PASSED" if d.get("cond_sub_eq_expected") == "True" else "FAILED"
++    })
++    tests.append({
++        "name":"test_reproduction.py::test_imageset_conditionset_subs.xreplace",
++        "status":"PASSED" if d.get("cond_xreplace_eq_expected") == "True" else "FAILED"
++    })
++    tests.append({
++        "name":"test_reproduction.py::test_imageset_conditionset_subs.subs_simultaneous",
++        "status":"PASSED" if d.get("cond_sub_sim_eq_expected") == "True" else "FAILED"
++    })
++print(json.dumps({"tests": tests}, indent=2))
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..434faa3d04
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,34 @@
++import json
++from sympy import symbols, Abs, solveset, S, imageset, Lambda, pi, asin, ConditionSet, Contains, Interval, Rational, FiniteSet
++x, y, n = symbols('x y n')
++# Finite set case
++sol = solveset(Abs(x) - y, x, domain=S.Reals)
++finite_sub = sol.subs(y, Rational(1,3))
++# ImageSet / ConditionSet case
++img = imageset(Lambda(n, 2*n*pi + asin(y)), S.Integers)
++cond = ConditionSet(x, Contains(y, Interval(-1,1)), img)
++cond_sub = cond.subs({y: Rational(1,3)})
++cond_xreplace = cond.xreplace({y: Rational(1,3)})
++cond_sub_sim = cond.subs({y: Rational(1,3)}, simultaneous=True)
++expected_img = imageset(Lambda(n, 2*n*pi + asin(Rational(1,3))), S.Integers)
++results = {
++    "finite_sub_str": str(finite_sub),
++    "cond_sub_str": str(cond_sub),
++    "cond_xreplace_str": str(cond_xreplace),
++    "cond_sub_sim_str": str(cond_sub_sim),
++    "finite_sub_eq_expected": str(finite_sub == FiniteSet(Rational(-1,3), Rational(1,3))),
++    "cond_sub_eq_expected": str(cond_sub == expected_img),
++    "cond_xreplace_eq_expected": str(cond_xreplace == expected_img),
++    "cond_sub_sim_eq_expected": str(cond_sub_sim == expected_img)
++}
++with open("/tmp/repro_results.json", "w") as f:
++    json.dump(results, f, indent=2)
++# Also print human-readable output for visibility
++print("FINITE_SUB:", results["finite_sub_str"])
++print("COND_SUB:", results["cond_sub_str"])
++print("COND_XREPLACE:", results["cond_xreplace_str"])
++print("COND_SUB_SIM:", results["cond_sub_sim_str"])
++print("FINITE_EQ:", results["finite_sub_eq_expected"])
++print("COND_SUB_EQ:", results["cond_sub_eq_expected"])
++print("COND_XREPLACE_EQ:", results["cond_xreplace_eq_expected"])
++print("COND_SUB_SIM_EQ:", results["cond_sub_sim_eq_expected"])
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..48faf83d11
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_finset_subs",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_imageset_conditionset_subs.subs",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_imageset_conditionset_subs.xreplace",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_imageset_conditionset_subs.subs_simultaneous",
++      "status": "PASSED"
++    }
++  ]
++}

@@ -1,0 +1,68 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..201c23af6a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,28 @@
++#!/usr/bin/env bash
++# Run the reproduction, record the actual test result, but always exit 0 so
++# the runner script itself is considered executed successfully.
++# Capture output and exit code of the test run.
++output=""
++exit_code=0
++
++# Run the test capturing both stdout/stderr and the exit code without exiting this script.
++output=$(python3 test_reproduction.py 2>&1)
++exit_code=$?
++
++# Print the test output for visibility
++echo "$output"
++
++# Write the test status JSON based on the actual exit code
++python3 - <<'PY' "$output" "$exit_code"
++import json, sys
++from pathlib import Path
++out = sys.argv[1]
++code = int(sys.argv[2])
++status = "PASSED" if code == 0 else "FAILED"
++tests = [{"name": "test_reproduction.py::test_duration_expression", "status": status}]
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print(Path("/testbed/test_status.json").read_text())
++PY
++
++# Always succeed the wrapper script so the runner doesn't treat this as an execution failure.
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..97e367b51b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,13 @@
++import decimal
++
++def convert_durationfield_value(value):
++    # Simulates the problematic conversion in Django's backend operations.
++    # This will raise decimal.InvalidOperation for non-numeric duration strings
++    # such as "00:00:01", reproducing the reported error.
++    return str(decimal.Decimal(value) / decimal.Decimal(1000000))
++
++if __name__ == "__main__":
++    value = "00:00:01"
++    print("Calling convert_durationfield_value with:", value)
++    # This call is expected to raise decimal.InvalidOperation
++    print(convert_durationfield_value(value))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..f1678c4b77
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_duration_expression",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

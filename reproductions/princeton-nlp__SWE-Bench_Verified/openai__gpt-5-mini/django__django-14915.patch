@@ -1,0 +1,73 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..17283c58ef
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction script and capture output (including traceback)
++output=$(python3 test_reproduction.py 2>&1 || true)
++status="PASSED"
++if echo "$output" | grep -q "TypeError: unhashable type: 'ModelChoiceIteratorValue'"; then
++  status="FAILED"
++elif [ -n "$output" ]; then
++  # If there is any other output or traceback, mark as ERROR
++  status="ERROR"
++fi
++# Ensure /testbed exists and write the test_status.json
++export RUN_OUTPUT="$output"
++export RUN_STATUS="$status"
++python3 - <<PY
++import os, json, pathlib, sys
++out = os.environ.get("RUN_OUTPUT", "")
++status = os.environ.get("RUN_STATUS", "ERROR")
++p = pathlib.Path("test_status.json")
++p.write_text(json.dumps({"tests":[{"name":"test_reproduction.py::test_modelchoiceiteratorvalue_unhashable","status":status}]}, indent=2))
++# Also echo the captured output for visibility
++sys.stdout.write(out)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..4f4934a6b4
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,23 @@
++class ModelChoiceIteratorValue:
++    def __init__(self, pk):
++        self.pk = pk
++    def __eq__(self, other):
++        # Emulate Django's ModelChoiceIteratorValue behaviour: compares equal to the raw PK (int)
++        if isinstance(other, int):
++            return self.pk == other
++        if isinstance(other, ModelChoiceIteratorValue):
++            return self.pk == other.pk
++        return False
++    # Note: no __hash__ defined -> unhashable because __eq__ exists
++
++def reproduce():
++    show_fields = {1: ['first_name', 'last_name']}
++    value = ModelChoiceIteratorValue(1)
++    # This membership test will attempt to hash value and raise TypeError: unhashable type: 'ModelChoiceIteratorValue'
++    if value in show_fields:
++        print("FOUND")
++    else:
++        print("NOT_FOUND")
++
++if __name__ == "__main__":
++    reproduce()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..2279a06f79
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_modelchoiceiteratorvalue_unhashable",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,108 @@
+diff --git a/output.txt b/output.txt
+new file mode 100644
+index 0000000000..ad3c2e8857
+--- /dev/null
++++ b/output.txt
+@@ -0,0 +1,6 @@
++TEST1: PASS
++TEST1_RESULT: 4*GammaMatrix(rho)*GammaMatrix(sigma)
++TEST1_EXPECTED: 4*GammaMatrix(rho)*GammaMatrix(sigma)
++TEST2: FAIL
++TEST2_RESULT: 4*GammaMatrix(sigma)*GammaMatrix(rho)
++TEST2_EXPECTED: 4*GammaMatrix(rho)*GammaMatrix(sigma)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..3517d5c602
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++python3 /testbed/test_kahane_bug.py > /testbed/output.txt 2>&1 || true
++
++python3 - <<'PY2'
++import json, re
++out = open("/testbed/output.txt").read()
++def status_for(tag):
++    m = re.search(r'^%s:\s*(\w+)'%tag, out, flags=re.M)
++    if not m:
++        return "ERROR"
++    s = m.group(1)
++    return {"PASS":"PASSED", "FAIL":"FAILED", "ERROR":"ERROR"}.get(s, "ERROR")
++
++statuses = [
++    {"name": "/testbed/test_kahane_bug.py::test_leading_gamma_matrix_case1", "status": status_for("TEST1")},
++    {"name": "/testbed/test_kahane_bug.py::test_leading_gamma_matrix_case2", "status": status_for("TEST2")}
++]
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": statuses}, indent=2))
++print(out)
++print("WROTE /testbed/test_status.json")
++PY2
+diff --git a/test_kahane_bug.py b/test_kahane_bug.py
+new file mode 100755
+index 0000000000..f33ca422e8
+--- /dev/null
++++ b/test_kahane_bug.py
+@@ -0,0 +1,43 @@
++#!/usr/bin/env python3
++import traceback
++
++def main():
++    try:
++        from sympy.physics.hep.gamma_matrices import GammaMatrix as G, kahane_simplify, LorentzIndex
++        from sympy.tensor.tensor import tensor_indices
++    except Exception:
++        print("TEST1: ERROR")
++        print("TEST2: ERROR")
++        print("IMPORT_EXCEPTION")
++        traceback.print_exc()
++        return
++
++    mu, nu, rho, sigma = tensor_indices("mu, nu, rho, sigma", LorentzIndex)
++    expected = 4 * G(rho) * G(sigma)
++
++    # Test 1: contracted pair first
++    try:
++        t1 = G(mu) * G(-mu) * G(rho) * G(sigma)
++        r1 = kahane_simplify(t1)
++        ok1 = r1.equals(expected)
++        print("TEST1: " + ("PASS" if ok1 else "FAIL"))
++        print("TEST1_RESULT: {}".format(r1))
++        print("TEST1_EXPECTED: {}".format(expected))
++    except Exception:
++        print("TEST1: ERROR")
++        traceback.print_exc()
++
++    # Test 2: contracted pair last
++    try:
++        t2 = G(rho) * G(sigma) * G(mu) * G(-mu)
++        r2 = kahane_simplify(t2)
++        ok2 = r2.equals(expected)
++        print("TEST2: " + ("PASS" if ok2 else "FAIL"))
++        print("TEST2_RESULT: {}".format(r2))
++        print("TEST2_EXPECTED: {}".format(expected))
++    except Exception:
++        print("TEST2: ERROR")
++        traceback.print_exc()
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..76655d9808
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_kahane_bug.py::test_leading_gamma_matrix_case1",
++      "status": "PASSED"
++    },
++    {
++      "name": "/testbed/test_kahane_bug.py::test_leading_gamma_matrix_case2",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

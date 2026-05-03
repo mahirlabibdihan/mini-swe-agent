@@ -1,0 +1,72 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5160018a35
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd "$(dirname "$0")"
++output="$(python3 test_reproduction.py 2>&1 || true)"
++# Echo output for visibility
++printf "%s\n" "$output"
++# Determine failure if specific warning or conversion error present
++if printf "%s" "$output" | grep -q -E "CAUGHT_WARNING: .*MatplotlibDeprecationWarning|MatplotlibDeprecationWarning|ConversionError|Failed to convert value"; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++# Only pass the status into the Python writer to avoid embedding the output into JSON
++python3 - <<PY "$status"
++import json, sys, pathlib
++status = sys.argv[1]
++tests = [{"name": "test_reproduction.py", "status": status}]
++p = pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests": tests}, indent=2))
++print("WROTE:", p)
++PY
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..d426ecf283
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,23 @@
++#!/usr/bin/env python3
++import os, warnings
++os.environ.setdefault("MPLBACKEND", "agg")
++warnings.simplefilter("always")
++try:
++    import matplotlib.pyplot as plt
++    with warnings.catch_warnings(record=True) as w:
++        warnings.simplefilter("always")
++        f, ax = plt.subplots()
++        ax.xaxis.update_units(["a", "b"])
++        try:
++            ax.plot([], [])
++        except Exception:
++            import traceback
++            traceback.print_exc()
++        for warn in w:
++            try:
++                print(f"CAUGHT_WARNING: {type(warn.message).__name__}: {warn.message}")
++            except Exception:
++                print("CAUGHT_WARNING: (unprintable warning)")
++except Exception:
++    import traceback
++    traceback.print_exc()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..dfe8321ba6
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,129 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8c547d2e30
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,69 @@
++#!/bin/bash
++set -euo pipefail
++# Try installing the specific sympy version; don't fail entirely if install has warnings/errors
++python3 -m pip install sympy==1.4 --quiet || true
++
++# Write the reproduction Python script
++cat > /testbed/test_reproduction.py <<'PY'
++from sympy import *
++from sympy.matrices.expressions.blockmatrix import block_collapse
++import traceback
++
++a = MatrixSymbol("a", 2, 2)
++z = ZeroMatrix(2, 2)
++b = BlockMatrix([[a, z], [z, z]])
++
++print("=== block_collapse(b * b) ===")
++try:
++    print(block_collapse(b * b))
++except Exception:
++    traceback.print_exc()
++
++print("\n=== b._blockmul(b) ===")
++try:
++    print(b._blockmul(b))
++except Exception:
++    traceback.print_exc()
++
++print("\n=== type of block [0,1] after b._blockmul(b) ===")
++try:
++    bm = b._blockmul(b)
++    print(type(bm.blocks[0, 1]))
++except Exception:
++    traceback.print_exc()
++
++print("\n=== block_collapse(b * b * b) (expecting exception) ===")
++try:
++    print(block_collapse(b * b * b))
++except Exception:
++    traceback.print_exc()
++    print("EXCEPTION_OCCURED")
++PY
++
++# Run the reproduction script and capture output
++OUT=$(/usr/bin/env python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$OUT"
++
++# Decide status based on output content
++STATUS="ERROR"
++if echo "$OUT" | grep -q "AttributeError: 'Zero' object has no attribute 'cols'"; then
++  STATUS="FAILED"
++elif echo "$OUT" | grep -qE "ModuleNotFoundError|ImportError"; then
++  STATUS="ERROR"
++elif echo "$OUT" | grep -q "EXCEPTION_OCCURED"; then
++  STATUS="FAILED"
++elif echo "$OUT" | grep -q "Matrix\\("; then
++  STATUS="PASSED"
++else
++  STATUS="ERROR"
++fi
++
++# Write test_status.json as required
++python3 - <<PY "$OUT" "$STATUS"
++import json, sys
++out=sys.argv[1]
++status=sys.argv[2]
++tests=[{"name":"/testbed/test_reproduction.py::reproduce_blockmatrix_zero_issue","status": status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..bd12a2bc1f
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,33 @@
++from sympy import *
++from sympy.matrices.expressions.blockmatrix import block_collapse
++import traceback
++
++a = MatrixSymbol("a", 2, 2)
++z = ZeroMatrix(2, 2)
++b = BlockMatrix([[a, z], [z, z]])
++
++print("=== block_collapse(b * b) ===")
++try:
++    print(block_collapse(b * b))
++except Exception:
++    traceback.print_exc()
++
++print("\n=== b._blockmul(b) ===")
++try:
++    print(b._blockmul(b))
++except Exception:
++    traceback.print_exc()
++
++print("\n=== type of block [0,1] after b._blockmul(b) ===")
++try:
++    bm = b._blockmul(b)
++    print(type(bm.blocks[0, 1]))
++except Exception:
++    traceback.print_exc()
++
++print("\n=== block_collapse(b * b * b) (expecting exception) ===")
++try:
++    print(block_collapse(b * b * b))
++except Exception:
++    traceback.print_exc()
++    print("EXCEPTION_OCCURED")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..d57738bfc8
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::reproduce_blockmatrix_zero_issue",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

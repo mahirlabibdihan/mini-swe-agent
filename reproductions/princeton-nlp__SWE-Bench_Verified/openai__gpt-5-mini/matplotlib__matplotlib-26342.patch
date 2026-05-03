@@ -1,0 +1,138 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..6c24119421
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,73 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Create the Python reproduction script
++cat > /testbed/test_reproduction.py <<'PY'
++#!/usr/bin/env python3
++import sys
++try:
++    import matplotlib
++    matplotlib.use('Agg')
++    import matplotlib.pyplot as plt
++    import numpy as np
++except Exception as e:
++    print("EXCEPTION: " + type(e).__name__ + ": " + str(e))
++    raise SystemExit(1)
++
++def main():
++    try:
++        x = np.linspace(0,1,10)
++        y = np.linspace(0,1,10)
++        X,Y = np.meshgrid(x,y)
++        Z = np.sin(2*np.pi*X)*np.cos(2*np.pi*Y)
++        fig, ax = plt.subplots()
++        cs = ax.contour(X,Y,Z)
++        # Try calling set_paths (expected to be missing in this repo/version)
++        try:
++            cs.set_paths([])
++            print("NO_EXCEPTION_set_paths_called")
++        except Exception as e:
++            print("EXCEPTION: " + type(e).__name__ + ": " + str(e))
++        # Also test existing slice-assignment pattern
++        try:
++            paths = cs.get_paths()
++            paths[:] = []
++            print("slice_assignment_ok")
++        except Exception as e:
++            print("slice_assignment_failed: " + type(e).__name__ + ": " + str(e))
++    except Exception as e:
++        print("EXCEPTION: " + type(e).__name__ + ": " + str(e))
++        raise
++
++if __name__ == '__main__':
++    main()
++PY
++
++# Run the reproduction and capture output
++output="$(python3 /testbed/test_reproduction.py 2>&1 || true)"
++echo "$output"
++
++# Derive test status from the actual output
++python3 - <<PY "$output"
++import json, sys
++out = sys.argv[1]
++tests = []
++name = "testbed/test_reproduction.py::test_set_paths_missing_or_present"
++status = "ERROR"
++if "NO_EXCEPTION_set_paths_called" in out:
++    status = "PASSED"
++elif "EXCEPTION: AttributeError" in out or "has no attribute 'set_paths'" in out or "set_paths" in out and "AttributeError" in out:
++    status = "FAILED"
++elif "slice_assignment_ok" in out and "NO_EXCEPTION_set_paths_called" not in out:
++    # slice assignment works but set_paths wasn't present -> issue reproduced
++    status = "FAILED"
++elif "EXCEPTION:" in out:
++    status = "ERROR"
++else:
++    status = "ERROR"
++tests.append({"name": name, "status": status})
++with open("/testbed/test_status.json", "w") as f:
++    json.dump({"tests": tests}, f, indent=2)
++print("WROTE /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..534b4d321b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,38 @@
++#!/usr/bin/env python3
++import sys
++try:
++    import matplotlib
++    matplotlib.use('Agg')
++    import matplotlib.pyplot as plt
++    import numpy as np
++except Exception as e:
++    print("EXCEPTION: " + type(e).__name__ + ": " + str(e))
++    raise SystemExit(1)
++
++def main():
++    try:
++        x = np.linspace(0,1,10)
++        y = np.linspace(0,1,10)
++        X,Y = np.meshgrid(x,y)
++        Z = np.sin(2*np.pi*X)*np.cos(2*np.pi*Y)
++        fig, ax = plt.subplots()
++        cs = ax.contour(X,Y,Z)
++        # Try calling set_paths (expected to be missing in this repo/version)
++        try:
++            cs.set_paths([])
++            print("NO_EXCEPTION_set_paths_called")
++        except Exception as e:
++            print("EXCEPTION: " + type(e).__name__ + ": " + str(e))
++        # Also test existing slice-assignment pattern
++        try:
++            paths = cs.get_paths()
++            paths[:] = []
++            print("slice_assignment_ok")
++        except Exception as e:
++            print("slice_assignment_failed: " + type(e).__name__ + ": " + str(e))
++    except Exception as e:
++        print("EXCEPTION: " + type(e).__name__ + ": " + str(e))
++        raise
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..0ea358fb18
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_reproduction.py::test_set_paths_missing_or_present",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

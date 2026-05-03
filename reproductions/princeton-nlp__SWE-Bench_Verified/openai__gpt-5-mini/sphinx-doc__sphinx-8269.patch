@@ -1,0 +1,135 @@
+diff --git a/project/server.py b/project/server.py
+new file mode 100644
+index 000000000..f0491a168
+--- /dev/null
++++ b/project/server.py
+@@ -0,0 +1,19 @@
++#!/usr/bin/env python3
++# server.py - returns 404 for /test.txt, 200 for others
++from http.server import HTTPServer, BaseHTTPRequestHandler
++class H(BaseHTTPRequestHandler):
++    def do_GET(self):
++        if self.path.split('?',1)[0].split('#',1)[0] == '/test.txt':
++            self.send_response(404)
++            self.send_header('Content-Type','text/plain')
++            self.end_headers()
++            self.wfile.write(b'Not Found')
++        else:
++            self.send_response(200)
++            self.send_header('Content-Type','text/plain')
++            self.end_headers()
++            self.wfile.write(b'OK')
++    def log_message(self, format, *args):
++        pass
++if __name__ == '__main__':
++    HTTPServer(('127.0.0.1', 8000), H).serve_forever()
+diff --git a/project/source/conf.py b/project/source/conf.py
+new file mode 100644
+index 000000000..3fe979e14
+--- /dev/null
++++ b/project/source/conf.py
+@@ -0,0 +1,11 @@
++# conf.py
++project = 'proj'
++author = 'me'
++extensions = []
++master_doc = 'index'
++release = '1.0'
++language = 'en'
++# Important for reproduction: ensure anchor checking is enabled
++linkcheck_anchors = True
++# Keep linkcheck output verbose
++linkcheck_timeout = 5
+diff --git a/project/source/index.rst b/project/source/index.rst
+new file mode 100644
+index 000000000..7ddf1a86f
+--- /dev/null
++++ b/project/source/index.rst
+@@ -0,0 +1,6 @@
++Welcome to the test project
++===========================
++
++Here is a link with an anchor to a non-existent resource:
++
++`foo <http://127.0.0.1:8000/test.txt#test>`_
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..024abc28e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,40 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed/project
++# Start the test HTTP server in background
++python3 server.py >/tmp/test_server.log 2>&1 &
++SERVER_PID=$!
++trap "kill ${SERVER_PID} >/dev/null 2>&1 || true" EXIT
++sleep 0.5
++# Ensure Sphinx is available
++if ! python3 -c "import sphinx" >/dev/null 2>&1; then
++  python3 -m pip install --upgrade --quiet pip setuptools wheel || true
++  python3 -m pip install --quiet Sphinx || true
++fi
++# Run sphinx linkcheck builder and capture output
++OUTPUT_FILE=/tmp/sphinx_linkcheck_output.txt
++timeout 60 python3 -m sphinx -b linkcheck source build >"${OUTPUT_FILE}" 2>&1 || true
++# Print output for visibility
++cat "${OUTPUT_FILE}" || true
++# Determine test result based on presence of both 404 and anchor-not-found message
++HAS_404=$(grep -E -c "404|Not Found|Client Error" "${OUTPUT_FILE}" || true)
++HAS_ANCHOR_MSG=$(grep -F -c "Anchor 'test' not found" "${OUTPUT_FILE}" || true)
++TEST_NAME="test_repro_linkcheck_anchor"
++if [ "${HAS_404}" -gt 0 ] && [ "${HAS_ANCHOR_MSG}" -gt 0 ]; then
++  STATUS="PASSED"
++elif [ "${HAS_404}" -gt 0 ] && [ "${HAS_ANCHOR_MSG}" -eq 0 ]; then
++  STATUS="FAILED"
++elif [ "${HAS_ANCHOR_MSG}" -gt 0 ] && [ "${HAS_404}" -eq 0 ]; then
++  STATUS="FAILED"
++else
++  STATUS="ERROR"
++fi
++export TEST_NAME STATUS
++python3 - <<PY
++import os, json
++data = {"tests": [{"name": os.environ.get("TEST_NAME", "test_repro_linkcheck_anchor"), "status": os.environ.get("STATUS", "ERROR")}]}
++with open("/testbed/test_status.json", "w") as f:
++    json.dump(data, f, indent=2)
++PY
++# Copy output for inspection
++cp "${OUTPUT_FILE}" /testbed/sphinx_linkcheck_output.txt || true
+diff --git a/sphinx_linkcheck_output.txt b/sphinx_linkcheck_output.txt
+new file mode 100644
+index 000000000..e49a3e969
+--- /dev/null
++++ b/sphinx_linkcheck_output.txt
+@@ -0,0 +1,14 @@
++Running Sphinx v3.3.0+/5a92b0a4c
++loading translations [en]... done
++WARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered, its visitors will be overridden
++loading pickled environment... done
++building [mo]: targets for 0 po files that are out of date
++building [linkcheck]: targets for 1 source files that are out of date
++updating environment: 0 added, 0 changed, 0 removed
++looking for now-outdated files... none found
++preparing documents... done
++writing output... [100%] index
++
++(line    6) broken    http://127.0.0.1:8000/test.txt#test - Anchor 'test' not found
++
++build finished with problems, 1 warning.
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..e8a9d642c
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro_linkcheck_anchor",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

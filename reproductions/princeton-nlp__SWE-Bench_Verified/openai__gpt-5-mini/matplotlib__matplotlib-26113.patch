@@ -1,0 +1,141 @@
+diff --git a/parse_results.py b/parse_results.py
+new file mode 100644
+index 0000000000..f05972965c
+--- /dev/null
++++ b/parse_results.py
+@@ -0,0 +1,36 @@
++
++import sys, json, re
++from pathlib import Path
++
++raw_file = sys.argv[1] if len(sys.argv) > 1 else "/testbed/raw_output.txt"
++out = Path(raw_file).read_text()
++
++tests = []
++if out.strip().startswith("IMPORT_ERROR:") or "ImportError" in out or "No module" in out:
++    tests.append({"name":"test/hexbin_min_cnt_inconsistency","status":"ERROR"})
++    tests.append({"name":"test/hexbin_mincnt_one_equals_two_with_C","status":"ERROR"})
++    tests.append({"name":"test/hexbin_control_counts_available","status":"ERROR"})
++else:
++    def find(key):
++        m=re.search(rf"{key}:\s*([0-9]+)", out)
++        return int(m.group(1)) if m else None
++    a=find("counts_noC_mincnt1")
++    b=find("counts_withC_mincnt1")
++    e=find("counts_withC_mincnt2")
++    c0=find("counts_withC_mincnt0")
++    nod=find("counts_noC_no_mincnt")
++    if a is None or b is None:
++        status1="ERROR"
++    else:
++        status1 = "PASSED" if a != b else "FAILED"
++    if b is None or e is None:
++        status2="ERROR"
++    else:
++        status2 = "PASSED" if b == e else "FAILED"
++    status3 = "PASSED" if None not in (a,b,e,c0,nod) else "ERROR"
++    tests.append({"name":"test/hexbin_min_cnt_inconsistency","status":status1})
++    tests.append({"name":"test/hexbin_mincnt_one_equals_two_with_C","status":status2})
++    tests.append({"name":"test/hexbin_control_counts_available","status":status3})
++
++Path("/testbed/test_status.json").write_text(json.dumps({"tests":tests}, indent=2))
++print("WROTE /testbed/test_status.json with:", json.dumps({"tests":tests}, indent=2))
+diff --git a/raw_output.txt b/raw_output.txt
+new file mode 100644
+index 0000000000..a7aaa36873
+--- /dev/null
++++ b/raw_output.txt
+@@ -0,0 +1,5 @@
++counts_noC_mincnt1: 51
++counts_withC_mincnt1: 36
++counts_withC_mincnt2: 29
++counts_withC_mincnt0: 51
++counts_noC_no_mincnt: 113
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..bb0c30c7f7
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,6 @@
++#!/bin/bash
++set -euo pipefail
++python3 /testbed/test_reproduction.py > /testbed/raw_output.txt 2>&1 || true
++cat /testbed/raw_output.txt
++python3 /testbed/parse_results.py /testbed/raw_output.txt
++echo "Run complete"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..bad23de1c8
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,47 @@
++
++import numpy as np
++import sys
++
++def main():
++    try:
++        import matplotlib
++        matplotlib.use("Agg")
++        from matplotlib import pyplot as plt
++    except Exception as e:
++        print("IMPORT_ERROR:", e)
++        sys.exit(0)
++
++    np.random.seed(42)
++    X, Y = np.random.multivariate_normal([0.0, 0.0], [[1.0, 0.1], [0.1, 1.0]], size=250).T
++    Z = np.ones_like(X)
++
++    extent = [-3., 3., -3., 3.]
++    gridsize = (7, 7)
++
++    def count_bins(C=None, mincnt=None, reduce_C_function=None):
++        fig, ax = plt.subplots()
++        kwargs = dict(x=X, y=Y, extent=extent, gridsize=gridsize, linewidth=0.0, cmap='Blues')
++        if C is not None:
++            kwargs['C'] = C
++            kwargs['reduce_C_function'] = reduce_C_function
++        if mincnt is not None:
++            kwargs['mincnt'] = mincnt
++        m = ax.hexbin(**kwargs)
++        count = len(m.get_offsets())
++        plt.close(fig)
++        return count
++
++    a = count_bins(C=None, mincnt=1)            # no C, mincnt=1
++    b = count_bins(C=Z, mincnt=1, reduce_C_function=np.sum)  # C, mincnt=1
++    e = count_bins(C=Z, mincnt=2, reduce_C_function=np.sum)  # C, mincnt=2
++    c0 = count_bins(C=Z, mincnt=0, reduce_C_function=np.sum) # C, mincnt=0
++    nod = count_bins(C=None, mincnt=None)       # no C, no mincnt
++
++    print("counts_noC_mincnt1:", a)
++    print("counts_withC_mincnt1:", b)
++    print("counts_withC_mincnt2:", e)
++    print("counts_withC_mincnt0:", c0)
++    print("counts_noC_no_mincnt:", nod)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..12196645cf
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test/hexbin_min_cnt_inconsistency",
++      "status": "PASSED"
++    },
++    {
++      "name": "test/hexbin_mincnt_one_equals_two_with_C",
++      "status": "FAILED"
++    },
++    {
++      "name": "test/hexbin_control_counts_available",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

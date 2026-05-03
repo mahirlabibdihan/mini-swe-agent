@@ -1,0 +1,132 @@
+diff --git a/pytest_output.txt b/pytest_output.txt
+new file mode 100644
+index 000000000..8412cc445
+--- /dev/null
++++ b/pytest_output.txt
+@@ -0,0 +1,27 @@
++.handler.level: 42
++F
++=================================== FAILURES ===================================
++___________________________________ test_bar ___________________________________
++
++caplog = <_pytest.logging.LogCaptureFixture object at 0x7ffff6dc1b80>
++
++    def test_bar(caplog):
++        print("handler.level:", caplog.handler.level)
++>       assert caplog.handler.level == 0
++E       assert 42 == 0
++E        +  where 42 = <LogCaptureHandler (Level 42)>.level
++E        +    where <LogCaptureHandler (Level 42)> = <_pytest.logging.LogCaptureFixture object at 0x7ffff6dc1b80>.handler
++
++test_caplog.py:6: AssertionError
++=============================== warnings summary ===============================
++src/_pytest/junitxml.py:421
++  /testbed/src/_pytest/junitxml.py:421: PytestDeprecationWarning: The 'junit_family' default value will change to 'xunit2' in pytest 6.0. See:
++    https://docs.pytest.org/en/stable/deprecations.html#junit-family-default-value-change-to-xunit2
++  for more information.
++    _issue_warning_captured(deprecated.JUNIT_XML_DEFAULT_FAMILY, config.hook, 2)
++
++-- Docs: https://docs.pytest.org/en/stable/warnings.html
++------------------- generated xml file: /testbed/report.xml --------------------
++=========================== short test summary info ============================
++FAILED test_caplog.py::test_bar - assert 42 == 0
++1 failed, 1 passed, 1 warning in 0.03s
+diff --git a/report.xml b/report.xml
+new file mode 100644
+index 000000000..7259ccd04
+--- /dev/null
++++ b/report.xml
+@@ -0,0 +1,10 @@
++<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="0.028" timestamp="2026-04-27T18:43:57.686320" hostname="21c1cc9c2b8a"><testcase classname="test_caplog" name="test_foo" file="test_caplog.py" line="0" time="0.000" /><testcase classname="test_caplog" name="test_bar" file="test_caplog.py" line="3" time="0.000"><failure message="assert 42 == 0&#10; +  where 42 = &lt;LogCaptureHandler (Level 42)&gt;.level&#10; +    where &lt;LogCaptureHandler (Level 42)&gt; = &lt;_pytest.logging.LogCaptureFixture object at 0x7ffff6dc1b80&gt;.handler">caplog = &lt;_pytest.logging.LogCaptureFixture object at 0x7ffff6dc1b80&gt;
++
++    def test_bar(caplog):
++        print("handler.level:", caplog.handler.level)
++&gt;       assert caplog.handler.level == 0
++E       assert 42 == 0
++E        +  where 42 = &lt;LogCaptureHandler (Level 42)&gt;.level
++E        +    where &lt;LogCaptureHandler (Level 42)&gt; = &lt;_pytest.logging.LogCaptureFixture object at 0x7ffff6dc1b80&gt;.handler
++
++test_caplog.py:6: AssertionError</failure></testcase></testsuite></testsuites>
+\ No newline at end of file
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..14aeaa8df
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,45 @@
++#!/bin/bash
++set -euo pipefail
++cd "."
++
++# Ensure pytest is available
++python -m pip install -q pytest
++
++# Run pytest with junitxml to capture test outcomes reliably; allow non-zero exit
++pytest -q -s --junitxml=report.xml test_caplog.py 2>&1 | tee pytest_output.txt || true
++
++# Parse report.xml to build test_status.json
++python - <<PY "/testbed/report.xml" "/testbed/pytest_output.txt"
++import sys, json, pathlib, xml.etree.ElementTree as ET, re
++report_path = pathlib.Path(sys.argv[1])
++out_txt = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8")
++
++tests = []
++if report_path.exists():
++    tree = ET.parse(report_path)
++    root = tree.getroot()
++    for tc in root.findall(".//testcase"):
++        name = tc.get("name") or ""
++        nodeid = f"test_caplog.py::{name}"
++        status = "PASSED"
++        if tc.find("failure") is not None or tc.find("error") is not None:
++            status = "FAILED"
++        elif tc.find("skipped") is not None:
++            status = "SKIPPED"
++        tests.append({"name": nodeid, "status": status})
++
++pathlib.Path("test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print(pathlib.Path("test_status.json").read_text())
++
++levels = re.findall(r"(?m)^[ \t]*handler\.level:\s*([0-9]+)[ \t]*$", out_txt)
++if levels:
++    for i, lvl in enumerate(levels, 1):
++        print(f"Observed printed handler.level #{i}: {lvl}")
++else:
++    print("No printed handler.level lines observed in pytest output.")
++PY
++
++echo "=== pytest_output.txt ==="
++sed -n "1,200p" pytest_output.txt || true
++echo "=== /testbed/test_status.json ==="
++sed -n "1,200p" test_status.json || true
+diff --git a/test_caplog.py b/test_caplog.py
+new file mode 100644
+index 000000000..08c8e8472
+--- /dev/null
++++ b/test_caplog.py
+@@ -0,0 +1,6 @@
++def test_foo(caplog):
++    caplog.set_level(42)
++
++def test_bar(caplog):
++    print("handler.level:", caplog.handler.level)
++    assert caplog.handler.level == 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..e191c63d6
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_caplog.py::test_foo",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_caplog.py::test_bar",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

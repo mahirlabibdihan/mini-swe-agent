@@ -1,0 +1,103 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..b5161ce2b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,47 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++# Build the docs
++mkdir -p build
++SPHINXBUILD=$(python3 -c "import shutil; p=shutil.which('sphinx-build'); print(p if p else '')")
++if [ -z "$SPHINXBUILD" ]; then
++  echo "sphinx-build not found" >&2
++  exit 1
++fi
++"$SPHINXBUILD" -b html source build > build/build.log 2>&1 || true
++HTML_FILE=build/index.html
++if [ ! -f "$HTML_FILE" ]; then
++  echo "HTML not generated; see build/build.log" >&2
++  cat build/build.log || true
++  python3 - <<'PY'
++import json
++from pathlib import Path
++Path("test_status.json").write_text(json.dumps({"tests":[{"name":"build/index.html","status":"ERROR"}]}, indent=2))
++PY
++  exit 0
++fi
++
++html=$(cat "$HTML_FILE")
++
++p1='<kbd class="kbd docutils literal notranslate"><kbd class="kbd docutils literal notranslate"></kbd>-<kbd class="kbd docutils literal notranslate"></kbd></kbd>'
++p2='<kbd class="kbd docutils literal notranslate"><kbd class="kbd docutils literal notranslate"></kbd>+<kbd class="kbd docutils literal notranslate"></kbd></kbd>'
++p3='<kbd class="kbd docutils literal notranslate"><kbd class="kbd docutils literal notranslate">Shift</kbd>-<kbd class="kbd docutils literal notranslate"></kbd>+<kbd class="kbd docutils literal notranslate"></kbd></kbd>'
++
++if echo "$html" | grep -F -- "$p1" >/dev/null 2>&1; then status1="FAILED"; else status1="PASSED"; fi
++if echo "$html" | grep -F -- "$p2" >/dev/null 2>&1; then status2="FAILED"; else status2="PASSED"; fi
++if echo "$html" | grep -F -- "$p3" >/dev/null 2>&1; then status3="FAILED"; else status3="PASSED"; fi
++
++python3 - <<PY "$status1" "$status2" "$status3"
++import json,sys
++from pathlib import Path
++s1,s2,s3 = sys.argv[1], sys.argv[2], sys.argv[3]
++out = {
++  "tests": [
++    {"name":"test_kbd_dash","status": s1},
++    {"name":"test_kbd_plus","status": s2},
++    {"name":"test_kbd_shift_plus","status": s3}
++  ]
++}
++Path("test_status.json").write_text(json.dumps(out, indent=2))
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/source/conf.py b/source/conf.py
+new file mode 100644
+index 000000000..faea0d480
+--- /dev/null
++++ b/source/conf.py
+@@ -0,0 +1,5 @@
++project = 'kbd-repro'
++master_doc = 'index'
++extensions = []
++templates_path = []
++exclude_patterns = []
+diff --git a/source/index.rst b/source/index.rst
+new file mode 100644
+index 000000000..cf14ebe16
+--- /dev/null
++++ b/source/index.rst
+@@ -0,0 +1,10 @@
++Keyboard examples
++=================
++
++Below are the examples from the issue:
++
++(1) :kbd:`-`
++
++(2) :kbd:`+`
++
++(3) :kbd:`Shift-+`
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..419f7f2e7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test_kbd_dash",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_kbd_plus",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_kbd_shift_plus",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

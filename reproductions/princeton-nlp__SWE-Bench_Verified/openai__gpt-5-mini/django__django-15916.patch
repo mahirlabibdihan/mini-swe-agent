@@ -1,0 +1,113 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..033d242501
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,26 @@
++#!/bin/bash
++set -euo pipefail
++# Ensure Django is available
++python3 -m pip install -q "Django" || true
++
++output="$(python3 /testbed/test_reproduction.py 2>&1)" || true
++echo "$output"
++
++python3 - "$output" <<'PY'
++import sys, json, re
++out = sys.argv[1]
++tests = []
++# parse lines like RESULT:Form:field:True
++for line in out.splitlines():
++    m = re.match(r'^RESULT:(\w+):(\w+):(True|False)$', line)
++    if m:
++        form, field, val = m.group(1), m.group(2), m.group(3)
++        name = f"test_reproduction.py::test_{form}_{field}"
++        status = "PASSED" if val == "True" else "FAILED"
++        tests.append({"name": name, "status": status})
++# If we didn't capture results, mark an ERROR
++if not tests:
++    tests = [{"name": "test_reproduction.py::test_modelform_factory", "status": "ERROR"}]
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print(json.dumps({"tests": tests}, indent=2))
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..695b256295
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,48 @@
++import sys
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=['django.contrib.contenttypes'],
++        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++        SECRET_KEY='test-secret',
++    )
++import django
++django.setup()
++
++from django import forms
++from django.db import models
++
++call_count = {'count': 0}
++
++def all_required(field, **kwargs):
++    call_count['count'] += 1
++    formfield = field.formfield(**kwargs)
++    if formfield is None:
++        return None
++    formfield.required = True
++    return formfield
++
++class MyModel(models.Model):
++    active = models.BooleanField()
++    name = models.CharField(max_length=64, blank=True, null=True)
++    class Meta:
++        app_label = 'tests'
++
++class MyForm(forms.ModelForm):
++    # assign the plain callable (not staticmethod) to avoid TypeError
++    formfield_callback = all_required
++    class Meta:
++        model = MyModel
++        formfield_callback = all_required
++        fields = ['active', 'name']
++
++FactoryForm = forms.modelform_factory(MyModel, form=MyForm)
++
++f1 = MyForm()
++f2 = FactoryForm()
++
++print(f"RESULT:MyForm:active:{f1.fields['active'].required}")
++print(f"RESULT:MyForm:name:{f1.fields['name'].required}")
++print(f"RESULT:FactoryForm:active:{f2.fields['active'].required}")
++print(f"RESULT:FactoryForm:name:{f2.fields['name'].required}")
++print(f"CALL_COUNT:{call_count['count']}")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..6817b9e104
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_MyForm_active",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_MyForm_name",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_FactoryForm_active",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_FactoryForm_name",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

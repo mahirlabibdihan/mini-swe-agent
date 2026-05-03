@@ -1,0 +1,94 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..9e1b69fce
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,51 @@
++#!/bin/bash
++set -euo pipefail
++
++# Ensure output directory exists
++mkdir -p /testbed
++
++# Run the reproduction script and capture output (stdout+stderr)
++output="$(python3 test_reproduction.py 2>&1 || true)"
++echo "----captured output----"
++echo "$output"
++echo "-----------------------"
++
++# Parse output and determine statuses
++python3 - <<'PY' "$output"
++import json, sys
++output = sys.argv[1]
++
++tests = []
++
++expected_rkf = "RepeatedKFold(n_splits=5, n_repeats=10, random_state=None)"
++expected_rskf = "RepeatedStratifiedKFold(n_splits=5, n_repeats=10, random_state=None)"
++
++if "IMPORT_ERROR:" in output:
++    tests.append({"name": "test_reproduction.py::test_repeated_kfold_repr", "status": "ERROR"})
++    tests.append({"name": "test_reproduction.py::test_repeated_stratified_kfold_repr", "status": "ERROR"})
++else:
++    rkf_repr = None
++    rskf_repr = None
++    for line in output.splitlines():
++        if line.startswith("RKF_REPR:"):
++            rkf_repr = line.split("RKF_REPR:",1)[1]
++        if line.startswith("RSKF_REPR:"):
++            rskf_repr = line.split("RSKF_REPR:",1)[1]
++
++    if rkf_repr is None:
++        tests.append({"name": "test_reproduction.py::test_repeated_kfold_repr", "status": "ERROR"})
++    else:
++        status = "PASSED" if rkf_repr == expected_rkf else "FAILED"
++        tests.append({"name": "test_reproduction.py::test_repeated_kfold_repr", "status": status})
++
++    if rskf_repr is None:
++        tests.append({"name": "test_reproduction.py::test_repeated_stratified_kfold_repr", "status": "ERROR"})
++    else:
++        status = "PASSED" if rskf_repr == expected_rskf else "FAILED"
++        tests.append({"name": "test_reproduction.py::test_repeated_stratified_kfold_repr", "status": status})
++
++out_path = "/testbed/test_status.json"
++with open(out_path, "w") as f:
++    json.dump({"tests": tests}, f, indent=2)
++print("Wrote", out_path)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..d6aae75d6
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,12 @@
++import sys
++try:
++    from sklearn.model_selection import RepeatedKFold, RepeatedStratifiedKFold
++except Exception as e:
++    print("IMPORT_ERROR:", repr(e))
++    sys.exit(0)
++
++rkf = RepeatedKFold()
++rskf = RepeatedStratifiedKFold()
++
++print("RKF_REPR:" + repr(rkf))
++print("RSKF_REPR:" + repr(rskf))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..989b182df
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_repeated_kfold_repr",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_repeated_stratified_kfold_repr",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

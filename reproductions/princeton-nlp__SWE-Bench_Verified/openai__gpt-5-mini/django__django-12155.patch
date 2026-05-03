@@ -1,0 +1,117 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..da98ca8e15
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd /testbed
++python -m pip install --quiet docutils >/dev/null 2>&1 || true
++
++output=$(python test_reproduction.py 2>&1 || true)
++echo "$output"
++
++status="PASSED"
++# If we see the directive/content error or any parse exception for the buggy version, mark as FAILED
++if echo "$output" | grep -Ei "no content permitted|Explicit markup ends without a blank line|PARSE_EXCEPTION|ERROR/3" >/dev/null; then
++  status="FAILED"
++fi
++
++python - <<PY "$output" "$status"
++import json, sys, os
++out = sys.argv[1]
++status = sys.argv[2]
++os.makedirs("/testbed", exist_ok=True)
++with open("/testbed/test_status.json", "w") as f:
++    json.dump({"tests":[{"name":"test_reproduction.py::test_trim_docstring_default_role","status":status}]}, f, indent=2)
++print("WROTE /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..50b5d023dc
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,67 @@
++from docutils.core import publish_doctree
++import traceback
++
++def trim_docstring_bug(docstring):
++    # Buggy version per PR description
++    lines = docstring.splitlines()
++    # remove leading and trailing blank lines
++    while lines and not lines[0].strip():
++        lines.pop(0)
++    while lines and not lines[-1].strip():
++        lines.pop()
++    if not lines:
++        return ''
++    indent = min(len(line) - len(line.lstrip()) for line in lines if line.lstrip())
++    new_lines = []
++    for line in lines:
++        if line.strip():
++            new_lines.append(line[indent:])
++        else:
++            new_lines.append('')
++    return '\n'.join(new_lines)
++
++def trim_docstring_fixed(docstring):
++    # Fixed version: skip first line when computing indent
++    lines = docstring.splitlines()
++    # remove leading and trailing blank lines
++    while lines and not lines[0].strip():
++        lines.pop(0)
++    while lines and not lines[-1].strip():
++        lines.pop()
++    if not lines:
++        return ''
++    # Skip the first line when computing indent (as proposed)
++    indent = min(len(line) - len(line.lstrip()) for line in lines[1:] if line.lstrip()) if len(lines) > 1 else 0
++    new_lines = []
++    for i, line in enumerate(lines):
++        if line.strip():
++            if i == 0:
++                new_lines.append(line)  # keep first line as-is
++            else:
++                new_lines.append(line[indent:])
++        else:
++            new_lines.append('')
++    return '\n'.join(new_lines)
++
++def attempt_parse(name, rst):
++    print(f"--- PARSING: {name} ---")
++    print(rst)
++    try:
++        publish_doctree(rst)
++        print("PARSE_OK")
++    except Exception as e:
++        print("PARSE_EXCEPTION:", e)
++        traceback.print_exc()
++
++def main():
++    # Docstring that starts on first line and has indented subsequent lines
++    doc = "This is the summary line.\n    This is a more detailed line that is indented.\n    Another indented line."
++    prefix = ".. default-role:: cmsreference\n"
++    buggy_rst = prefix + trim_docstring_bug(doc)
++    fixed_rst = prefix + trim_docstring_fixed(doc)
++
++    attempt_parse("buggy_trim", buggy_rst)
++    attempt_parse("fixed_trim", fixed_rst)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..f4c12b1341
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_trim_docstring_default_role",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

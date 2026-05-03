@@ -1,0 +1,55 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..388418c33f
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++cd "$(dirname "$0")"
++# Run the reproduction script, append an exit marker, and capture everything
++raw=$(python3 test_reproduction.py 2>&1; printf "<<<EXIT:%d>>>" $? )
++# Extract the exit code from the marker
++exit_code=$(printf "%s" "$raw" | sed -n 's/.*<<<EXIT:\([0-9]\+\)>>>/\1/p')
++# Remove the exit marker to get original output
++output=$(printf "%s" "$raw" | sed 's/<<<EXIT:[0-9]\+>>>$//')
++# Print output for visibility
++printf "%s\n" "$output"
++# Determine status
++status="PASSED"
++if [ "$exit_code" != "0" ]; then
++  status="FAILED"
++fi
++# Write the required JSON file
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_reproduction.py::test_loaddata_sqlite_keyword", "status": "$status"}]}
++JSON
++# Always exit 0 so runner completes successfully
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..930158d4ea
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,15 @@
++import sqlite3, sys, traceback
++table_name = "order"
++conn = sqlite3.connect(":memory:")
++cur = conn.cursor()
++# Create the table with quoting so creation succeeds even though name is a SQL keyword.
++cur.execute('CREATE TABLE "order" (id INTEGER PRIMARY KEY)')
++try:
++    # This mirrors the buggy usage: unquoted table name passed into PRAGMA
++    cur.execute('PRAGMA foreign_key_check(%s)' % table_name)
++    rows = cur.fetchall()
++    print("PRAGMA foreign_key_check succeeded, rows:", rows)
++    sys.exit(0)
++except Exception:
++    traceback.print_exc()
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..f12b8fecf9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_reproduction.py::test_loaddata_sqlite_keyword", "status": "FAILED"}]}

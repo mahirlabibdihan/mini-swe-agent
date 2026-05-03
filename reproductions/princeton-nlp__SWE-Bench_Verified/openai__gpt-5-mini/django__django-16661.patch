@@ -1,0 +1,170 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5e3620299b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,42 @@
++#!/bin/bash
++set -euo pipefail
++PYTHON=${PYTHON:-python3}
++
++# Ensure Django is available (best-effort)
++pip install -q "Django>=2.2" || true
++
++# Run the reproduction test and capture output
++output=$($PYTHON testbed/test_reproduction.py 2>&1 || true)
++
++# Determine status from test output markers
++status="ERROR"
++if echo "$output" | grep -q "TEST_RESULT: PASSED"; then
++  status="PASSED"
++elif echo "$output" | grep -q "TEST_RESULT: FAILED - returned not True"; then
++  status="FAILED"
++elif echo "$output" | grep -q "TEST_RESULT: FAILED - exception raised" || echo "$output" | grep -q "EXCEPTION:"; then
++  status="ERROR"
++else
++  status="ERROR"
++fi
++
++# Write strictly valid JSON to the absolute required path
++python3 - <<PY
++import json
++obj = {
++    "tests": [
++        {
++            "name": "test_modeladmin_lookup_allowed.py::test_lookup_allowed_foreign_primary",
++            "status": "$status"
++        }
++    ]
++}
++with open("/testbed/test_status.json", "w") as f:
++    json.dump(obj, f, indent=2)
++PY
++
++# Output for visibility
++echo "----- TEST OUTPUT -----"
++echo "$output"
++echo "-----------------------"
++cat /testbed/test_status.json
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..4b0923816c
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_modeladmin_lookup_allowed.py::test_lookup_allowed_foreign_primary",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testbed/test_app/__init__.py b/testbed/test_app/__init__.py
+new file mode 100644
+index 0000000000..79e5d708d5
+--- /dev/null
++++ b/testbed/test_app/__init__.py
+@@ -0,0 +1 @@
++# test_app package
+diff --git a/testbed/test_app/models.py b/testbed/test_app/models.py
+new file mode 100644
+index 0000000000..e702e2e38f
+--- /dev/null
++++ b/testbed/test_app/models.py
+@@ -0,0 +1,21 @@
++from django.db import models
++
++class Country(models.Model):
++    name = models.CharField(max_length=256)
++    class Meta:
++        app_label = 'test_app'
++
++class Place(models.Model):
++    country = models.ForeignKey(Country, models.CASCADE)
++    class Meta:
++        app_label = 'test_app'
++
++class Restaurant(models.Model):
++    place = models.OneToOneField(Place, models.CASCADE, primary_key=True)
++    class Meta:
++        app_label = 'test_app'
++
++class Waiter(models.Model):
++    restaurant = models.ForeignKey(Restaurant, models.CASCADE)
++    class Meta:
++        app_label = 'test_app'
+diff --git a/testbed/test_repro_output.txt b/testbed/test_repro_output.txt
+new file mode 100644
+index 0000000000..3214337165
+--- /dev/null
++++ b/testbed/test_repro_output.txt
+@@ -0,0 +1 @@
++rc=1
+diff --git a/testbed/test_reproduction.py b/testbed/test_reproduction.py
+new file mode 100644
+index 0000000000..6b5253fcbf
+--- /dev/null
++++ b/testbed/test_reproduction.py
+@@ -0,0 +1,45 @@
++import sys
++from pathlib import Path
++
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[
++            'django.contrib.auth',
++            'django.contrib.contenttypes',
++            'test_app',
++        ],
++        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++        SECRET_KEY='test-secret-key',
++        USE_TZ=True,
++    )
++
++import django
++django.setup()
++
++from django.contrib import admin
++from test_app.models import Waiter
++
++def run_test():
++    ma = admin.ModelAdmin(Waiter, admin.site)
++    try:
++        allowed = ma.lookup_allowed('restaurant__place__country', 'test_value')
++        print("lookup_allowed returned:", allowed)
++        if allowed is True:
++            print("TEST_RESULT: PASSED")
++            return 0
++        else:
++            print("TEST_RESULT: FAILED - returned not True")
++            return 1
++    except Exception as e:
++        # Print the exception class name for analysis
++        print("EXCEPTION:", type(e).__name__)
++        print("EXCEPTION_REPR:", repr(e))
++        print("TEST_RESULT: ERROR - exception raised")
++        return 2
++
++if __name__ == '__main__':
++    rc = run_test()
++    Path("testbed/test_repro_output.txt").write_text("rc=%d\n" % rc)
++    sys.exit(rc)
+diff --git a/testbed/test_status.json b/testbed/test_status.json
+new file mode 100644
+index 0000000000..4b0923816c
+--- /dev/null
++++ b/testbed/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_modeladmin_lookup_allowed.py::test_lookup_allowed_foreign_primary",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

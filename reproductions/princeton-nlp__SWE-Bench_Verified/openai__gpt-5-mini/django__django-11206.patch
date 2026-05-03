@@ -1,0 +1,98 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..818f2d6788
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,47 @@
++#!/bin/bash
++set -euo pipefail
++
++cat <<'PY' > /testbed/test_reproduction.py
++#!/usr/bin/env python3
++from decimal import Decimal
++from django.conf import settings
++settings.configure(USE_L10N=False, USE_THOUSAND_SEPARATOR=False)
++from django.utils.numberformat import format as nformat
++
++a = nformat(Decimal('1e-199'), '.', decimal_pos=2)
++b = nformat(Decimal('1e-200'), '.', decimal_pos=2)
++
++print("nformat(Decimal('1e-199'), '.', decimal_pos=2) ->", repr(a))
++print("nformat(Decimal('1e-200'), '.', decimal_pos=2) ->", repr(b))
++
++# According to the PR, when decimal_pos is provided and the value is smaller than the precision,
++# the expected formatted output should be zeros (e.g., '0.00').
++expected_a = '0.00'
++expected_b = '0.00'  # PR-expected behavior: should not switch to exponential notation
++
++if a == expected_a and b == expected_b:
++    print('Behavior matches PR-expected (no exponential).')
++    raise SystemExit(0)
++else:
++    print('Observed behavior demonstrates the bug: exponential notation used for very small value when decimal_pos is provided.')
++    print('Expected both:', repr(expected_a), 'Got:', repr(a), repr(b))
++    raise SystemExit(1)
++PY
++
++python3 -m pip install --quiet Django
++
++set +e
++python3 /testbed/test_reproduction.py 2>&1 | tee /tmp/test_output.txt
++rc=${PIPESTATUS[0]}
++export RC=$rc
++set -e
++
++python3 - <<PY
++import os, json
++rc = int(os.environ.get('RC','1'))
++status = 'PASSED' if rc == 0 else 'FAILED'
++tests = [{"name": "test_reproduction.py::test_numberformat_small_decimal_expected_no_exp", "status": status}]
++open('/testbed/test_status.json','w').write(json.dumps({'tests': tests}, indent=2))
++with open('/tmp/test_output.txt') as f: print(f.read())
++print('Exit code:', rc)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..6a8ebe37d2
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,24 @@
++#!/usr/bin/env python3
++from decimal import Decimal
++from django.conf import settings
++settings.configure(USE_L10N=False, USE_THOUSAND_SEPARATOR=False)
++from django.utils.numberformat import format as nformat
++
++a = nformat(Decimal('1e-199'), '.', decimal_pos=2)
++b = nformat(Decimal('1e-200'), '.', decimal_pos=2)
++
++print("nformat(Decimal('1e-199'), '.', decimal_pos=2) ->", repr(a))
++print("nformat(Decimal('1e-200'), '.', decimal_pos=2) ->", repr(b))
++
++# According to the PR, when decimal_pos is provided and the value is smaller than the precision,
++# the expected formatted output should be zeros (e.g., '0.00').
++expected_a = '0.00'
++expected_b = '0.00'  # PR-expected behavior: should not switch to exponential notation
++
++if a == expected_a and b == expected_b:
++    print('Behavior matches PR-expected (no exponential).')
++    raise SystemExit(0)
++else:
++    print('Observed behavior demonstrates the bug: exponential notation used for very small value when decimal_pos is provided.')
++    print('Expected both:', repr(expected_a), 'Got:', repr(a), repr(b))
++    raise SystemExit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..9d697c7703
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_numberformat_small_decimal_expected_no_exp",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

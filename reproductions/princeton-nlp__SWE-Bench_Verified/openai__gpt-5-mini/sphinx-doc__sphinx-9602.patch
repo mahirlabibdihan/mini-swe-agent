@@ -1,0 +1,99 @@
+diff --git a/docs/source/conf.py b/docs/source/conf.py
+new file mode 100644
+index 000000000..2b5b9b953
+--- /dev/null
++++ b/docs/source/conf.py
+@@ -0,0 +1,6 @@
++import os
++import sys
++sys.path.insert(0, os.path.abspath('../..'))
++project = "repro"
++extensions = ["sphinx.ext.autodoc"]
++master_doc = "index"
+diff --git a/docs/source/index.rst b/docs/source/index.rst
+new file mode 100644
+index 000000000..c1db38be4
+--- /dev/null
++++ b/docs/source/index.rst
+@@ -0,0 +1,5 @@
++repro documentation
++===================
++
++.. automodule:: mymod
++   :members:
+diff --git a/mymod.py b/mymod.py
+new file mode 100644
+index 000000000..ff70b81b1
+--- /dev/null
++++ b/mymod.py
+@@ -0,0 +1,8 @@
++import typing
++@typing.overload
++def foo(x: "typing.Literal[True]") -> int: ...
++@typing.overload
++def foo(x: "typing.Literal[False]") -> str: ...
++def foo(x: bool):
++    """a func"""
++    return 1 if x else "foo"
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..826c69dce
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,41 @@
++#!/bin/bash
++set -euo pipefail
++# Ensure sphinx-build is available; try to install a matching version if not.
++if ! command -v sphinx-build >/dev/null 2>&1; then
++  echo "sphinx-build not found; installing Sphinx==4.1.2 (user install)..."
++  python -m pip install --user "Sphinx==4.1.2"
++  export PATH="$HOME/.local/bin:$PATH"
++fi
++
++SRC_DIR="/testbed/docs/source"
++BUILD_DIR="/testbed/docs/build"
++
++# Run sphinx-build with nitpicky mode and warnings-as-errors to reproduce the issue.
++set +e
++output="$(sphinx-build -b html -n -W "$SRC_DIR" "$BUILD_DIR" 2>&1)"
++exit_code=$?
++set -e
++
++echo "=== sphinx-build exit code: $exit_code ==="
++echo "$output"
++
++status="PASSED"
++if [ $exit_code -ne 0 ]; then
++  status="FAILED"
++fi
++
++# Write the required test status JSON to /testbed/test_status.json
++python - <<PY "$status"
++import json, sys
++status = sys.argv[1]
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": [{"name": "sphinx_literal_nitpick", "status": status}]}, indent=2))
++print("Wrote /testbed/test_status.json with status:", status)
++PY
++
++# Do NOT exit non-zero so the harness sees the script as executed.
++if [ "$status" = "FAILED" ]; then
++  echo "Test FAILED as expected (sphinx-build returned non-zero)."
++else
++  echo "Test PASSED (sphinx-build succeeded)."
++fi
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..f02c50708
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "sphinx_literal_nitpick",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,68 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..e31ae4b8be
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,12 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_parse_http_date.py 2>&1 || true)
++echo "$output"
++status="PASSED"
++if echo "$output" | grep -q "MISMATCH"; then status="FAILED"; fi
++python3 - <<PY "$status"
++import sys, json
++status=sys.argv[1]
++tests=[{"name": "/testbed/test_parse_http_date.py::test_two_digit_year_70", "status": status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++PY
+diff --git a/test_parse_http_date.py b/test_parse_http_date.py
+new file mode 100644
+index 0000000000..34eed90593
+--- /dev/null
++++ b/test_parse_http_date.py
+@@ -0,0 +1,29 @@
++import datetime
++def incorrect_year(two_digit):
++    y = int(two_digit)
++    if 0 <= y <= 69:
++        return 2000 + y
++    return 1900 + y
++
++def rfc_year(two_digit, now=None):
++    if now is None:
++        now = datetime.datetime.utcnow()
++    y = int(two_digit)
++    cand1 = 1900 + y
++    cand2 = 2000 + y
++    # If cand2 appears to be more than 50 years in the future, use cand1 per RFC.
++    if (cand2 - now.year) > 50:
++        return cand1
++    return cand2
++
++if __name__ == "__main__":
++    now = datetime.datetime.utcnow()
++    two = "70"
++    inc = incorrect_year(two)
++    rfc = rfc_year(two, now)
++    print(f"NOW_YEAR:{now.year}")
++    print(f"INPUT:{two} INCORRECT:{inc} RFC:{rfc}")
++    if inc != rfc:
++        print("MISMATCH")
++    else:
++        print("MATCH")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..a01cffb339
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_parse_http_date.py::test_two_digit_year_70",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

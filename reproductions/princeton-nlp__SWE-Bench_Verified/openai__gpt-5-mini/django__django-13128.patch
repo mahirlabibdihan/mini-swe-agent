@@ -1,0 +1,217 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..f5c38e9bd3
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++# Run the reproduction script and capture output
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Determine status
++status="PASSED"
++if echo "$output" | grep -q "Expression contains mixed types"; then
++  status="FAILED"
++elif echo "$output" | grep -q "RESULT: NO_ERROR"; then
++  status="PASSED"
++elif echo "$output" | grep -q "RESULT: EXCEPTION"; then
++  status="ERROR"
++else
++  status="ERROR"
++fi
++
++# Write test_status.json using python -c with status passed as argv
++python3 -c 'import json, pathlib, sys; s=sys.argv[1]; pathlib.Path("/testbed/test_status.json").write_text(json.dumps({"tests":[{"name":"test_reproduction.py::test_temporal_subtraction","status":s}]}, indent=2)); print("WROTE /testbed/test_status.json with status:", s)' "$status"
+diff --git a/setup_and_run.sh b/setup_and_run.sh
+new file mode 100755
+index 0000000000..56c255b549
+--- /dev/null
++++ b/setup_and_run.sh
+@@ -0,0 +1,101 @@
++#!/bin/bash
++set -euo pipefail
++# Install Django
++pip install Django -q
++
++# Prepare test app directory
++mkdir -p /testbed/testapp
++
++# __init__.py
++cat > /testbed/testapp/__init__.py <<'PY'
++# testapp package
++PY
++
++# models.py
++cat > /testbed/testapp/models.py <<'PY'
++from django.db import models
++
++class Experiment(models.Model):
++    start = models.DateTimeField()
++    end = models.DateTimeField()
++
++    class Meta:
++        app_label = 'testapp'
++PY
++
++# reproduction script
++cat > /testbed/test_reproduction.py <<'PY'
++#!/usr/bin/env python3
++import os, sys, datetime
++from django.conf import settings
++
++BASE_DIR = os.path.dirname(__file__)
++settings.configure(
++    INSTALLED_APPS=['testapp','django.contrib.contenttypes'],
++    DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++    USE_TZ=False,
++)
++
++import django
++django.setup()
++
++from testapp.models import Experiment
++from django.db import connection
++
++# Create DB table for the model without migrations
++with connection.schema_editor() as se:
++    se.create_model(Experiment)
++
++# Insert one object
++Experiment.objects.create(start=datetime.datetime(2020,1,1,0,0), end=datetime.datetime(2020,1,2,0,0))
++
++# Attempt the problematic annotation
++from django.db.models import F, Value, DurationField
++
++try:
++    qs = Experiment.objects.annotate(
++        delta=F('end') - F('start') + Value(datetime.timedelta(), output_field=DurationField())
++    )
++    # Force evaluation
++    list(qs)
++    print("RESULT: NO_ERROR")
++except Exception as e:
++    # Print full exception for parsing
++    print("RESULT: EXCEPTION")
++    print(repr(e))
++    # Exit with non-zero to indicate failure
++    sys.exit(2)
++PY
++
++# run_test.sh to execute and record status
++cat > /testbed/run_test.sh <<'PY'
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++# Determine status by looking for the specific Django FieldError message
++status="PASSED"
++if echo "$output" | grep -q "Expression contains mixed types"; then
++  status="FAILED"
++elif echo "$output" | grep -q "RESULT: EXCEPTION"; then
++  status="ERROR"
++fi
++
++python3 - <<PYCODE
++import json, pathlib, sys, re
++output = sys.stdin.read()
++# Build statuses based on detected status variable passed via environment
++statuses = [{"name": "test_reproduction.py::test_temporal_subtraction", "status": "$status"}]
++p = pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests": statuses}, indent=2))
++print("WROTE", p)
++PYCODE <<EOF
++$output
++EOF
++PY
++
++chmod +x /testbed/run_test.sh
++
++# Execute the test runner
++/testbed/run_test.sh
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..de296e6c52
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,40 @@
++#!/usr/bin/env python3
++import os, sys, datetime
++from django.conf import settings
++
++BASE_DIR = os.path.dirname(__file__)
++settings.configure(
++    INSTALLED_APPS=['testapp','django.contrib.contenttypes'],
++    DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++    USE_TZ=False,
++)
++
++import django
++django.setup()
++
++from testapp.models import Experiment
++from django.db import connection
++
++# Create DB table for the model without migrations
++with connection.schema_editor() as se:
++    se.create_model(Experiment)
++
++# Insert one object
++Experiment.objects.create(start=datetime.datetime(2020,1,1,0,0), end=datetime.datetime(2020,1,2,0,0))
++
++# Attempt the problematic annotation
++from django.db.models import F, Value, DurationField
++
++try:
++    qs = Experiment.objects.annotate(
++        delta=F('end') - F('start') + Value(datetime.timedelta(), output_field=DurationField())
++    )
++    # Force evaluation
++    list(qs)
++    print("RESULT: NO_ERROR")
++except Exception as e:
++    # Print full exception for parsing
++    print("RESULT: EXCEPTION")
++    print(repr(e))
++    # Exit with non-zero to indicate failure
++    sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..ea469f536b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_temporal_subtraction",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..f8268c6c4c
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,8 @@
++from django.db import models
++
++class Experiment(models.Model):
++    start = models.DateTimeField()
++    end = models.DateTimeField()
++
++    class Meta:
++        app_label = 'testapp'

@@ -1,0 +1,123 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..48881aee
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,5 @@
++#!/bin/bash
++set -euo pipefail
++python3 -m pip install -q xarray pydap netcdf4 || true
++python3 /testbed/test_reproduction.py
++nl -ba /testbed/test_status.json || true
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..c977074a
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,68 @@
++import json, sys, traceback
++from pathlib import Path
++
++URL = "https://observations.ipsl.fr/thredds/dodsC/EUREC4A/PRODUCTS/testdata/netcdf_testfiles/test_NC_BYTE_neg.nc"
++out_path = Path("/testbed/test_status.json")
++
++def write_status(status, details):
++    out = {"tests": [{"name": "repro::netcdf4_vs_pydap", "status": status, "details": details}]}
++    out_path.write_text(json.dumps(out, indent=2))
++
++try:
++    try:
++        import xarray as xr
++        import numpy as np
++    except Exception as e:
++        write_status("ERROR", {"error": f"Missing dependency: {e}"})
++        sys.exit(0)
++
++    engines = ["netcdf4", "pydap"]
++    results = {}
++    errors = {}
++    for eng in engines:
++        try:
++            ds = xr.open_dataset(URL, engine=eng)
++            if "test" in ds:
++                arr = ds["test"].values
++            elif "test" in ds.coords:
++                arr = ds.coords["test"].values
++            else:
++                keys = list(ds.variables.keys())
++                arr = ds[keys[0]].values if keys else None
++            arr = None if arr is None else np.array(arr)
++            results[eng] = None if arr is None else arr.tolist()
++            ds.close()
++        except Exception as e:
++            errors[eng] = repr(e)
++            results[eng] = f"ERROR: {e}"
++
++    # Compare arrays elementwise allowing NaNs to match
++    status = "FAILED"
++    details = {"results": results, "errors": errors}
++    try:
++        net = results.get("netcdf4")
++        py = results.get("pydap")
++        equal = False
++        if isinstance(net, list) and isinstance(py, list) and len(net) == len(py):
++            equal = True
++            import math
++            for a,b in zip(net, py):
++                if isinstance(a, float) and isinstance(b, float):
++                    if math.isnan(a) and math.isnan(b):
++                        continue
++                if a != b:
++                    equal = False
++                    break
++        if equal:
++            status = "PASSED"
++        else:
++            # Intentionally fail because the bug is that engines differ (expected failing reproduction)
++            status = "FAILED"
++    except Exception as e:
++        status = "ERROR"
++        details["compare_error"] = repr(e)
++
++    write_status(status, details)
++
++except Exception:
++    write_status("ERROR", {"traceback": traceback.format_exc()})
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..d9d0b46b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,31 @@
++{
++  "tests": [
++    {
++      "name": "repro::netcdf4_vs_pydap",
++      "status": "FAILED",
++      "details": {
++        "results": {
++          "netcdf4": [
++            -128.0,
++            -1.0,
++            0.0,
++            1.0,
++            2.0,
++            NaN,
++            127.0
++          ],
++          "pydap": [
++            128.0,
++            255.0,
++            0.0,
++            1.0,
++            2.0,
++            NaN,
++            127.0
++          ]
++        },
++        "errors": {}
++      }
++    }
++  ]
++}
+\ No newline at end of file

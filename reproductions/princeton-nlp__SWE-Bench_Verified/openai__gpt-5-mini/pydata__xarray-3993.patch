@@ -1,0 +1,105 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..a67cbe52
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,44 @@
++#!/bin/bash
++set -euo pipefail
++OUTPUT="$(python /testbed/test_reproduction.py 2>&1 || true)"
++echo "$OUTPUT"
++
++# Now expect consistency: both should accept 'coord' and both should accept 'dim'.
++# This will mark the current inconsistent behavior as FAIL.
++tests=()
++
++if echo "$OUTPUT" | grep -q "^IMPORT_ERROR"; then
++  tests+=("{\"name\":\"test_reproduction:import_xarray\",\"status\":\"ERROR\"}")
++else
++  # Expect DS to accept coord
++  if echo "$OUTPUT" | grep -q "^DS_COORD: OK"; then
++    tests+=("{\"name\":\"test_reproduction:ds_integrate_coord_accepts\",\"status\":\"PASSED\"}")
++  else
++    tests+=("{\"name\":\"test_reproduction:ds_integrate_coord_accepts\",\"status\":\"FAILED\"}")
++  fi
++
++  # Expect DS to accept dim (this is currently false -> should FAIL)
++  if echo "$OUTPUT" | grep -q "^DS_DIM: OK"; then
++    tests+=("{\"name\":\"test_reproduction:ds_integrate_dim_accepts\",\"status\":\"PASSED\"}")
++  else
++    tests+=("{\"name\":\"test_reproduction:ds_integrate_dim_accepts\",\"status\":\"FAILED\"}")
++  fi
++
++  # Expect DA to accept dim
++  if echo "$OUTPUT" | grep -q "^DA_DIM: OK"; then
++    tests+=("{\"name\":\"test_reproduction:da_integrate_dim_accepts\",\"status\":\"PASSED\"}")
++  else
++    tests+=("{\"name\":\"test_reproduction:da_integrate_dim_accepts\",\"status\":\"FAILED\"}")
++  fi
++
++  # Expect DA to accept coord (this is currently false -> should FAIL)
++  if echo "$OUTPUT" | grep -q "^DA_COORD: OK"; then
++    tests+=("{\"name\":\"test_reproduction:da_integrate_coord_accepts\",\"status\":\"PASSED\"}")
++  else
++    tests+=("{\"name\":\"test_reproduction:da_integrate_coord_accepts\",\"status\":\"FAILED\"}")
++  fi
++fi
++
++# Build JSON and write to /testbed/test_status.json
++printf '{"tests":[%s]}\n' "$(IFS=,; echo "${tests[*]}")" > /testbed/test_status.json
++echo "WROTE /testbed/test_status.json"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..62a33938
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,42 @@
++import traceback
++def safe_run(fn):
++    try:
++        res = fn()
++        return ("OK", None, res)
++    except Exception as e:
++        return ("ERR", traceback.format_exc(), None)
++
++try:
++    import xarray as xr
++    import numpy as np
++except Exception as e:
++    print("IMPORT_ERROR")
++    print(repr(e))
++    raise SystemExit(0)
++
++da = xr.DataArray(np.arange(3.0), coords={'x': [0.0, 1.0, 2.0]}, dims='x')
++ds = xr.Dataset({'a': da})
++
++# 1: Dataset.integrate(coord='x') -> expected to succeed
++status1, tb1, res1 = safe_run(lambda: ds.integrate(coord='x'))
++print("DS_COORD:", status1)
++if tb1:
++    print(tb1)
++
++# 2: Dataset.integrate(dim='x') -> expected to raise / not accept dim
++status2, tb2, res2 = safe_run(lambda: ds.integrate(dim='x'))
++print("DS_DIM:", status2)
++if tb2:
++    print(tb2)
++
++# 3: DataArray.integrate(dim='x') -> expected to succeed
++status3, tb3, res3 = safe_run(lambda: da.integrate(dim='x'))
++print("DA_DIM:", status3)
++if tb3:
++    print(tb3)
++
++# 4: DataArray.integrate(coord='x') -> expected to raise / not accept coord
++status4, tb4, res4 = safe_run(lambda: da.integrate(coord='x'))
++print("DA_COORD:", status4)
++if tb4:
++    print(tb4)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..8a80f4d6
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction:ds_integrate_coord_accepts","status":"PASSED"},{"name":"test_reproduction:ds_integrate_dim_accepts","status":"FAILED"},{"name":"test_reproduction:da_integrate_dim_accepts","status":"PASSED"},{"name":"test_reproduction:da_integrate_coord_accepts","status":"FAILED"}]}

@@ -1,0 +1,107 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..bf55b23253
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -euo pipefail
++python -m pip install "Django==3.2.7" --quiet
++export PYTHONPATH="$PWD/testbed:${PYTHONPATH:-}"
++export DJANGO_SETTINGS_MODULE=testproj.settings
++python - <<'PY'
++import django, sys, json, os
++django.setup()
++from django.test import Client
++
++client = Client()
++# Expectation: RFC-5646 locales with script+region SHOULD be handled -> expect 200 for all
++cases = [
++    ('/en-us/', True),
++    ('/en-latn-us/', True),   # should be 200 but is 404 in buggy behavior
++    ('/en-Latn-US/', True),   # should be 200 but is 404 in buggy behavior
++]
++results = []
++for path, expected in cases:
++    resp = client.get(path)
++    observed_ok = (resp.status_code == 200)
++    test_pass = "PASSED" if observed_ok == expected else "FAILED"
++    results.append({"name": f"test_repro::{path.strip('/') or 'root'}", "status": test_pass})
++    print(path, "status_code=", resp.status_code, "content=", resp.content[:80])
++
++os.makedirs('/testbed', exist_ok=True)
++with open('/testbed/test_status.json', 'w') as f:
++    json.dump({"tests": results}, f, indent=2)
++
++# Do not force non-zero exit; the presence of FAILED entries in test_status.json is the important part.
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..f6ee2153b6
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test_repro::en-us",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_repro::en-latn-us",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro::en-Latn-US",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testbed/testproj/__init__.py b/testbed/testproj/__init__.py
+new file mode 100644
+index 0000000000..323c22847f
+--- /dev/null
++++ b/testbed/testproj/__init__.py
+@@ -0,0 +1 @@
++# package marker
+diff --git a/testbed/testproj/settings.py b/testbed/testproj/settings.py
+new file mode 100644
+index 0000000000..378ee6439c
+--- /dev/null
++++ b/testbed/testproj/settings.py
+@@ -0,0 +1,17 @@
++SECRET_KEY = 'secret'
++DEBUG = True
++ALLOWED_HOSTS = ['*']
++ROOT_URLCONF = 'testproj.urls'
++MIDDLEWARE = [
++    'django.middleware.common.CommonMiddleware',
++    'django.middleware.locale.LocaleMiddleware',
++]
++LANGUAGE_CODE = 'en-us'
++LANGUAGES = [
++    ('en-us', "English"),
++    ('en-latn-us', "Latin English"),
++    ('en-Latn-US', "BCP 47 case format"),
++]
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++]
+diff --git a/testbed/testproj/urls.py b/testbed/testproj/urls.py
+new file mode 100644
+index 0000000000..8574baa5e6
+--- /dev/null
++++ b/testbed/testproj/urls.py
+@@ -0,0 +1,11 @@
++from django.conf.urls.i18n import i18n_patterns
++from django.urls import path
++from django.http import HttpResponse
++
++def bangiah(request):
++    return HttpResponse('U!')
++
++urlpatterns = []
++urlpatterns += i18n_patterns(
++    path('', bangiah),
++)

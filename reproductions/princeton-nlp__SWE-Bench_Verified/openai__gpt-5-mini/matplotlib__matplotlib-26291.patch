@@ -1,0 +1,65 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5ed595b375
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the reproduction Python script
++cat > /testbed/test_reproduction.py <<'PY'
++from matplotlib.offsetbox import OffsetBox
++# Reproduce the reported error: AttributeError: 'NoneType' object has no attribute '_get_renderer'
++ob = OffsetBox()
++ob.figure = None
++# This call should trigger the AttributeError in the reported scenario
++ob.get_window_extent(None)
++PY
++
++# Run the reproduction and capture output (including traceback)
++output=$(python /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Determine test status and write /testbed/test_status.json
++python - <<'PY' "$output"
++import json, sys
++out = sys.argv[1]
++tests = []
++if "AttributeError" in out and "_get_renderer" in out:
++    status = "FAILED"
++elif "Traceback" not in out and out.strip() == "":
++    status = "PASSED"
++else:
++    status = "ERROR"
++tests.append({"name": "test_reproduction.py::test_offsetbox_get_window_extent", "status": status})
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print(json.dumps({"tests": tests}, indent=2))
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..4614281614
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,6 @@
++from matplotlib.offsetbox import OffsetBox
++# Reproduce the reported error: AttributeError: 'NoneType' object has no attribute '_get_renderer'
++ob = OffsetBox()
++ob.figure = None
++# This call should trigger the AttributeError in the reported scenario
++ob.get_window_extent(None)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..4b2f261066
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_offsetbox_get_window_extent",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

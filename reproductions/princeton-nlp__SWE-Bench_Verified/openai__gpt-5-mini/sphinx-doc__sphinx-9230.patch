@@ -1,0 +1,118 @@
+diff --git a/docs/conf.py b/docs/conf.py
+new file mode 100644
+index 000000000..75562bf55
+--- /dev/null
++++ b/docs/conf.py
+@@ -0,0 +1,3 @@
++project = 'sphinxTest'
++extensions = ['sphinx.ext.autodoc']
++master_doc = 'index'
+diff --git a/docs/index.rst b/docs/index.rst
+new file mode 100644
+index 000000000..a973252df
+--- /dev/null
++++ b/docs/index.rst
+@@ -0,0 +1,5 @@
++sphinxTest
++=========
++
++.. automodule:: mymodule
++    :members:
+diff --git a/mymodule.py b/mymodule.py
+new file mode 100644
+index 000000000..8ce0ebbb0
+--- /dev/null
++++ b/mymodule.py
+@@ -0,0 +1,7 @@
++def example(opc_meta=None):
++    """
++    Example function.
++
++    :param dict(str, str) opc_meta: (optional)
++    """
++    return opc_meta
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..a9ab35cea
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,64 @@
++#!/usr/bin/env bash
++set -euo pipefail
++ROOT="/testbed"
++mkdir -p "$ROOT"
++cd "$ROOT"
++
++# Create a minimal Python module with the problematic docstring
++cat > mymodule.py <<'PY'
++def example(opc_meta=None):
++    """
++    Example function.
++
++    :param dict(str, str) opc_meta: (optional)
++    """
++    return opc_meta
++PY
++
++# Create a minimal Sphinx project
++mkdir -p docs
++cat > docs/conf.py <<'PYCONF'
++project = 'sphinxTest'
++extensions = ['sphinx.ext.autodoc']
++master_doc = 'index'
++PYCONF
++
++cat > docs/index.rst <<'RSTR'
++sphinxTest
++=========
++
++.. automodule:: mymodule
++    :members:
++RSTR
++
++# Install the specific Sphinx version (quiet if possible)
++python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
++python3 -m pip install "sphinx==4.0.1" >/dev/null 2>&1
++
++# Build the docs
++BUILD_DIR="$ROOT/build"
++rm -rf "$BUILD_DIR"
++mkdir -p "$BUILD_DIR"
++sphinx-build -b html docs "$BUILD_DIR" >/dev/null 2>&1 || true
++
++# Use Python to inspect the generated HTML safely
++python3 - <<'PY'
++import re, json, sys, os
++root = "/testbed"
++html = os.path.join(root, "build", "index.html")
++rendering_ok = False
++if os.path.exists(html):
++    with open(html, "r", encoding="utf-8", errors="ignore") as f:
++        content = f.read()
++    # Look for opc_meta and a dict(str, str) rendering nearby
++    if re.search(r"opc_meta[^\n\r]{0,200}dict\\s*\\(\\s*str\\s*,\\s*str\\s*\\)", content, re.IGNORECASE | re.DOTALL):
++        rendering_ok = True
++
++status = "PASSED" if rendering_ok else "FAILED"
++out = {"tests": [{"name": "test_repro/sphinx_dict_param_render", "status": status}]}
++with open(os.path.join(root, "test_status.json"), "w", encoding="utf-8") as fh:
++    json.dump(out, fh, indent=2)
++print("Rendering OK:", rendering_ok)
++print("Wrote", os.path.join(root, "test_status.json"), "with status", status)
++PY
++
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..3076500e1
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro/sphinx_dict_param_render",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

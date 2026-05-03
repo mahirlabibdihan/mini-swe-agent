@@ -1,0 +1,89 @@
+diff --git a/raw_output.txt b/raw_output.txt
+new file mode 100644
+index 0000000000..13d17515f9
+--- /dev/null
++++ b/raw_output.txt
+@@ -0,0 +1,4 @@
++unescaped_should_not_match_wrong_key: FAILED
++escaped_should_not_match_wrong_key: PASSED
++unescaped_should_match_correct_key: PASSED
++escaped_should_match_correct_key: PASSED
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..0ffa418099
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++python3 - <<PY
++import re, json, sys
++prefix = "a.b"
++pk = "id"
++pattern_unescaped = re.compile(r"{}-\\d+-{}$".format(prefix, pk))
++pattern_escaped = re.compile(r"{}-\\d+-{}$".format(re.escape(prefix), re.escape(pk)))
++wrong_key = "axb-0-id"
++correct_key = "a.b-0-id"
++tests = []
++tests.append(("unescaped_should_not_match_wrong_key", not bool(pattern_unescaped.match(wrong_key))))
++tests.append(("escaped_should_not_match_wrong_key", not bool(pattern_escaped.match(wrong_key))))
++tests.append(("unescaped_should_match_correct_key", bool(pattern_unescaped.match(correct_key))))
++tests.append(("escaped_should_match_correct_key", bool(pattern_escaped.match(correct_key))))
++out_lines = []
++for name, result in tests:
++    out_lines.append(name + ": " + ("PASSED" if result else "FAILED"))
++print("\\n".join(out_lines))
++open("test_status.json","w").write(json.dumps({"tests":[{"name":n,"status":"PASSED" if r else "FAILED"} for n,r in tests]}, indent=2))
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..448f72788f
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,18 @@
++import re
++prefix = 'a.b'
++pk = 'id'
++
++pattern_unescaped = re.compile(r'{}-\d+-{}$'.format(prefix, pk))
++pattern_escaped = re.compile(r'{}-\d+-{}$'.format(re.escape(prefix), re.escape(pk)))
++
++wrong_key = 'axb-0-id'
++correct_key = 'a.b-0-id'
++
++tests = []
++# This first test EXPECTS the unescaped pattern NOT to match wrong_key -> should FAIL because of the bug
++tests.append(('unescaped_should_not_match_wrong_key', not bool(pattern_unescaped.match(wrong_key))))
++tests.append(('escaped_should_not_match_wrong_key', not bool(pattern_escaped.match(wrong_key))))
++tests.append(('unescaped_should_match_correct_key', bool(pattern_unescaped.match(correct_key))))
++tests.append(('escaped_should_match_correct_key', bool(pattern_escaped.match(correct_key))))
++for name, result in tests:
++    print(name + ': ' + ('PASSED' if result else 'FAILED'))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..9a4134ad71
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "unescaped_should_not_match_wrong_key",
++      "status": "FAILED"
++    },
++    {
++      "name": "escaped_should_not_match_wrong_key",
++      "status": "PASSED"
++    },
++    {
++      "name": "unescaped_should_match_correct_key",
++      "status": "PASSED"
++    },
++    {
++      "name": "escaped_should_match_correct_key",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

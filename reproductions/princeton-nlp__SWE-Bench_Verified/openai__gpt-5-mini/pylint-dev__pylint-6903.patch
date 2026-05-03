@@ -1,0 +1,64 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..da47522b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,13 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++output=$(python3 test_reproduction.py 2>&1 || true)
++status="PASSED"
++if echo "$output" | grep -q "Number of processes must be at least 1"; then
++  status="FAILED"
++elif echo "$output" | grep -q "Traceback"; then
++  status="ERROR"
++fi
++mkdir -p /testbed
++echo "{\"tests\":[{\"name\":\"test_reproduction.py::test_pylint_jobs_zero\",\"status\":\"$status\"}]}" > /testbed/test_status.json
++echo "$output"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..709a5616
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,32 @@
++#!/usr/bin/env python3
++import multiprocessing
++import os
++import traceback
++import sys
++
++def query_cpu():
++    # Simulate cgroup values from the PR: cfs_quota=-1, cfs_period=100000, cpu_shares=2
++    cfs_quota = -1
++    cfs_period = 100000
++    cpu_shares = 2
++    if cfs_quota > 0:
++        return int(cfs_quota / cfs_period)
++    if cpu_shares > 0:
++        return int(cpu_shares / 1024)
++    return os.cpu_count() or 1
++
++def main():
++    cpus = query_cpu()
++    print("Computed cpus:", cpus)
++    # This should raise ValueError if cpus == 0, reproducing the issue.
++    pool = multiprocessing.Pool(processes=cpus)
++    pool.close()
++    pool.join()
++    print("Created pool with", cpus)
++
++if __name__ == "__main__":
++    try:
++        main()
++    except Exception:
++        traceback.print_exc()
++        sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..ea565358
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py::test_pylint_jobs_zero","status":"FAILED"}]}

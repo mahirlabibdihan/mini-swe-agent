@@ -1,0 +1,102 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..87fc8e574
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,54 @@
++#!/bin/bash
++set -euo pipefail
++cat > /testbed/test_repro.py <<'PY2'
++from sympy import MatrixSymbol, pretty, latex
++A = MatrixSymbol('A', 2, 2)
++B = MatrixSymbol('B', 2, 2)
++expr = A - A*B - B
++print("==STR_START==")
++print(str(expr))
++print("==STR_END==")
++print("==PRETTY_START==")
++print(pretty(expr))
++print("==PRETTY_END==")
++print("==LATEX_START==")
++print(latex(expr))
++print("==LATEX_END==")
++PY2
++
++python3 -m pip install --quiet sympy || true
++
++output="$(python3 /testbed/test_repro.py 2>&1 || true)"
++str_out="$(printf "%s" "$output" | awk '/==STR_START==/{flag=1;next}/==STR_END==/{flag=0}flag')"
++pretty_out="$(printf "%s" "$output" | awk '/==PRETTY_START==/{flag=1;next}/==PRETTY_END==/{flag=0}flag')"
++latex_out="$(printf "%s" "$output" | awk '/==LATEX_START==/{flag=1;next}/==LATEX_END==/{flag=0}flag')"
++
++# Determine test results based on presence of buggy patterns described in the PR
++str_status="FAILED"
++if printf "%s" "$str_out" | grep -F -q "(-1)*B" && printf "%s" "$str_out" | grep -F -q "(-1)*A*B"; then
++  str_status="PASSED"
++fi
++
++pretty_status="FAILED"
++if printf "%s" "$pretty_out" | grep -F -q "+ -"; then
++  pretty_status="PASSED"
++fi
++
++latex_status="FAILED"
++if printf "%s" "$latex_out" | grep -F -q "-1"; then
++  latex_status="PASSED"
++fi
++
++python3 - <<PYJSON "$str_status" "$pretty_status" "$latex_status" "$output"
++import json,sys
++str_status, pretty_status, latex_status, output = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
++statuses = [
++  {"name": "testbed/test_repro.py::test_str_printing_has_minus_one_coeffs", "status": str_status},
++  {"name": "testbed/test_repro.py::test_pretty_printing_has_plus_minus", "status": pretty_status},
++  {"name": "testbed/test_repro.py::test_latex_printing_has_minus_one_coeffs", "status": latex_status},
++]
++out = {"tests": statuses}
++open("/testbed/test_status.json","w").write(json.dumps(out, indent=2))
++# Print the reproduction output for inspection
++print(output)
++PYJSON
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..1941f99f5
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,13 @@
++from sympy import MatrixSymbol, pretty, latex
++A = MatrixSymbol('A', 2, 2)
++B = MatrixSymbol('B', 2, 2)
++expr = A - A*B - B
++print("==STR_START==")
++print(str(expr))
++print("==STR_END==")
++print("==PRETTY_START==")
++print(pretty(expr))
++print("==PRETTY_END==")
++print("==LATEX_START==")
++print(latex(expr))
++print("==LATEX_END==")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..d7ba55dd9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_repro.py::test_str_printing_has_minus_one_coeffs",
++      "status": "PASSED"
++    },
++    {
++      "name": "testbed/test_repro.py::test_pretty_printing_has_plus_minus",
++      "status": "PASSED"
++    },
++    {
++      "name": "testbed/test_repro.py::test_latex_printing_has_minus_one_coeffs",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

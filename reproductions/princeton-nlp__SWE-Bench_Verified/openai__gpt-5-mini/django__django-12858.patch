@@ -1,0 +1,104 @@
+diff --git a/app/__init__.py b/app/__init__.py
+new file mode 100644
+index 0000000000..b9d56a44ca
+--- /dev/null
++++ b/app/__init__.py
+@@ -0,0 +1 @@
++# app package
+diff --git a/app/models.py b/app/models.py
+new file mode 100644
+index 0000000000..5e5671bd54
+--- /dev/null
++++ b/app/models.py
+@@ -0,0 +1,13 @@
++from django.db import models
++
++class Product(models.Model):
++    parent = models.ForeignKey('self', models.CASCADE, null=True, blank=True, related_name='children')
++
++class Supply(models.Model):
++    product = models.ForeignKey(Product, models.CASCADE)
++
++class Stock(models.Model):
++    supply = models.ForeignKey(Supply, models.CASCADE)
++
++    class Meta:
++        ordering = ['supply__product__parent__isnull']
+diff --git a/manage.py b/manage.py
+new file mode 100644
+index 0000000000..b3d0811de5
+--- /dev/null
++++ b/manage.py
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python
++import os, sys
++os.environ.setdefault("DJANGO_SETTINGS_MODULE", "settings")
++from django.core.management import execute_from_command_line
++if __name__ == "__main__":
++    execute_from_command_line(sys.argv)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..d5432eb705
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Ensure Django is installed
++python -m pip install -q "Django>=2.2" || python -m pip install -q Django
++
++# Run the system check and capture output
++output=$(python manage.py check 2>&1 || true)
++echo "$output"
++
++# Determine status based on presence of SystemCheckError or models.E015
++status="PASSED"
++if echo "$output" | grep -q -E "SystemCheckError|models\\.E015|E015"; then
++  status="FAILED"
++fi
++
++# Write machine-readable test result
++python - <<PYTHON "$output" "$status"
++import json, sys
++out = sys.argv[1]
++status = sys.argv[2]
++Path = __import__("pathlib").Path
++tests = [{"name": "test_repro::ordering_isnull_check", "status": "FAILED" if status=="FAILED" else "PASSED"}]
++Path("test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print("WROTE test_status.json with status:", status)
++PYTHON
+diff --git a/settings.py b/settings.py
+new file mode 100644
+index 0000000000..96f8218781
+--- /dev/null
++++ b/settings.py
+@@ -0,0 +1,14 @@
++SECRET_KEY = "unsafe-secret-for-testing"
++INSTALLED_APPS = [
++    "app",
++    "django.contrib.contenttypes",
++]
++DATABASES = {
++    "default": {
++        "ENGINE": "django.db.backends.sqlite3",
++        "NAME": "db.sqlite3",
++    }
++}
++MIDDLEWARE = []
++ROOT_URLCONF = ""
++DEFAULT_AUTO_FIELD = "django.db.models.AutoField"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..964b681a43
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro::ordering_isnull_check",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,105 @@
+diff --git a/reproduction_output.txt b/reproduction_output.txt
+new file mode 100644
+index 0000000000..338951f30f
+--- /dev/null
++++ b/reproduction_output.txt
+@@ -0,0 +1,9 @@
++Traceback (most recent call last):
++  File "test_repro.py", line 17, in <module>
++    subfig.legend()
++  File "/testbed/lib/matplotlib/figure.py", line 1068, in legend
++    l = mlegend.Legend(self, handles, labels, *extra_args,
++  File "/testbed/lib/matplotlib/legend.py", line 441, in __init__
++    raise TypeError("Legend needs either Axes or Figure as parent")
++TypeError: Legend needs either Axes or Figure as parent
++EXCEPTION_RAISED:TypeError:Legend needs either Axes or Figure as parent
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..81951ab927
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,37 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Run the reproduction script, capture output and exit code
++output=$(python3 test_repro.py 2>&1 || true)
++exit_code=$?
++printf "%s\n" "$output" > reproduction_output.txt
++
++# Determine status based on output contents
++status="ERROR"
++if grep -q "EXCEPTION_IMPORT:ModuleNotFoundError" reproduction_output.txt; then
++    status="SKIPPED"
++elif grep -q "Legend needs either Axes or Figure as parent" reproduction_output.txt; then
++    # The bug is reproduced -> mark as FAILED to indicate the library is behaving incorrectly.
++    status="FAILED"
++elif grep -q "^NO_ERROR$" reproduction_output.txt; then
++    # No exception means the issue is not present -> mark as PASSED
++    status="PASSED"
++elif grep -q "^EXCEPTION_RAISED:ModuleNotFoundError" reproduction_output.txt; then
++    status="SKIPPED"
++elif grep -q "^EXCEPTION_RAISED:" reproduction_output.txt; then
++    # Some other exception occurred; mark as ERROR to indicate unexpected failure mode
++    status="ERROR"
++else
++    status="ERROR"
++fi
++
++python3 - <<PY
++import json
++out = open("reproduction_output.txt").read()
++status = "$status"
++data = {"tests": [{"name": "testbed/test_repro.py::test_subfigure_legend", "status": status}]}
++open("test_status.json", "w").write(json.dumps(data, indent=2))
++print("=== Reproduction script output ===")
++print(out)
++print("=== Determined status: {} (exit code {}) ===".format(status, $exit_code))
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..aa3b2a1d3e
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,26 @@
++# Reproduction script: attempt to add a legend to a SubFigure
++import sys, traceback
++try:
++    import matplotlib
++    matplotlib.use("Agg")
++    import matplotlib.pyplot as plt
++except Exception as e:
++    traceback.print_exc()
++    print("EXCEPTION_IMPORT:"+type(e).__name__+":"+str(e))
++    sys.exit(2)
++
++try:
++    # Code from the PR description
++    subfig = plt.figure().subfigures()
++    ax = subfig.subplots()
++    ax.plot([0, 1, 2], [0, 1, 2], label="test")
++    subfig.legend()
++    # If no exception, print explicit marker
++    print("NO_ERROR")
++    sys.exit(0)
++except Exception as e:
++    traceback.print_exc()
++    # Print a marker with the exception repr for parsing
++    print("EXCEPTION_RAISED:"+type(e).__name__+":"+str(e))
++    # exit with non-zero to indicate failure as expected
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..a967b37a02
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_repro.py::test_subfigure_legend",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

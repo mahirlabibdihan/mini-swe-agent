@@ -187,7 +187,6 @@ pyrightconfig.json
 .vscode/
 *.jsonl
 *.jsonl.*
-*.patch
 *.DS_Store
 data/repos/copies
 notebooks/

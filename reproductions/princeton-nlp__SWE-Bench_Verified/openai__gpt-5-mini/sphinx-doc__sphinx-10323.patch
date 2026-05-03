@@ -1,0 +1,261 @@
+diff --git a/pom.xml b/pom.xml
+new file mode 100644
+index 000000000..f7ecc68de
+--- /dev/null
++++ b/pom.xml
+@@ -0,0 +1,26 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project>
++  <build>
++    <plugins>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-compiler-plugin</artifactId>
++        <version>3.8.0</version>
++        <configuration>
++          <source>1.8</source>
++          <target>1.8</target>
++          <debug>true</debug>
++          <encoding>UTF-8</encoding>
++        </configuration>
++      </plugin>
++      <plugin>
++        <groupId>com.github.ekryd.sortpom</groupId>
++        <artifactId>sortpom-maven-plugin</artifactId>
++        <version>2.15.0</version>
++        <configuration>
++          <verifyFailOn>strict</verifyFailOn>
++        </configuration>
++      </plugin>
++    </plugins>
++  </build>
++</project>
+diff --git a/run_all.sh b/run_all.sh
+new file mode 100644
+index 000000000..50e883f74
+--- /dev/null
++++ b/run_all.sh
+@@ -0,0 +1,113 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Create test files using Python to avoid nested heredoc issues
++python3 - <<'PY'
++import textwrap, pathlib
++tb = pathlib.Path("/testbed")
++src = tb / "source"
++src.mkdir(parents=True, exist_ok=True)
++(src / "conf.py").write_text("project = 'testproj'\nextensions = []\nmaster_doc = 'index'\n")
++(src / "index.rst").write_text(textwrap.dedent("""\
++# hello world
++
++Code examples:
++
++.. literalinclude:: ../pom.xml
++   :language: xml
++   :prepend:       </plugin>
++   :start-at: <groupId>com.github.ekryd.sortpom</groupId>
++   :end-at: </plugin>
++"""))
++(tb / "pom.xml").write_text(textwrap.dedent("""\
++<?xml version="1.0" encoding="UTF-8"?>
++<project>
++  <build>
++    <plugins>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-compiler-plugin</artifactId>
++        <version>3.8.0</version>
++        <configuration>
++          <source>1.8</source>
++          <target>1.8</target>
++          <debug>true</debug>
++          <encoding>UTF-8</encoding>
++        </configuration>
++      </plugin>
++      <plugin>
++        <groupId>com.github.ekryd.sortpom</groupId>
++        <artifactId>sortpom-maven-plugin</artifactId>
++        <version>2.15.0</version>
++        <configuration>
++          <verifyFailOn>strict</verifyFailOn>
++        </configuration>
++      </plugin>
++    </plugins>
++  </build>
++</project>
++"""))
++print("WROTE test files under /testbed")
++PY
++
++cd /testbed
++
++# Ensure Sphinx is available; try to install if not
++if ! python3 -c "import sphinx" >/dev/null 2>&1; then
++  echo "sphinx not found, attempting to install sphinx..."
++  python3 -m pip install --quiet "sphinx>=3.0" || true
++fi
++
++BUILD_DIR=build
++SRC_DIR=source
++
++rm -rf "$BUILD_DIR"
++mkdir -p "$BUILD_DIR"
++
++BUILD_LOG="$BUILD_DIR/build.log"
++if ! sphinx-build -b text "$SRC_DIR" "$BUILD_DIR" >"$BUILD_LOG" 2>&1; then
++  python3 - <<'PY'
++import json, pathlib
++p=pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests":[{"name":"repro/literalinclude_prepend_indentation","status":"ERROR","detail":"sphinx-build failed, see build.log"}]}, indent=2))
++print("WROTE /testbed/test_status.json with ERROR")
++PY
++  exit 0
++fi
++
++OUT_TXT="$BUILD_DIR/index.txt"
++if [ ! -f "$OUT_TXT" ]; then
++  python3 - <<'PY'
++import json, pathlib
++p=pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests":[{"name":"repro/literalinclude_prepend_indentation","status":"ERROR","detail":"output file missing"}]}, indent=2))
++print("WROTE /testbed/test_status.json with ERROR (missing output)")
++PY
++  exit 0
++fi
++
++first_line=$(awk '/<plugin>/{print NR ":" $0; exit}' "$OUT_TXT" || true)
++
++status="PASSED"
++detail=""
++if [ -z "$first_line" ]; then
++  status="ERROR"
++  detail="could not find <plugin> in output"
++else
++  line=$(echo "$first_line" | cut -d: -f2-)
++  leading_spaces=$(echo "$line" | sed -n 's/^\([ ]*\).*/\1/p' | wc -c)
++  leading_spaces=$((leading_spaces - 1))
++  if [ "$leading_spaces" -lt 6 ]; then
++    status="FAILED"
++    detail="found <plugin> with ${leading_spaces} leading spaces (expected 6)"
++  else
++    status="PASSED"
++    detail="found <plugin> with ${leading_spaces} leading spaces"
++  fi
++fi
++
++python3 - <<'PY'
++import json, pathlib, sys
++p=pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests":[{"name":"repro/literalinclude_prepend_indentation","status":"%s","detail":"%s"}]}, indent=2) % ("'"$status"'", "'"$detail"'"))
++print("WROTE /testbed/test_status.json with status:", "'"$status"'")
++PY
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..4e37deae0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,64 @@
++#!/usr/bin/env bash
++set -euo pipefail
++cd /testbed
++
++# Ensure Sphinx is available; try to install if not
++if ! python3 -c "import sphinx" >/dev/null 2>&1; then
++  python3 -m pip install --quiet "sphinx>=3.0" || true
++fi
++
++BUILD_DIR=build
++SRC_DIR=source
++
++rm -rf "$BUILD_DIR"
++mkdir -p "$BUILD_DIR"
++
++# Build docs (use python -m sphinx to ensure correct interpreter)
++python3 -m sphinx -b text "$SRC_DIR" "$BUILD_DIR" > "$BUILD_DIR/build.log" 2>&1 || true
++
++OUT="$BUILD_DIR/index.txt"
++if [ ! -f "$OUT" ]; then
++  python3 - <<PY
++import json, pathlib
++p=pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests":[{"name":"repro/literalinclude_prepend_indentation","status":"ERROR","detail":"output missing"}]}, indent=2))
++print("WROTE /testbed/test_status.json with ERROR (output missing)")
++PY
++  exit 0
++fi
++
++# Find first <plugin> or </plugin> line
++line=$(awk '/<\/?plugin>/{print; exit}' "$OUT" || true)
++
++if [ -z "$line" ]; then
++  python3 - <<PY
++import json, pathlib
++p=pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests":[{"name":"repro/literalinclude_prepend_indentation","status":"ERROR","detail":"no plugin tag found in output"}]}, indent=2))
++print("WROTE /testbed/test_status.json with ERROR (no plugin tag)")
++PY
++  exit 0
++fi
++
++# Count leading spaces
++leading_spaces=$(printf "%s" "$line" | sed -n 's/^\([ ]*\).*/\1/p' | wc -c)
++leading_spaces=$((leading_spaces - 1))
++
++EXPECTED=6
++
++if [ "$leading_spaces" -lt "$EXPECTED" ]; then
++  status="FAILED"
++  detail="found plugin line with ${leading_spaces} leading spaces (expected >= ${EXPECTED})"
++else
++  status="PASSED"
++  detail="found plugin line with ${leading_spaces} leading spaces"
++fi
++
++python3 - <<PY
++import json, pathlib
++p=pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests":[{"name":"repro/literalinclude_prepend_indentation","status":"%s","detail":"%s"}]}, indent=2) % ("$status","$detail"))
++print("WROTE /testbed/test_status.json with status:", "$status")
++PY
++
++exit 0
+diff --git a/source/conf.py b/source/conf.py
+new file mode 100644
+index 000000000..d3c832b34
+--- /dev/null
++++ b/source/conf.py
+@@ -0,0 +1,3 @@
++project = 'testproj'
++extensions = []
++master_doc = 'index'
+diff --git a/source/index.rst b/source/index.rst
+new file mode 100644
+index 000000000..8bdc348e3
+--- /dev/null
++++ b/source/index.rst
+@@ -0,0 +1,9 @@
++# hello world
++
++Code examples:
++
++.. literalinclude:: ../pom.xml
++   :language: xml
++   :prepend:       </plugin>
++   :start-at: <groupId>com.github.ekryd.sortpom</groupId>
++   :end-at: </plugin>
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..9f16bcb00
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,9 @@
++{
++  "tests": [
++    {
++      "name": "repro/literalinclude_prepend_indentation",
++      "status": "FAILED",
++      "detail": "found plugin line with 2 leading spaces (expected >= 6)"
++    }
++  ]
++}
+\ No newline at end of file

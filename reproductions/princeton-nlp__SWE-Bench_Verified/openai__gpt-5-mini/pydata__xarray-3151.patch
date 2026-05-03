@@ -1,0 +1,110 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..b95e4c68
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,41 @@
++#!/bin/bash
++set -euo pipefail
++# Ensure /testbed exists
++mkdir -p /testbed
++
++# Try importing xarray; if missing, install it
++python - <<'PY' 2>/dev/null || python -m pip install --quiet xarray && true
++import xarray
++print("xarray_ok")
++PY
++
++# Run the reproduction script and capture output
++output=$(python test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Parse TEST_RESULT lines to build JSON status file
++python - <<'PY' "$output"
++import json
++import sys
++from pathlib import Path
++raw = sys.argv[1]
++lines = raw.splitlines()
++tests = []
++for ln in lines:
++    if ln.startswith("TEST_RESULT:"):
++        parts = ln.split(None, 2)
++        # Format: TEST_RESULT: <name> <STATUS>
++        if len(parts) >= 3:
++            name = parts[1]
++            status = parts[2]
++        else:
++            name = "unknown"
++            status = "ERROR"
++        tests.append({"name": name, "status": status})
++# If no test lines found, mark overall script error
++if not tests:
++    tests = [{"name": "test_reproduction.py", "status": "ERROR"}]
++out = {"tests": tests}
++Path("/testbed/test_status.json").write_text(json.dumps(out, indent=2))
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..00974621
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,38 @@
++import traceback
++import sys
++import json
++def run_test(name, ycoord):
++    try:
++        import xarray as xr
++        import numpy as np
++        ds1 = xr.Dataset(
++            data_vars=dict(
++                data=(['x', 'y'], np.random.rand(3, 3))
++            ),
++            coords=dict(
++                x=[1, 2, 3],
++                y=ycoord
++            )
++        )
++        ds2 = xr.Dataset(
++            data_vars=dict(
++                data=(['x', 'y'], np.random.rand(4, 3))
++            ),
++            coords = dict(
++                x=[4, 5, 6, 7],
++                y=ycoord
++            )
++        )
++        # This is the call that is reported to raise for non-monotonic identical coords
++        xr.combine_by_coords((ds1, ds2))
++        print(f"TEST_RESULT: {name} PASSED")
++    except Exception as e:
++        tb = traceback.format_exc()
++        print(f"TEST_RESULT: {name} FAILED")
++        print("ERROR_TRACEBACK_START")
++        print(tb)
++        print("ERROR_TRACEBACK_END")
++if __name__ == '__main__':
++    # Two tests: monotonic (should pass) and non-monotonic (issue: raises ValueError)
++    run_test("test_combine_monotonic", ['a','b','c'])
++    run_test("test_combine_non_monotonic", ['a','c','b'])
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..c156d62b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_combine_monotonic",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_combine_non_monotonic",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

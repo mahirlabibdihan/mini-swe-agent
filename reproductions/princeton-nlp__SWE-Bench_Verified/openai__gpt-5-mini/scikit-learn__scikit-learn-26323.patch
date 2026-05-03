@@ -1,0 +1,97 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..8c0301833
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,72 @@
++#!/bin/bash
++set -euo pipefail
++
++python - <<'PY'
++import json, sys, traceback
++from pathlib import Path
++
++out_path = Path("/testbed/test_status.json")
++tests = []
++
++try:
++    import pandas as pd
++    from sklearn.compose import make_column_selector, make_column_transformer
++    from sklearn.feature_selection import VarianceThreshold
++except Exception as e:
++    # If imports fail, record error for both tests
++    err = "".join(traceback.format_exception_only(type(e), e)).strip()
++    tests.append({"name": "test_repro.py::test_out1_remainder_estimator_set_output", "status": "ERROR"})
++    tests.append({"name": "test_repro.py::test_out2_explicit_transformers_set_output", "status": "ERROR"})
++    out_path.write_text(json.dumps({"tests": tests}, indent=2))
++    print("Import error:", err)
++    sys.exit(0)
++
++# Prepare DataFrame and expected values
++df = pd.DataFrame({"a": [True, False, True], "b": [1, 2, 3]})
++expected_values = [[True, 1], [False, 2], [True, 3]]
++
++# Test 1: remainder as an estimator
++try:
++    ct1 = make_column_transformer(
++        (VarianceThreshold(), make_column_selector(dtype_include=bool)),
++        remainder=VarianceThreshold(),
++        verbose_feature_names_out=False,
++    ).set_output(transform="pandas")
++    out1 = ct1.fit_transform(df)
++    # Compare raw values and ensure column 'a' is boolean dtype
++    values_ok = out1.values.tolist() == expected_values
++    dtype_ok = str(out1["a"].dtype) == "bool" or out1["a"].dtype == bool
++    status1 = "PASSED" if (values_ok and dtype_ok) else "FAILED"
++    tests.append({"name": "test_repro.py::test_out1_remainder_estimator_set_output", "status": status1})
++    print("OUT1:")
++    print(out1)
++    print("dtypes:", out1.dtypes.to_dict())
++except Exception:
++    tests.append({"name": "test_repro.py::test_out1_remainder_estimator_set_output", "status": "ERROR"})
++    print("OUT1: Exception")
++    traceback.print_exc()
++
++# Test 2: explicit transformer for both columns
++try:
++    ct2 = make_column_transformer(
++        (VarianceThreshold(), make_column_selector(dtype_include=bool)),
++        (VarianceThreshold(), make_column_selector(dtype_exclude=bool)),
++        verbose_feature_names_out=False,
++    ).set_output(transform="pandas")
++    out2 = ct2.fit_transform(df)
++    values_ok2 = out2.values.tolist() == expected_values
++    dtype_ok2 = str(out2["a"].dtype) == "bool" or out2["a"].dtype == bool
++    status2 = "PASSED" if (values_ok2 and dtype_ok2) else "FAILED"
++    tests.append({"name": "test_repro.py::test_out2_explicit_transformers_set_output", "status": status2})
++    print("OUT2:")
++    print(out2)
++    print("dtypes:", out2.dtypes.to_dict())
++except Exception:
++    tests.append({"name": "test_repro.py::test_out2_explicit_transformers_set_output", "status": "ERROR"})
++    print("OUT2: Exception")
++    traceback.print_exc()
++
++out_path.write_text(json.dumps({"tests": tests}, indent=2))
++print()
++print("Wrote", out_path)
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..b5ce80cb5
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_out1_remainder_estimator_set_output",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro.py::test_out2_explicit_transformers_set_output",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

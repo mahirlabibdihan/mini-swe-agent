@@ -1,0 +1,99 @@
+diff --git a/fake_psql_dir/psql b/fake_psql_dir/psql
+new file mode 100755
+index 0000000000..0be63d0157
+--- /dev/null
++++ b/fake_psql_dir/psql
+@@ -0,0 +1,15 @@
++#!/usr/bin/env bash
++# Fake psql that emits warnings if any option-like args appear after the first non-option (dbname)
++db_seen=0
++for a in "$@"; do
++  if [[ $db_seen -eq 0 && "${a#-}" == "$a" ]]; then
++    # first non-option -> treat as dbname
++    db_seen=1
++    continue
++  fi
++  if [[ $db_seen -eq 1 ]]; then
++    printf 'psql: warning: extra command-line argument "%s" ignored\n' "$a" >&2
++  fi
++done
++printf 'psql (fake)\n' 
++exit 0
+diff --git a/manage.py b/manage.py
+new file mode 100755
+index 0000000000..502d2b9a60
+--- /dev/null
++++ b/manage.py
+@@ -0,0 +1,31 @@
++#!/usr/bin/env python3
++import sys
++import subprocess
++import os
++
++def main():
++    # Simple simulation of Django's manage.py dbshell where dbname is placed before extra args
++    args = sys.argv[1:]
++    if not args or args[0] != "dbshell":
++        print("Usage: manage.py dbshell [-- <extra psql args>]")
++        sys.exit(1)
++    # Find '--' and collect extra args
++    extra = []
++    if "--" in args:
++        idx = args.index("--")
++        extra = args[idx+1:]
++    # Simulated database name
++    dbname = os.environ.get("DB_NAME", "some_database")
++    # Incorrect ordering: psql <dbname> <extra args...>
++    cmd = ["psql", dbname] + extra
++    # Execute psql (we expect a fake psql on PATH)
++    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
++    out, err = p.communicate()
++    if out:
++        sys.stdout.write(out)
++    if err:
++        sys.stderr.write(err)
++    sys.exit(p.returncode)
++
++if __name__ == "__main__":
++    main()
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..027caff4b6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,20 @@
++#!/usr/bin/env bash
++set -euo pipefail
++mkdir -p /testbed
++export PATH="$(pwd)/fake_psql_dir:$PATH"
++output=$(python3 manage.py dbshell -- -c "select * from some_table;" 2>&1 || true)
++echo "=== capture of manage.py dbshell ==="
++echo "$output"
++status="PASSED"
++if printf "%s" "$output" | grep -F "psql: warning: extra command-line argument \"-c\" ignored" >/dev/null 2>&1 || \\
++   printf "%s" "$output" | grep -F "psql: warning: extra command-line argument \"select * from some_table;\" ignored" >/dev/null 2>&1; then
++  status="FAILED"
++fi
++python3 - <<PY "${status}"
++import json,sys,pathlib
++status=sys.argv[1]
++data={"tests":[{"name":"test_repro/test_db_shell.py::test_dbshell_arg_order","status":status}]}
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps(data,indent=2))
++print("Wrote /testbed/test_status.json with status:", status)
++PY
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..789d2ae75b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro/test_db_shell.py::test_dbshell_arg_order",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

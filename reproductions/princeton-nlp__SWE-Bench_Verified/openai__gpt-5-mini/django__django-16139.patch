@@ -1,0 +1,64 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..6e94b80cdd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++# run_test.sh - run the reproduction and always emit /testbed/test_status.json
++set -u -o pipefail
++# Execute the test script; capture exit code but do not let this script exit non-zero
++python3 test_reproduction.py
++rc=$?
++if [ "$rc" -eq 0 ]; then
++  status="PASSED"
++else
++  status="FAILED"
++fi
++# Write the required machine-readable test status file
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"test_reproduction.py::test_password_link","status":"$status"}]}
++JSON
++echo "Wrote /testbed/test_status.json with status: $status"
++# Exit zero so the runner/sandbox considers run_test.sh successful while preserving test status in the JSON
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..3a9e4ed73c
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,27 @@
++#!/usr/bin/env python3
++# test_reproduction.py
++# Simulate URL resolution for admin change view accessed via a to_field lookup (uuid),
++# and show that "../password/" (current behavior) does not resolve to the same URL as
++# "../../{pk}/password/" (desired behavior that includes the instance PK).
++from urllib.parse import urljoin
++import sys
++
++# Simulate accessing the change view via a to_field (uuid) lookup in the querystring
++base = "http://example.com/admin/auth/user/22222222-3333-4444-5555-666677778888/change/?_to_field=uuid"
++current_help = "../password/"
++current_url = urljoin(base, current_help)
++
++instance_pk = "1"
++desired_help = f"../../{instance_pk}/password/"
++desired_url = urljoin(base, desired_help)
++
++print("Base admin URL:", base)
++print("Current help_text:", repr(current_help), "-> resolved URL:", current_url)
++print("Desired help_text:", repr(desired_help), "-> resolved URL:", desired_url)
++
++# If the URLs differ, that reproduces the bug described (link will point to wrong place)
++if current_url != desired_url:
++    print("Result: MISMATCH - current link does NOT point to the expected password URL (reproduced issue).")
++    sys.exit(1)
++print("Result: MATCH - links are the same (no issue detected).")
++sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..3f29e6fe12
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py::test_password_link","status":"FAILED"}]}

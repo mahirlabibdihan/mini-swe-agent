@@ -1,0 +1,76 @@
+diff --git a/locks_buggy.py b/locks_buggy.py
+new file mode 100644
+index 0000000000..7bfe297d94
+--- /dev/null
++++ b/locks_buggy.py
+@@ -0,0 +1,11 @@
++import fcntl
++def _fd(f):
++    return f.fileno()
++def lock(f, flags):
++    # Buggy implementation: fcntl.flock returns None on success,
++    # so comparing to 0 will always be False.
++    ret = fcntl.flock(_fd(f), flags)
++    return ret == 0
++def unlock(f):
++    ret = fcntl.flock(_fd(f), fcntl.LOCK_UN)
++    return ret == 0
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..6da6d0b198
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++set -euo pipefail
++OUT=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$OUT"
++ACTUAL=$(echo "$OUT" | awk -F': ' '/ACTUAL:/ {print $2; exit}')
++STATUS="FAILED"
++if [ "$ACTUAL" = "True" ]; then
++  STATUS="PASSED"
++fi
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {"name": "testbed/test_reproduction.py", "status": "$STATUS"}
++  ]
++}
++JSON
++echo "/testbed/test_status.json written with status: $STATUS"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..9c7b34af62
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,19 @@
++import fcntl, os
++from locks_buggy import lock, unlock
++path = '/tmp/testfile_locks_bug'
++open(path, 'a').close()
++f = open(path, 'r+')
++flags = fcntl.LOCK_EX | fcntl.LOCK_NB
++try:
++    ok = lock(f, flags)
++except OSError:
++    ok = False
++print("EXPECTED: True")
++print("ACTUAL: {}".format(ok))
++# Clean up if lock thinks it's held
++try:
++    if ok:
++        unlock(f)
++except Exception:
++    pass
++f.close()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e189f6a878
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,5 @@
++{
++  "tests": [
++    {"name": "testbed/test_reproduction.py", "status": "FAILED"}
++  ]
++}

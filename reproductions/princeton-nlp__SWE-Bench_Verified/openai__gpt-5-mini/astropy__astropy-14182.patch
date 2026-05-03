@@ -1,0 +1,105 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..313553161
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Attempt to install astropy quietly (non-fatal)
++python -m pip install -q astropy==4.0.1 >/dev/null 2>&1 || python -m pip install -q astropy >/dev/null 2>&1 || true
++# Run reproduction
++output=$(python test_reproduction.py 2>&1 || true)
++printf '%s\n' "$output"
++# Determine if reproduction detected
++reproduced=false
++if printf '%s\n' "$output" | grep -q "^REPRODUCED: True"; then
++  reproduced=true
++fi
++# If the issue is reproduced, mark the test as FAILED (to indicate a bug); otherwise mark as PASSED
++if [ "$reproduced" = true ]; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++# Write the required JSON to /testbed/test_status.json
++cat > /testbed/test_status.json <<EOF
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_header_rows_rst",
++      "status": "$status"
++    }
++  ]
++}
++EOF
++echo "Wrote /testbed/test_status.json with status: $status"
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..01effb586
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,47 @@
++import sys, traceback
++def main():
++    try:
++        from astropy.table import QTable
++        import astropy.units as u
++    except Exception as e:
++        print("IMPORT_ERROR", file=sys.stdout)
++        print(traceback.format_exc(), file=sys.stdout)
++        print("REPRODUCED: False")
++        return
++    tbl = QTable({'wave': [350,950]*u.nm, 'response': [0.7, 1.2]*u.count})
++    import io
++    # try writing rst without header_rows
++    try:
++        buf = io.StringIO()
++        tbl.write(buf, format="ascii.rst")
++        print("WRITE_RST_NO_HEADERS: OK")
++        rst_ok = True
++    except Exception:
++        print("WRITE_RST_NO_HEADERS: EXCEPTION")
++        print(traceback.format_exc(), file=sys.stdout)
++        rst_ok = False
++    # try writing fixed_width with header_rows (should work)
++    try:
++        buf2 = io.StringIO()
++        tbl.write(buf2, format="ascii.fixed_width", header_rows=["name","unit"])
++        print("WRITE_FIXED_WITH_HEADERS: OK")
++        fixed_ok = True
++    except Exception:
++        print("WRITE_FIXED_WITH_HEADERS: EXCEPTION")
++        print(traceback.format_exc(), file=sys.stdout)
++        fixed_ok = False
++    # try writing rst with header_rows (this is expected to raise TypeError per PR)
++    try:
++        buf3 = io.StringIO()
++        tbl.write(buf3, format="ascii.rst", header_rows=["name","unit"])
++        print("WRITE_RST_WITH_HEADERS: OK")
++        rst_with_headers_ok = True
++    except Exception:
++        print("WRITE_RST_WITH_HEADERS: EXCEPTION")
++        print(traceback.format_exc(), file=sys.stdout)
++        rst_with_headers_ok = False
++    # PR-reproduced if rst_ok is True and rst_with_headers_ok is False
++    reproduced = rst_ok and (not rst_with_headers_ok)
++    print("REPRODUCED: {}".format(reproduced))
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..6b0797fc6
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_header_rows_rst",
++      "status": "FAILED"
++    }
++  ]
++}

@@ -1,0 +1,109 @@
+diff --git a/diffbug.fits b/diffbug.fits
+new file mode 100644
+index 000000000..fb6df78b7
+Binary files /dev/null and b/diffbug.fits differ
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 000000000..11092241f
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,27 @@
++Traceback (most recent call last):
++  File "/testbed/test_repro.py", line 12, in <module>
++    d = fits.FITSDiff('diffbug.fits', 'diffbug.fits')
++  File "/testbed/astropy/io/fits/diff.py", line 331, in __init__
++    super().__init__(a, b)
++  File "/testbed/astropy/io/fits/diff.py", line 87, in __init__
++    self._diff()
++  File "/testbed/astropy/io/fits/diff.py", line 369, in _diff
++    hdu_diff = HDUDiff.fromdiff(self, self.a[idx], self.b[idx])
++  File "/testbed/astropy/io/fits/diff.py", line 120, in fromdiff
++    return cls(a, b, **kwargs)
++  File "/testbed/astropy/io/fits/diff.py", line 570, in __init__
++    super().__init__(a, b)
++  File "/testbed/astropy/io/fits/diff.py", line 87, in __init__
++    self._diff()
++  File "/testbed/astropy/io/fits/diff.py", line 603, in _diff
++    self.diff_data = TableDataDiff.fromdiff(self, self.a.data, self.b.data)
++  File "/testbed/astropy/io/fits/diff.py", line 120, in fromdiff
++    return cls(a, b, **kwargs)
++  File "/testbed/astropy/io/fits/diff.py", line 1342, in __init__
++    super().__init__(a, b)
++  File "/testbed/astropy/io/fits/diff.py", line 87, in __init__
++    self._diff()
++  File "/testbed/astropy/io/fits/diff.py", line 1463, in _diff
++    diffs = np.where(arra != arrb)
++ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
++IDENTICAL: ERROR
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..9c0f22fe5
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++# Run the reproduction, capture output
++python3 test_repro.py 2>&1 | tee run_output.txt || true
++
++# Parse IDENTICAL line
++ident=$(awk '/^IDENTICAL:/{print $2; exit}' run_output.txt || true)
++
++# Check for the ValueError message known from the traceback
++errormsg=$(grep -F "The truth value of an array with more than one element is ambiguous" run_output.txt || true)
++
++status="ERROR"
++if [ "$ident" = "True" ]; then
++  status="PASSED"
++elif [ "$ident" = "False" ]; then
++  # FITSDiff reported a difference when comparing file to itself -> reproduce bug
++  status="FAILED"
++elif [ -n "$errormsg" ]; then
++  # Exception indicates VLA handling issue; treat as reproduction of the bug
++  status="FAILED"
++else
++  status="ERROR"
++fi
++
++cat > test_status.json <<JSON
++{"tests":[{"name":"test_repro.py::test_fitsdiff_vla_self_compare","status":"$status"}]}
++JSON
++
++# Print run output and status file for visibility
++nl -ba run_output.txt | sed -n '1,200p' || true
++echo "---- /testbed/test_status.json ----"
++nl -ba test_status.json | sed -n '1,200p'
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..b2695730e
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,19 @@
++# Reproduction script for FITSDiff VLA self-compare issue
++from astropy.io import fits
++import sys, traceback
++
++try:
++    # Create a VLA column like in the PR description
++    col = fits.Column('a', format='QD', array=[[0], [0, 0]])
++    hdu = fits.BinTableHDU.from_columns([col])
++    hdu.writeto('diffbug.fits', overwrite=True)
++
++    # Compare the file to itself
++    d = fits.FITSDiff('diffbug.fits', 'diffbug.fits')
++    print("IDENTICAL:", d.identical)
++    # Print detailed diff (this prints to stdout)
++    fits.printdiff('diffbug.fits', 'diffbug.fits')
++except Exception:
++    print("IDENTICAL: ERROR")
++    traceback.print_exc()
++    sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..dab3eec29
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_repro.py::test_fitsdiff_vla_self_compare","status":"FAILED"}]}

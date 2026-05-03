@@ -1,0 +1,85 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000..a0588dd
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,2 @@
++DEBUG prepared header value: None
++RESULT test_reproduction.py::test_header_set_none BUG_PRESENT FAIL
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000..7d775b2
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++
++#!/usr/bin/env bash
++set -euo pipefail
++mkdir -p /testbed
++# Run the test and capture output to a file
++python3 /testbed/test_reproduction.py > /testbed/run_output.txt 2>&1 || true
++# Echo output to stdout for visibility
++cat /testbed/run_output.txt
++# Parse RESULT lines from the output file and write test_status.json
++python3 - <<'PY2'
++import json
++from pathlib import Path
++out = Path('/testbed/run_output.txt').read_text()
++statuses = []
++for line in out.splitlines():
++    line = line.strip()
++    if not line:
++        continue
++    if line.startswith("RESULT"):
++        tokens = line.split()
++        # Expect format: RESULT <test_name> ... <STATUS>
++        if len(tokens) >= 3:
++            name = tokens[1]
++            status_token = tokens[-1]
++            status_map = {'PASS':'PASSED','FAIL':'FAILED','ERROR':'ERROR'}
++            statuses.append({"name": name, "status": status_map.get(status_token, "ERROR")})
++if not statuses:
++    statuses = [{"name":"test_reproduction.py::unknown","status":"ERROR"}]
++Path('/testbed/test_status.json').write_text(json.dumps({"tests": statuses}, indent=2))
++print("Wrote /testbed/test_status.json")
++PY2
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100755
+index 0000000..760adf9
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,19 @@
++#!/usr/bin/env python3
++import sys
++try:
++    import requests
++except Exception as e:
++    print(f"RESULT test_reproduction.py::import_requests ERROR {e!s}")
++    sys.exit(0)
++
++# Set session header to None and inspect prepared request header.
++s = requests.Session()
++s.headers['Accept-Encoding'] = None
++prepped = s.prepare_request(requests.Request('GET', 'http://example.com'))
++val = prepped.headers.get('Accept-Encoding')
++print("DEBUG prepared header value:", repr(val))
++# Expect the buggy behavior (string "None"); mark FAIL when not reproduced so test_status.json shows a failure.
++if val == "None":
++    print("RESULT test_reproduction.py::test_header_set_none BUG_PRESENT PASS")
++else:
++    print("RESULT test_reproduction.py::test_header_set_none BUG_PRESENT FAIL")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000..600cea4
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_header_set_none",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,161 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..2309fe9b3
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,74 @@
++#!/bin/bash
++set -euo pipefail
++WORK=/testbed
++SRC="$WORK/source"
++BUILD="$WORK/build/html"
++rm -rf "$WORK/source" "$WORK/build" "$WORK/test_status.json" || true
++mkdir -p "$SRC" "$WORK/build"
++
++# Create example module with empty __all__
++cat > "$SRC/example.py" <<'PY'
++__all__ = []
++
++def foo():
++    "docstring"
++
++def bar():
++    "docstring"
++
++def baz():
++    "docstring"
++PY
++
++# Sphinx index and conf
++cat > "$SRC/index.rst" <<'RST'
++Test Module
++===========
++
++.. automodule:: example
++   :members:
++RST
++
++cat > "$SRC/conf.py" <<'PY'
++import os, sys
++sys.path.insert(0, os.path.abspath('.'))
++extensions = ['sphinx.ext.autodoc']
++master_doc = 'index'
++project = 'autodoc_test'
++PY
++
++# Build the docs (install sphinx if missing)
++python -m pip install -q sphinx || true
++python -m sphinx -b html "$SRC" "$BUILD" > "$WORK/sphinx_build.log" 2>&1 || true
++
++# Inspect generated HTML to see if members are shown
++OUT="$BUILD/index.html"
++found=0
++if [ -f "$OUT" ]; then
++  if grep -q "example.foo" "$OUT" 2>/dev/null || grep -q "foo(" "$OUT" 2>/dev/null || grep -q ">foo<" "$OUT" 2>/dev/null; then
++    found=1
++  fi
++fi
++
++# IMPORTANT: mark as FAILED when the bug is observed (members shown despite empty __all__)
++status="PASSED"
++if [ "$found" -eq 1 ]; then
++  status="FAILED"
++fi
++
++# Write the required test_status.json
++cat > "$WORK/test_status.json" <<JSON
++{
++  "tests": [
++    {
++      "name": "test_autodoc_empty_all",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++# Output summary
++echo "Reproduction result: $status"
++echo "Sphinx build log (tail):"
++tail -n 200 "$WORK/sphinx_build.log" || true
+diff --git a/source/conf.py b/source/conf.py
+new file mode 100644
+index 000000000..1f025e713
+--- /dev/null
++++ b/source/conf.py
+@@ -0,0 +1,5 @@
++import os, sys
++sys.path.insert(0, os.path.abspath('.'))
++extensions = ['sphinx.ext.autodoc']
++master_doc = 'index'
++project = 'autodoc_test'
+diff --git a/source/example.py b/source/example.py
+new file mode 100644
+index 000000000..9f70190af
+--- /dev/null
++++ b/source/example.py
+@@ -0,0 +1,10 @@
++__all__ = []
++
++def foo():
++    "docstring"
++
++def bar():
++    "docstring"
++
++def baz():
++    "docstring"
+diff --git a/source/index.rst b/source/index.rst
+new file mode 100644
+index 000000000..596030e3a
+--- /dev/null
++++ b/source/index.rst
+@@ -0,0 +1,5 @@
++Test Module
++===========
++
++.. automodule:: example
++   :members:
+diff --git a/sphinx_build.log b/sphinx_build.log
+new file mode 100644
+index 000000000..ec8a0f032
+--- /dev/null
++++ b/sphinx_build.log
+@@ -0,0 +1,23 @@
++Running Sphinx v3.5.0+/1f7fdc263
++WARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered, its visitors will be overridden
++making output directory... done
++building [mo]: targets for 0 po files that are out of date
++building [html]: targets for 1 source files that are out of date
++updating environment: [new config] 1 added, 0 changed, 0 removed
++reading sources... [100%] index
++
++looking for now-outdated files... none found
++pickling environment... done
++checking consistency... done
++preparing documents... done
++writing output... [100%] index
++
++generating indices... genindex py-modindex done
++writing additional pages... search done
++copying static files... done
++copying extra files... done
++dumping search index in English (code: en)... done
++dumping object inventory... done
++build succeeded, 1 warning.
++
++The HTML pages are in build/html.
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..e7bd85443
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_autodoc_empty_all",
++      "status": "FAILED"
++    }
++  ]
++}

@@ -1,0 +1,170 @@
+diff --git a/colorbar_output.png b/colorbar_output.png
+new file mode 100644
+index 0000000000..8537eff9e1
+Binary files /dev/null and b/colorbar_output.png differ
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..7f1a249bde
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1 @@
++SAVED /testbed/colorbar_output.png
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..6270bc0089
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,104 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Create the reproduction script
++cat > /testbed/test_repro.py <<'PY'
++#!/usr/bin/env python3
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib as mpl
++import numpy as np
++import matplotlib.pyplot as plt
++from matplotlib.colors import from_levels_and_colors
++
++# Reproduction of the issue from the PR description
++my_cmap = mpl.cm.viridis
++bounds = np.arange(10)
++nb_colors = len(bounds) + 1
++colors = my_cmap(np.linspace(100, 255, nb_colors).astype(int))
++my_cmap, my_norm = from_levels_and_colors(bounds, colors, extend='both')
++
++plt.figure(figsize=(5, 1))
++ax = plt.subplot(111)
++cbar = mpl.colorbar.ColorbarBase(
++    ax,
++    cmap=my_cmap,
++    norm=my_norm,
++    orientation='horizontal',
++    drawedges=True
++)
++plt.subplots_adjust(left=0.05, bottom=0.4, right=0.95, top=0.9)
++out = '/testbed/colorbar_output.png'
++plt.savefig(out, dpi=200)
++print("SAVED", out)
++PY
++
++# Run the reproduction
++python3 /testbed/test_repro.py > /testbed/run_output.txt 2>&1 || true
++
++# Analyze the image for dark (near-black) edge lines at left and right extremities
++python3 - <<'PY'
++from matplotlib import image
++import numpy as np, json, pathlib, sys
++img_path = '/testbed/colorbar_output.png'
++try:
++    img = image.imread(img_path)
++except Exception as e:
++    pathlib.Path('/testbed/test_status.json').write_text(json.dumps({"tests":[{"name":"test/reproduction_colorbar_drawedges.py::test_edges_present","status":"ERROR"}]}, indent=2))
++    print("ERROR reading image:", e, file=sys.stderr)
++    sys.exit(1)
++
++# Normalize to uint8 RGB
++if img.dtype == np.float32 or img.dtype == np.float64:
++    arr = (img * 255).astype(np.uint8)
++else:
++    arr = img.astype(np.uint8)
++if arr.ndim == 2:
++    arr = np.stack([arr]*3, axis=-1)
++h, w = arr.shape[:2]
++
++# Consider a pixel "dark" if all RGB channels are below threshold
++th = 40
++dark = np.all(arr[:, :, :3] < th, axis=2)
++
++# Inspect small vertical bands near left and right edges
++band_width = min(20, max(2, w // 20))
++left_band = dark[:, :band_width]
++right_band = dark[:, max(0, w-band_width):]
++
++left_fracs = left_band.mean(axis=0) if left_band.size else np.array([0.0])
++right_fracs = right_band.mean(axis=0) if right_band.size else np.array([0.0])
++
++left_has = float(left_fracs.max()) > 0.05
++right_has = float(right_fracs.max()) > 0.05
++
++# Sanity check: ensure there are inner separators (expected when drawedges=True)
++center_band = dark[:, w//4: 3*w//4] if w>=4 else dark
++center_has = float(center_band.mean(axis=0).max()) > 0.05
++
++result = {
++    "image_shape": [int(h), int(w)],
++    "band_width": int(band_width),
++    "left_max_dark_fraction": float(left_fracs.max()),
++    "right_max_dark_fraction": float(right_fracs.max()),
++    "center_max_dark_fraction": float(center_band.mean(axis=0).max()),
++    "left_has": left_has,
++    "right_has": right_has,
++    "center_has": center_has
++}
++print("ANALYSIS_RESULT:", result)
++
++status = "PASSED" if (left_has and right_has) else "FAILED"
++test_record = {"tests":[{"name":"test/reproduction_colorbar_drawedges.py::test_edges_present","status":status}]}
++path = pathlib.Path("/testbed/test_status.json")
++path.write_text(json.dumps(test_record, indent=2))
++print("WROTE", path)
++PY
++
++# Print outputs for visibility
++echo "=== run output ==="
++cat /testbed/run_output.txt || true
++echo
++echo "=== test_status.json ==="
++cat /testbed/test_status.json || true
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..bd6aac2e91
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,28 @@
++#!/usr/bin/env python3
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib as mpl
++import numpy as np
++import matplotlib.pyplot as plt
++from matplotlib.colors import from_levels_and_colors
++
++# Reproduction of the issue from the PR description
++my_cmap = mpl.cm.viridis
++bounds = np.arange(10)
++nb_colors = len(bounds) + 1
++colors = my_cmap(np.linspace(100, 255, nb_colors).astype(int))
++my_cmap, my_norm = from_levels_and_colors(bounds, colors, extend='both')
++
++plt.figure(figsize=(5, 1))
++ax = plt.subplot(111)
++cbar = mpl.colorbar.ColorbarBase(
++    ax,
++    cmap=my_cmap,
++    norm=my_norm,
++    orientation='horizontal',
++    drawedges=True
++)
++plt.subplots_adjust(left=0.05, bottom=0.4, right=0.95, top=0.9)
++out = '/testbed/colorbar_output.png'
++plt.savefig(out, dpi=200)
++print("SAVED", out)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..52f59557e5
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test/reproduction_colorbar_drawedges.py::test_edges_present",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

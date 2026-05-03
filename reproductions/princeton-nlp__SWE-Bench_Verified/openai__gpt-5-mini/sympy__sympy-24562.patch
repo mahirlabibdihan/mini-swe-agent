@@ -1,0 +1,133 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 0000000000..fb1bc9564a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,59 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Create the Python reproduction script
++cat > /testbed/test_reproduction.py <<'PY'
++#!/usr/bin/env python3
++import json
++tests = []
++try:
++    from sympy import Rational
++except Exception as e:
++    tests.append({"name": "/testbed/test_reproduction.py::test_rational_str", "status": "ERROR", "detail": f"sympy import failed: {e}"})
++    tests.append({"name": "/testbed/test_reproduction.py::test_rational_float", "status": "ERROR", "detail": f"sympy import failed: {e}"})
++    with open("/testbed/test_status.json", "w") as f:
++        json.dump({"tests": [{"name": t["name"], "status": t["status"]} for t in tests]}, f, indent=2)
++    print(json.dumps(tests, indent=2))
++    raise SystemExit(0)
++
++# Test 1: string numerator and denominator
++name = "/testbed/test_reproduction.py::test_rational_str"
++try:
++    r = Rational('0.5', '100')
++    expected = Rational(1, 200)
++    status = "PASSED" if r == expected else "FAILED"
++    detail = f"got={r}, expected={expected}"
++except Exception as e:
++    status = "ERROR"
++    detail = str(e)
++tests.append({"name": name, "status": status, "detail": detail})
++
++# Test 2: float numerator, int denominator
++name = "/testbed/test_reproduction.py::test_rational_float"
++try:
++    r = Rational(0.5, 100)
++    expected = Rational(1, 200)
++    status = "PASSED" if r == expected else "FAILED"
++    detail = f"got={r}, expected={expected}"
++except Exception as e:
++    status = "ERROR"
++    detail = str(e)
++tests.append({"name": name, "status": status, "detail": detail})
++
++# Write the required test_status.json with only name and status fields per schema
++with open("/testbed/test_status.json", "w") as f:
++    json.dump({"tests": [{"name": t["name"], "status": t["status"]} for t in tests]}, f, indent=2)
++
++# Also print detailed results for visibility
++print(json.dumps(tests, indent=2))
++PY
++
++# Ensure sympy version matches the PR description to reproduce behavior
++python3 -m pip install --quiet sympy==1.11.1 || python3 -m pip install --user --quiet sympy==1.11.1
++
++# Run the test script (this will create /testbed/test_status.json)
++python3 /testbed/test_reproduction.py
++
++# Show the produced status file
++echo "WROTE /testbed/test_status.json:"
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..6147d58bbb
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,43 @@
++#!/usr/bin/env python3
++import json
++tests = []
++try:
++    from sympy import Rational
++except Exception as e:
++    tests.append({"name": "/testbed/test_reproduction.py::test_rational_str", "status": "ERROR", "detail": f"sympy import failed: {e}"})
++    tests.append({"name": "/testbed/test_reproduction.py::test_rational_float", "status": "ERROR", "detail": f"sympy import failed: {e}"})
++    with open("/testbed/test_status.json", "w") as f:
++        json.dump({"tests": [{"name": t["name"], "status": t["status"]} for t in tests]}, f, indent=2)
++    print(json.dumps(tests, indent=2))
++    raise SystemExit(0)
++
++# Test 1: string numerator and denominator
++name = "/testbed/test_reproduction.py::test_rational_str"
++try:
++    r = Rational('0.5', '100')
++    expected = Rational(1, 200)
++    status = "PASSED" if r == expected else "FAILED"
++    detail = f"got={r}, expected={expected}"
++except Exception as e:
++    status = "ERROR"
++    detail = str(e)
++tests.append({"name": name, "status": status, "detail": detail})
++
++# Test 2: float numerator, int denominator
++name = "/testbed/test_reproduction.py::test_rational_float"
++try:
++    r = Rational(0.5, 100)
++    expected = Rational(1, 200)
++    status = "PASSED" if r == expected else "FAILED"
++    detail = f"got={r}, expected={expected}"
++except Exception as e:
++    status = "ERROR"
++    detail = str(e)
++tests.append({"name": name, "status": status, "detail": detail})
++
++# Write the required test_status.json with only name and status fields per schema
++with open("/testbed/test_status.json", "w") as f:
++    json.dump({"tests": [{"name": t["name"], "status": t["status"]} for t in tests]}, f, indent=2)
++
++# Also print detailed results for visibility
++print(json.dumps(tests, indent=2))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..998bee6f4b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::test_rational_str",
++      "status": "FAILED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::test_rational_float",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

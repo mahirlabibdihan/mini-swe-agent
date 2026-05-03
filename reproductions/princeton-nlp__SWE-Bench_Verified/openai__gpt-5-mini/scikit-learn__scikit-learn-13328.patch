@@ -1,0 +1,72 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..0d1f1e7f8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++set -u -o pipefail
++mkdir -p /testbed
++
++# Run the reproduction script, capture output and exit code
++output=$(python3 test_reproduction.py 2>&1)
++rc=$?
++
++# Determine status based on actual output
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++    # Look for the specific TypeError message substring reported in the PR
++    if echo "$output" | grep -q "TypeError" && echo "$output" | grep -q "numpy boolean negative"; then
++        status="FAILED"
++    else
++        status="ERROR"
++    fi
++else
++    status="PASSED"
++fi
++
++# Write the required /testbed/test_status.json
++python3 - <<PYTHON "$status" "$output"
++import json,sys
++status=sys.argv[1]
++output=sys.argv[2]
++tests=[{"name":"test_reproduction.py::test_huber_regressor_bool_X","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++# Also print the captured output for visibility
++print(output)
++PYTHON
++
++# Show the generated test status file
++nl -ba /testbed/test_status.json || true
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..f4b4e3b51
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,11 @@
++import numpy as np
++from sklearn.datasets import make_regression
++from sklearn.linear_model import HuberRegressor
++
++# Reproduction of the issue from the PR description
++X, y, coef = make_regression(n_samples=200, n_features=2, noise=4.0, coef=True, random_state=0)
++X_bool = X > 0
++
++# This is expected to raise the TypeError described in the PR when dtype is bool
++huber = HuberRegressor().fit(X_bool, y)
++print("Fitted HuberRegressor successfully (unexpected):", huber)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..4916191cc
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_huber_regressor_bool_X",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

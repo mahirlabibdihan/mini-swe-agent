@@ -1,0 +1,95 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..4fa565f7
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++# Run the reproduction script, capture its output and real exit code, then write test_status.json
++# Ensure this runner always exits 0 so the harness sees it executed successfully.
++set -u
++
++python3 /testbed/test_reproduction.py > /testbed/test_output.txt 2>&1
++rc=$?
++output=$(cat /testbed/test_output.txt)
++
++python3 - <<PY "$output" "$rc"
++import json, sys
++out = sys.argv[1]
++rc = int(sys.argv[2])
++status = "PASSED" if rc == 0 else "FAILED"
++report = {"tests": [{"name": "test_reproduction.py::test_coordinates_preserved", "status": status}]}
++open("/testbed/test_status.json", "w").write(json.dumps(report, indent=2))
++print(out)
++PY
++
++# Always exit 0 regardless of test result so harness considers the runner succeeded
++exit 0
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 00000000..78c174af
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,18 @@
++Original dataset:
++<xarray.Dataset>
++Dimensions:  (time: 24)
++Coordinates:
++    day      (time) int64 0 365 730 1095 1460 1825 ... 6935 7300 7665 8030 8395
++Dimensions without coordinates: time
++Data variables:
++    T        (time) int64 0 1 2 3 4 5 6 7 8 9 ... 14 15 16 17 18 19 20 21 22 23
++
++After coarsen().construct():
++<xarray.Dataset>
++Dimensions:  (year: 2, month: 12)
++Dimensions without coordinates: year, month
++Data variables:
++    day      (year, month) int64 0 365 730 1095 1460 ... 7300 7665 8030 8395
++    T        (year, month) int64 0 1 2 3 4 5 6 7 8 ... 16 17 18 19 20 21 22 23
++
++FAIL: 'day' was demoted to a data variable
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..b666c668
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,23 @@
++import xarray as xr
++import numpy as np
++import sys
++
++da = xr.DataArray(np.arange(24), dims=["time"])
++da = da.assign_coords(day=365 * da)
++ds = da.to_dataset(name="T")
++
++res = ds.coarsen(time=12).construct(time=("year", "month"))
++
++is_coord = 'day' in res.coords
++
++print("Original dataset:")
++print(ds)
++print("\nAfter coarsen().construct():")
++print(res)
++
++if is_coord:
++    print("\nPASS: 'day' is still a coordinate")
++    sys.exit(0)
++else:
++    print("\nFAIL: 'day' was demoted to a data variable")
++    sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..cec0e5cc
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_coordinates_preserved",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

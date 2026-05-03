@@ -1,0 +1,85 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a1e4e948d5
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,46 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Create the reproduction Python script that triggers UnicodeDecodeError when decoding invalid bytes
++cat > /testbed/test_reproduction.py <<'PY'
++#!/usr/bin/env python3
++# Simulate fetching DB rows where one column contains invalid UTF-8 bytes,
++# causing a UnicodeDecodeError when decoded (like mysqlclient on Py3).
++rows = [
++    (b"0ec189d6-b854-4300-969a-bf3a3378bff3/0", b"normal text", b"other"),
++    (b"0ec189d6-b854-4300-969a-bf3a3378bff3/1", b"\xed\xbf\xbfinvalid bytes here", b"aux"),
++]
++def simulate_delete_fetch():
++    print("Simulating SELECT of multiple columns for objects to delete...")
++    for i, row in enumerate(rows):
++        print("Row", i, "raw:", row)
++        for j, col in enumerate(row):
++            if isinstance(col, bytes):
++                print(" Decoding column", j, "->", col)
++                # This decode will raise UnicodeDecodeError for the invalid bytes row
++                decoded = col.decode("utf-8")
++                print("  Decoded:", decoded)
++        print(" Row", i, "processed successfully.")
++if __name__ == "__main__":
++    simulate_delete_fetch()
++PY
++
++# Run the reproduction and capture output (allow non-zero so we can inspect it)
++output=$(/usr/bin/env python3 /testbed/test_reproduction.py 2>&1) || true
++exit_code=$?
++status="PASSED"
++if echo "$output" | grep -q "UnicodeDecodeError"; then
++  status="FAILED"
++elif [ $exit_code -ne 0 ]; then
++  status="ERROR"
++fi
++
++# Write machine-readable test result
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_reproduction.py", "status": "$status"}]}
++JSON
++
++# Print outputs for inspection
++echo "----- SCRIPT OUTPUT -----"
++echo "$output"
++echo "----- TEST_STATUS.JSON WRITTEN -----"
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..bd94768dbd
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,20 @@
++#!/usr/bin/env python3
++# Simulate fetching DB rows where one column contains invalid UTF-8 bytes,
++# causing a UnicodeDecodeError when decoded (like mysqlclient on Py3).
++rows = [
++    (b"0ec189d6-b854-4300-969a-bf3a3378bff3/0", b"normal text", b"other"),
++    (b"0ec189d6-b854-4300-969a-bf3a3378bff3/1", b"\xed\xbf\xbfinvalid bytes here", b"aux"),
++]
++def simulate_delete_fetch():
++    print("Simulating SELECT of multiple columns for objects to delete...")
++    for i, row in enumerate(rows):
++        print("Row", i, "raw:", row)
++        for j, col in enumerate(row):
++            if isinstance(col, bytes):
++                print(" Decoding column", j, "->", col)
++                # This decode will raise UnicodeDecodeError for the invalid bytes row
++                decoded = col.decode("utf-8")
++                print("  Decoded:", decoded)
++        print(" Row", i, "processed successfully.")
++if __name__ == "__main__":
++    simulate_delete_fetch()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..b652a4613e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_reproduction.py", "status": "FAILED"}]}

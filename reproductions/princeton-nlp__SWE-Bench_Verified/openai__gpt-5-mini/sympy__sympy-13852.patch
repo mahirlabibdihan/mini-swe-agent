@@ -1,0 +1,90 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 000000000..9fecd12e1
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,10 @@
++/testbed/sympy/core/basic.py:3: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
++  from collections import Mapping, defaultdict
++/testbed/sympy/core/containers.py:271: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
++  class OrderedSet(collections.MutableSet):
++/testbed/sympy/solvers/diophantine.py:3188: SyntaxWarning: "is" with a literal. Did you mean "=="?
++  if feasible is 1:  # it's prime and k == 2
++/testbed/sympy/plotting/plot.py:28: DeprecationWarning: Using or importing the ABCs from 'collections' instead of from 'collections.abc' is deprecated since Python 3.3, and in 3.10 it will stop working
++  from collections import Callable
++Expanded expression: -log(z*exp_polar(-I*pi) + 1)
++/testbed/test_status.json written with status: FAILED
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..8a98cd73e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,5 @@
++#!/bin/bash
++set -euo pipefail
++python3 /testbed/test_repro_polylog.py 2>&1 | tee /testbed/run_output.txt || true
++# Show the resulting test_status.json
++nl -ba /testbed/test_status.json | sed -n '1,200p'
+diff --git a/test_repro_polylog.py b/test_repro_polylog.py
+new file mode 100755
+index 000000000..5f311a779
+--- /dev/null
++++ b/test_repro_polylog.py
+@@ -0,0 +1,42 @@
++#!/usr/bin/env python3
++import json, sys
++try:
++    import sympy as sp
++except Exception as e:
++    print("ERROR: sympy not available:", e, file=sys.stderr)
++    # write error status
++    with open("/testbed/test_status.json", "w") as f:
++        json.dump({"tests":[{"name":"test_repro_polylog.py::test_expand_polylog1","status":"ERROR"}]}, f, indent=2)
++    sys.exit(0)
++
++z = sp.symbols('z')
++expr = None
++err = None
++# Try expand_func if available, else fallback to .expand(func=True)
++try:
++    try:
++        from sympy.simplify.simplify import expand_func as _ef
++    except Exception:
++        _ef = None
++    if _ef is not None:
++        expr = _ef(sp.polylog(1, z))
++    else:
++        expr = sp.polylog(1, z).expand(func=True)
++except Exception as e:
++    err = str(e)
++
++out_str = "None" if expr is None else str(expr)
++print("Expanded expression:", out_str)
++if err:
++    print("Error during expansion:", err, file=sys.stderr)
++
++# Determine test outcome: the bug is presence of 'exp_polar' in the expansion
++if expr is None:
++    status = "ERROR"
++else:
++    status = "FAILED" if "exp_polar" in out_str else "PASSED"
++
++tests = [{"name":"test_repro_polylog.py::test_expand_polylog1","status":status}]
++with open("/testbed/test_status.json","w") as f:
++    json.dump({"tests": tests}, f, indent=2)
++print("/testbed/test_status.json written with status:", status)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..377fc0489
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro_polylog.py::test_expand_polylog1",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

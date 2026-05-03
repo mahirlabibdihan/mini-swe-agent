@@ -1,0 +1,52 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..e6b712886c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,12 @@
++#!/bin/sh
++python3 /testbed/test_repro.py
++rc=$?
++if [ "$rc" -eq 0 ]; then
++  status=PASSED
++elif [ "$rc" -eq 1 ]; then
++  status=FAILED
++else
++  status=ERROR
++fi
++printf '{"tests":[{"name":"/testbed/test_repro.py::test_partitions_reuse","status":"%s"}]}\n' "$status" > /testbed/test_status.json
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..87182dc412
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,21 @@
++import sys
++try:
++    from sympy.utilities.iterables import partitions
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    sys.exit(2)
++
++def main():
++    parts = list(partitions(6, m=3))
++    print("Produced", len(parts), "partition dicts")
++    ids = [id(p) for p in parts]
++    reused = len(set(ids)) != len(ids)
++    if reused:
++        print("REUSED_DICT_OBJECTS ids:", ids)
++        sys.exit(1)
++    else:
++        print("NO_REUSE ids:", ids)
++        sys.exit(0)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e8bd174914
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"/testbed/test_repro.py::test_partitions_reuse","status":"FAILED"}]}

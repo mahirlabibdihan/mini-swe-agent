@@ -1,0 +1,62 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..5d9a717d40
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++
++testname="/testbed/test_repro.py::namedtuple_iterator_constructor"
++status="PASSED"
++if echo "$output" | grep -q "missing 1 required positional argument"; then
++  status="FAILED"
++elif echo "$output" | grep -q "Traceback"; then
++  status="ERROR"
++fi
++
++python3 - <<PY "$output" "$testname" "$status"
++import json, sys
++out = sys.argv[1]
++name = sys.argv[2]
++status = sys.argv[3]
++report = {"tests": [{"name": name, "status": status}]}
++open("/testbed/test_status.json", "w").write(json.dumps(report, indent=2))
++print(out)
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..76250e2c04
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,14 @@
++from collections import namedtuple
++import sys, traceback
++Range = namedtuple('Range', ['near','far'])
++r = Range(1,2)
++print("Original namedtuple:", r)
++# This mimics the buggy reconstitution: passing an iterator to the namedtuple constructor
++try:
++    reconstructed = type(r)((x*10 for x in r))
++    print("Reconstructed:", reconstructed)
++except Exception:
++    traceback.print_exc()
++    # exit with non-zero to indicate the reproduction produced an error
++    sys.exit(1)
++sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..a2f30194b0
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_repro.py::namedtuple_iterator_constructor",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

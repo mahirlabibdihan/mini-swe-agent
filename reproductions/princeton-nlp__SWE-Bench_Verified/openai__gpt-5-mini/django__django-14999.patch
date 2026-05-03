@@ -1,0 +1,395 @@
+diff --git a/db.sqlite3 b/db.sqlite3
+new file mode 100644
+index 0000000000..f6d9b09a1b
+Binary files /dev/null and b/db.sqlite3 differ
+diff --git a/manage.py b/manage.py
+new file mode 100755
+index 0000000000..ce27baa1e5
+--- /dev/null
++++ b/manage.py
+@@ -0,0 +1,6 @@
++#!/usr/bin/env python
++import os, sys
++if __name__ == "__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "testproj.settings")
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
+diff --git a/migrate_output.txt b/migrate_output.txt
+new file mode 100644
+index 0000000000..ad046dfeb4
+--- /dev/null
++++ b/migrate_output.txt
+@@ -0,0 +1,109 @@
++System check identified some issues:
++
++WARNINGS:
++myapp.OldModel: (models.W042) Auto-created primary key used when not defining a primary key type, by default 'django.db.models.AutoField'.
++	HINT: Configure the DEFAULT_AUTO_FIELD setting or the AppConfig.default_auto_field attribute to point to a subclass of AutoField, e.g. 'django.db.models.BigAutoField'.
++(0.000) 
++            SELECT name, type FROM sqlite_master
++            WHERE type in ('table', 'view') AND NOT name='sqlite_sequence'
++            ORDER BY name; args=None; alias=default
++(0.000) 
++            SELECT name, type FROM sqlite_master
++            WHERE type in ('table', 'view') AND NOT name='sqlite_sequence'
++            ORDER BY name; args=None; alias=default
++Operations to perform:
++  Apply all migrations: contenttypes, myapp
++Running migrations:
++(0.000) 
++            SELECT name, type FROM sqlite_master
++            WHERE type in ('table', 'view') AND NOT name='sqlite_sequence'
++            ORDER BY name; args=None; alias=default
++(0.000) PRAGMA foreign_keys = OFF; args=None; alias=default
++(0.000) PRAGMA foreign_keys; args=None; alias=default
++(0.000) BEGIN; args=None; alias=default
++CREATE TABLE "django_migrations" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "app" varchar(255) NOT NULL, "name" varchar(255) NOT NULL, "applied" datetime NOT NULL); (params None)
++(0.000) CREATE TABLE "django_migrations" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "app" varchar(255) NOT NULL, "name" varchar(255) NOT NULL, "applied" datetime NOT NULL); args=None; alias=default
++(0.000) PRAGMA foreign_key_check; args=None; alias=default
++(0.000) PRAGMA foreign_keys = ON; args=None; alias=default
++  Applying contenttypes.0001_initial...(0.000) PRAGMA foreign_keys = OFF; args=None; alias=default
++(0.000) PRAGMA foreign_keys; args=None; alias=default
++(0.000) BEGIN; args=None; alias=default
++CREATE TABLE "django_content_type" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "name" varchar(100) NOT NULL, "app_label" varchar(100) NOT NULL, "model" varchar(100) NOT NULL); (params None)
++(0.000) CREATE TABLE "django_content_type" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "name" varchar(100) NOT NULL, "app_label" varchar(100) NOT NULL, "model" varchar(100) NOT NULL); args=None; alias=default
++CREATE UNIQUE INDEX "django_content_type_app_label_model_76bd3d3b_uniq" ON "django_content_type" ("app_label", "model"); (params ())
++(0.000) CREATE UNIQUE INDEX "django_content_type_app_label_model_76bd3d3b_uniq" ON "django_content_type" ("app_label", "model"); args=(); alias=default
++(0.000) 
++            SELECT name, type FROM sqlite_master
++            WHERE type in ('table', 'view') AND NOT name='sqlite_sequence'
++            ORDER BY name; args=None; alias=default
++(0.000) INSERT INTO "django_migrations" ("app", "name", "applied") SELECT 'contenttypes', '0001_initial', '2026-04-24 21:00:34.285293' RETURNING "django_migrations"."id"; args=('contenttypes', '0001_initial', '2026-04-24 21:00:34.285293'); alias=default
++(0.000) PRAGMA foreign_key_check; args=None; alias=default
++(0.000) PRAGMA foreign_keys = ON; args=None; alias=default
++ OK
++  Applying contenttypes.0002_remove_content_type_name...(0.000) PRAGMA foreign_keys = OFF; args=None; alias=default
++(0.000) PRAGMA foreign_keys; args=None; alias=default
++(0.000) BEGIN; args=None; alias=default
++CREATE TABLE "new__django_content_type" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "app_label" varchar(100) NOT NULL, "model" varchar(100) NOT NULL, "name" varchar(100) NULL); (params None)
++(0.000) CREATE TABLE "new__django_content_type" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "app_label" varchar(100) NOT NULL, "model" varchar(100) NOT NULL, "name" varchar(100) NULL); args=None; alias=default
++INSERT INTO "new__django_content_type" ("id", "app_label", "model", "name") SELECT "id", "app_label", "model", "name" FROM "django_content_type"; (params ())
++(0.000) INSERT INTO "new__django_content_type" ("id", "app_label", "model", "name") SELECT "id", "app_label", "model", "name" FROM "django_content_type"; args=(); alias=default
++DROP TABLE "django_content_type"; (params ())
++(0.000) DROP TABLE "django_content_type"; args=(); alias=default
++ALTER TABLE "new__django_content_type" RENAME TO "django_content_type"; (params ())
++(0.000) ALTER TABLE "new__django_content_type" RENAME TO "django_content_type"; args=(); alias=default
++CREATE UNIQUE INDEX "django_content_type_app_label_model_76bd3d3b_uniq" ON "django_content_type" ("app_label", "model"); (params ())
++(0.000) CREATE UNIQUE INDEX "django_content_type_app_label_model_76bd3d3b_uniq" ON "django_content_type" ("app_label", "model"); args=(); alias=default
++CREATE TABLE "new__django_content_type" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "app_label" varchar(100) NOT NULL, "model" varchar(100) NOT NULL); (params None)
++(0.000) CREATE TABLE "new__django_content_type" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "app_label" varchar(100) NOT NULL, "model" varchar(100) NOT NULL); args=None; alias=default
++INSERT INTO "new__django_content_type" ("id", "app_label", "model") SELECT "id", "app_label", "model" FROM "django_content_type"; (params ())
++(0.000) INSERT INTO "new__django_content_type" ("id", "app_label", "model") SELECT "id", "app_label", "model" FROM "django_content_type"; args=(); alias=default
++DROP TABLE "django_content_type"; (params ())
++(0.000) DROP TABLE "django_content_type"; args=(); alias=default
++ALTER TABLE "new__django_content_type" RENAME TO "django_content_type"; (params ())
++(0.000) ALTER TABLE "new__django_content_type" RENAME TO "django_content_type"; args=(); alias=default
++CREATE UNIQUE INDEX "django_content_type_app_label_model_76bd3d3b_uniq" ON "django_content_type" ("app_label", "model"); (params ())
++(0.000) CREATE UNIQUE INDEX "django_content_type_app_label_model_76bd3d3b_uniq" ON "django_content_type" ("app_label", "model"); args=(); alias=default
++(0.000) 
++            SELECT name, type FROM sqlite_master
++            WHERE type in ('table', 'view') AND NOT name='sqlite_sequence'
++            ORDER BY name; args=None; alias=default
++(0.000) INSERT INTO "django_migrations" ("app", "name", "applied") SELECT 'contenttypes', '0002_remove_content_type_name', '2026-04-24 21:00:34.292792' RETURNING "django_migrations"."id"; args=('contenttypes', '0002_remove_content_type_name', '2026-04-24 21:00:34.292792'); alias=default
++(0.000) PRAGMA foreign_key_check; args=None; alias=default
++(0.000) PRAGMA foreign_keys = ON; args=None; alias=default
++ OK
++  Applying myapp.0001_initial...(0.000) PRAGMA foreign_keys = OFF; args=None; alias=default
++(0.000) PRAGMA foreign_keys; args=None; alias=default
++(0.000) BEGIN; args=None; alias=default
++CREATE TABLE "custom_table" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "name" varchar(100) NOT NULL); (params None)
++(0.000) CREATE TABLE "custom_table" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "name" varchar(100) NOT NULL); args=None; alias=default
++(0.000) 
++            SELECT name, type FROM sqlite_master
++            WHERE type in ('table', 'view') AND NOT name='sqlite_sequence'
++            ORDER BY name; args=None; alias=default
++(0.000) INSERT INTO "django_migrations" ("app", "name", "applied") SELECT 'myapp', '0001_initial', '2026-04-24 21:00:34.294810' RETURNING "django_migrations"."id"; args=('myapp', '0001_initial', '2026-04-24 21:00:34.294810'); alias=default
++(0.000) PRAGMA foreign_key_check; args=None; alias=default
++(0.000) PRAGMA foreign_keys = ON; args=None; alias=default
++ OK
++  Applying myapp.0002_rename...(0.000) PRAGMA foreign_keys = OFF; args=None; alias=default
++(0.000) PRAGMA foreign_keys; args=None; alias=default
++(0.000) BEGIN; args=None; alias=default
++(0.000) SELECT "django_content_type"."id", "django_content_type"."app_label", "django_content_type"."model" FROM "django_content_type" WHERE ("django_content_type"."app_label" = 'myapp' AND "django_content_type"."model" = 'oldmodel') LIMIT 21; args=('myapp', 'oldmodel'); alias=default
++(0.000) 
++            SELECT name, type FROM sqlite_master
++            WHERE type in ('table', 'view') AND NOT name='sqlite_sequence'
++            ORDER BY name; args=None; alias=default
++(0.000) INSERT INTO "django_migrations" ("app", "name", "applied") SELECT 'myapp', '0002_rename', '2026-04-24 21:00:34.297947' RETURNING "django_migrations"."id"; args=('myapp', '0002_rename', '2026-04-24 21:00:34.297947'); alias=default
++(0.000) PRAGMA foreign_key_check; args=None; alias=default
++(0.000) PRAGMA foreign_keys = ON; args=None; alias=default
++ OK
++(0.000) 
++            SELECT name, type FROM sqlite_master
++            WHERE type in ('table', 'view') AND NOT name='sqlite_sequence'
++            ORDER BY name; args=None; alias=default
++(0.000) SELECT "django_migrations"."id", "django_migrations"."app", "django_migrations"."name", "django_migrations"."applied" FROM "django_migrations"; args=(); alias=default
++(0.000) SELECT "django_content_type"."id", "django_content_type"."app_label", "django_content_type"."model" FROM "django_content_type" WHERE "django_content_type"."app_label" = 'contenttypes'; args=('contenttypes',); alias=default
++(0.000) BEGIN; args=None; alias=default
++(0.000) INSERT INTO "django_content_type" ("app_label", "model") SELECT 'contenttypes', 'contenttype' RETURNING "django_content_type"."id"; args=('contenttypes', 'contenttype'); alias=default
++(0.000) SELECT "django_content_type"."id", "django_content_type"."app_label", "django_content_type"."model" FROM "django_content_type" WHERE "django_content_type"."app_label" = 'myapp'; args=('myapp',); alias=default
++(0.000) BEGIN; args=None; alias=default
++(0.000) INSERT INTO "django_content_type" ("app_label", "model") SELECT 'myapp', 'newmodel' RETURNING "django_content_type"."id"; args=('myapp', 'newmodel'); alias=default
+diff --git a/myapp/__init__.py b/myapp/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/myapp/migrations/0001_initial.py b/myapp/migrations/0001_initial.py
+new file mode 100644
+index 0000000000..1a71232c40
+--- /dev/null
++++ b/myapp/migrations/0001_initial.py
+@@ -0,0 +1,15 @@
++from django.db import migrations, models
++
++class Migration(migrations.Migration):
++    initial = True
++    dependencies = []
++    operations = [
++        migrations.CreateModel(
++            name='OldModel',
++            fields=[
++                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('name', models.CharField(max_length=100)),
++            ],
++            options={'db_table': 'custom_table'},
++        ),
++    ]
+diff --git a/myapp/migrations/0002_rename.py b/myapp/migrations/0002_rename.py
+new file mode 100644
+index 0000000000..6d59d1c37e
+--- /dev/null
++++ b/myapp/migrations/0002_rename.py
+@@ -0,0 +1,9 @@
++from django.db import migrations
++
++class Migration(migrations.Migration):
++    dependencies = [
++        ('myapp', '0001_initial'),
++    ]
++    operations = [
++        migrations.RenameModel(old_name='OldModel', new_name='NewModel'),
++    ]
+diff --git a/myapp/migrations/__init__.py b/myapp/migrations/__init__.py
+new file mode 100644
+index 0000000000..7f7d0d386c
+--- /dev/null
++++ b/myapp/migrations/__init__.py
+@@ -0,0 +1 @@
++# migrations package
+diff --git a/myapp/models.py b/myapp/models.py
+new file mode 100644
+index 0000000000..14bd95fd4a
+--- /dev/null
++++ b/myapp/models.py
+@@ -0,0 +1,6 @@
++from django.db import models
++
++class OldModel(models.Model):
++    name = models.CharField(max_length=100)
++    class Meta:
++        db_table = 'custom_table'
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..83f5a6f5d1
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,132 @@
++#!/bin/bash
++set -euo pipefail
++export PYTHONUNBUFFERED=1
++cd /testbed
++
++# Install Django
++python -m pip install --quiet Django==3.2 || python -m pip install --quiet Django
++
++# Ensure migrations package exists
++mkdir -p myapp/migrations
++cat > myapp/migrations/__init__.py <<PY
++# migrations package
++PY
++
++# Create Django project layout and settings with SQL logging
++cat > testproj/__init__.py <<PY
++PY
++
++cat > testproj/settings.py <<PY
++SECRET_KEY = 'test-key'
++DEBUG = True
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'myapp',
++]
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': 'db.sqlite3',
++    }
++}
++MIDDLEWARE = []
++ROOT_URLCONF = None
++USE_TZ = False
++LOGGING = {
++    'version': 1,
++    'disable_existing_loggers': False,
++    'handlers': {
++        'console': {'class': 'logging.StreamHandler'},
++    },
++    'loggers': {
++        'django.db.backends': {
++            'handlers': ['console'],
++            'level': 'DEBUG',
++        },
++    },
++}
++PY
++
++cat > manage.py <<PY
++#!/usr/bin/env python
++import os, sys
++if __name__ == "__main__":
++    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "testproj.settings")
++    from django.core.management import execute_from_command_line
++    execute_from_command_line(sys.argv)
++PY
++chmod +x manage.py
++
++# Create models and migrations
++cat > myapp/__init__.py <<PY
++PY
++
++cat > myapp/models.py <<PY
++from django.db import models
++
++class OldModel(models.Model):
++    name = models.CharField(max_length=100)
++    class Meta:
++        db_table = 'custom_table'
++PY
++
++cat > myapp/migrations/0001_initial.py <<PY
++from django.db import migrations, models
++
++class Migration(migrations.Migration):
++    initial = True
++    dependencies = []
++    operations = [
++        migrations.CreateModel(
++            name='OldModel',
++            fields=[
++                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
++                ('name', models.CharField(max_length=100)),
++            ],
++            options={'db_table': 'custom_table'},
++        ),
++    ]
++PY
++
++cat > myapp/migrations/0002_rename.py <<PY
++from django.db import migrations
++
++class Migration(migrations.Migration):
++    dependencies = [
++        ('myapp', '0001_initial'),
++    ]
++    operations = [
++        migrations.RenameModel(old_name='OldModel', new_name='NewModel'),
++    ]
++PY
++
++# Remove any existing sqlite DB to start fresh
++rm -f db.sqlite3
++
++# Run migrate and capture output
++MIGRATE_OUTPUT=$(python manage.py migrate --noinput 2>&1 || true)
++echo "$MIGRATE_OUTPUT" > /testbed/migrate_output.txt
++
++# If SQL indicates table rebuild (CREATE TABLE / INSERT INTO / DROP TABLE), that's a FAILURE per the PR expectation
++if echo "$MIGRATE_OUTPUT" | grep -Eqi "CREATE TABLE|INSERT INTO|DROP TABLE"; then
++    STATUS="FAILED"
++    REASON="migrate output shows CREATE/INSERT/DROP indicating SQLite table rebuild during RenameModel (bug reproduced - should be noop)"
++else
++    STATUS="PASSED"
++    REASON="migrate output did not show table rebuild SQL; RenameModel behaved as noop"
++fi
++
++# Write machine-readable test status file
++python - <<PYTHON > /testbed/test_status.json
++import json, sys
++status = "$STATUS"
++reason = "$REASON"
++obj = {"tests": [{"name": "test/migrate_myapp_rename", "status": status, "reason": reason}]}
++print(json.dumps(obj, indent=2))
++PYTHON
++
++# Print concise results for inspection
++echo "=== concise migrate output (head) ==="
++head -n 120 /testbed/migrate_output.txt || true
++echo "=== test status ==="
++cat /testbed/test_status.json
+diff --git a/sqlmigrate_0002_output.txt b/sqlmigrate_0002_output.txt
+new file mode 100644
+index 0000000000..3c8248e33b
+--- /dev/null
++++ b/sqlmigrate_0002_output.txt
+@@ -0,0 +1,10 @@
++System check identified some issues:
++
++WARNINGS:
++myapp.OldModel: (models.W042) Auto-created primary key used when not defining a primary key type, by default 'django.db.models.AutoField'.
++	HINT: Configure the DEFAULT_AUTO_FIELD setting or the AppConfig.default_auto_field attribute to point to a subclass of AutoField, e.g. 'django.db.models.BigAutoField'.
++BEGIN;
++--
++-- Rename model OldModel to NewModel
++--
++COMMIT;
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..79db22ccca
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,9 @@
++{
++  "tests": [
++    {
++      "name": "test/migrate_myapp_rename",
++      "status": "FAILED",
++      "reason": "migrate output shows CREATE/INSERT/DROP indicating SQLite table rebuild during RenameModel (bug reproduced - should be noop)"
++    }
++  ]
++}
+diff --git a/testproj/__init__.py b/testproj/__init__.py
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/testproj/settings.py b/testproj/settings.py
+new file mode 100644
+index 0000000000..119632b060
+--- /dev/null
++++ b/testproj/settings.py
+@@ -0,0 +1,28 @@
++SECRET_KEY = 'test-key'
++DEBUG = True
++INSTALLED_APPS = [
++    'django.contrib.contenttypes',
++    'myapp',
++]
++DATABASES = {
++    'default': {
++        'ENGINE': 'django.db.backends.sqlite3',
++        'NAME': 'db.sqlite3',
++    }
++}
++MIDDLEWARE = []
++ROOT_URLCONF = None
++USE_TZ = False
++LOGGING = {
++    'version': 1,
++    'disable_existing_loggers': False,
++    'handlers': {
++        'console': {'class': 'logging.StreamHandler'},
++    },
++    'loggers': {
++        'django.db.backends': {
++            'handlers': ['console'],
++            'level': 'DEBUG',
++        },
++    },
++}

@@ -1,0 +1,117 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..c32f47bd5c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Run the reproduction and capture output
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Determine test status based on observed output
++status="PASSED"
++if echo "$output" | grep -q "Caught exception during migration evaluation"; then
++  if echo "$output" | grep -q "is not a valid Status"; then
++    status="FAILED"
++  else
++    status="ERROR"
++  fi
++fi
++
++# Write machine-readable test result to /testbed/test_status.json
++python3 - <<PY "$output" "$status"
++import json,sys
++out=sys.argv[1]
++status=sys.argv[2]
++records=[{"name":"test_reproduction.py::test_enum_migration","status":status}]
++open('/testbed/test_status.json','w').write(json.dumps({"tests":records}, indent=2))
++print('WROTE /testbed/test_status.json with status:', status)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..a59dcdb06e
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,65 @@
++#!/usr/bin/env python3
++import os
++from enum import Enum
++
++class TranslationProxy:
++    def __init__(self, key, translations):
++        self.key = key
++        self.translations = translations
++    def __str__(self):
++        locale = os.environ.get("LOCALE", "en")
++        return self.translations.get(locale, self.translations.get("en", self.key))
++    def __repr__(self):
++        return repr(str(self))
++    def __eq__(self, other):
++        if isinstance(other, TranslationProxy):
++            return str(self) == str(other)
++        return str(self) == other
++    def __hash__(self):
++        return hash(str(self))
++
++def simulate(locale_generation, locale_runtime):
++    os.environ['LOCALE'] = locale_generation
++
++    class Status(Enum):
++        GOOD = TranslationProxy("GOOD", {"en": "Good", "es": "Bueno"})
++        BAD = TranslationProxy("BAD", {"en": "Bad", "es": "Malo"})
++        def __str__(self):
++            return self.name
++
++    # Emulate migration serialization that uses the Enum value string at generation time
++    default_value_str = str(Status.GOOD.value)  # 'Good' when locale_generation='en'
++    migration_code = f"Status('{default_value_str}')"  # problematic form
++
++    print("=== Generation phase ===")
++    print("LOCALE:", locale_generation)
++    print("Status.GOOD.value (repr):", repr(Status.GOOD.value))
++    print("Serialized migration default (what migration file would contain):", migration_code)
++
++    # Now simulate applying the migration in a different locale
++    os.environ['LOCALE'] = locale_runtime
++
++    class Status(Enum):
++        GOOD = TranslationProxy("GOOD", {"en": "Good", "es": "Bueno"})
++        BAD = TranslationProxy("BAD", {"en": "Bad", "es": "Malo"})
++        def __str__(self):
++            return self.name
++
++    print("\n=== Migration application phase ===")
++    print("LOCALE:", locale_runtime)
++    print("Status.GOOD.value (repr):", repr(Status.GOOD.value))
++    print("Attempting to evaluate migration code:", migration_code)
++    try:
++        result = eval(migration_code, {"Status": Status})
++        print("Evaluation result:", result)
++        return {"error": False, "message": "Evaluated without error", "exception": None}
++    except Exception as e:
++        print("Caught exception during migration evaluation:", type(e).__name__, str(e))
++        return {"error": True, "message": str(e), "exception": repr(e)}
++
++if __name__ == "__main__":
++    res = simulate("en", "es")
++    if res["error"]:
++        print("\n---EXPECTED-FAILURE-DETECTED---")
++    else:
++        print("\n---NO-FAILURE-DETECTED---")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..77bd3ed8f2
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_enum_migration",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

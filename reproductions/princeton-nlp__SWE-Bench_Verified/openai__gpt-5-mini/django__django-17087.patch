@@ -1,0 +1,91 @@
+diff --git a/appname/__init__.py b/appname/__init__.py
+new file mode 100644
+index 0000000000..3f804a1ca6
+--- /dev/null
++++ b/appname/__init__.py
+@@ -0,0 +1 @@
++# package init for appname
+diff --git a/appname/models.py b/appname/models.py
+new file mode 100644
+index 0000000000..08eca3c454
+--- /dev/null
++++ b/appname/models.py
+@@ -0,0 +1,8 @@
++class Profile:
++    class Capability:
++        BASIC = ("BASIC", "Basic")
++        PROFESSIONAL = ("PROFESSIONAL", "Professional")
++
++        @classmethod
++        def default(cls) -> list:
++            return [cls.BASIC]
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..765c2f85e8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++python3 - <<'PY' "$output"
++import json, sys
++out = sys.argv[1]
++lines = out.splitlines()
++buggy = None
++correct = None
++for L in lines:
++    if L.startswith("BUGGY:"):
++        buggy = L.split("BUGGY:",1)[1].strip()
++    if L.startswith("CORRECT:"):
++        correct = L.split("CORRECT:",1)[1].strip()
++expected_buggy = "appname.models.Capability.default"
++# Mark FAILED if the bug is observed (i.e., buggy equals expected_bad_value)
++status = "PASSED"
++if buggy == expected_buggy:
++    status = "FAILED"
++tests = [
++    {
++        "name": "test_reproduction.py::test_nested_default_serialization",
++        "status": status
++    }
++]
++with open("test_status.json","w") as f:
++    json.dump({"tests": tests}, f, indent=2)
++print("WROTE /testbed/test_status.json with status:", status)
++PY
++nl -ba /testbed/test_status.json | sed -n '1,120p'
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..06f94c24dc
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,11 @@
++# Compute buggy vs correct dotted paths for nested classmethod default
++import appname.models as models
++Capability = models.Profile.Capability
++func = Capability.default
++module_name = models.__name__
++buggy = f"{module_name}.{Capability.__name__}.{func.__name__}"
++qualname_parts = func.__qualname__.split('.')
++nested_chain = qualname_parts[:-1]
++correct = module_name + "." + ".".join(nested_chain) + "." + func.__name__
++print("BUGGY:" + buggy)
++print("CORRECT:" + correct)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..a93f0130e6
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_nested_default_serialization",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

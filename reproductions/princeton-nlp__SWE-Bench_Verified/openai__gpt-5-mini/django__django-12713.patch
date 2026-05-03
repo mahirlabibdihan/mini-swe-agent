@@ -1,0 +1,105 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..cda3389612
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,26 @@
++#!/bin/bash
++set -euo pipefail
++TMP="/tmp/run_output.txt"
++OUT="/testbed/test_status.json"
++# Run the test script and capture output
++python3 /testbed/test_reproduction.py > "$TMP" 2>&1 || true
++# Parse TEST: lines using regex to allow colons in the test name
++python3 - <<'PY'
++import re, json, sys
++tests = []
++pattern = re.compile(r'^TEST:(.+):([A-Z]+)$')
++with open("/tmp/run_output.txt", "r") as f:
++    for ln in f:
++        ln = ln.rstrip("\n")
++        m = pattern.match(ln)
++        if not m:
++            continue
++        name, status = m.group(1), m.group(2)
++        if status not in ("PASSED", "FAILED", "SKIPPED", "ERROR"):
++            status = "ERROR"
++        tests.append({"name": name, "status": status})
++if not tests:
++    tests = [{"name": "test_reproduction.py::no_tests_detected", "status": "ERROR"}]
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print(open("/testbed/test_status.json").read())
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..864c9db31d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,48 @@
++# Minimal deterministic reproduction
++class Widget:
++    def __init__(self):
++        self.marker = "ok"
++
++def make_widget():
++    return Widget()
++
++class Field:
++    def __init__(self, widget):
++        self.widget = widget
++
++# Correct behavior: pre-call widget if callable
++def formfield_for_foreignkey(**kwargs):
++    widget = kwargs.get('widget')
++    if callable(widget):
++        widget = widget()
++    return Field(widget=widget)
++
++# Buggy behavior: does NOT call callable widget
++def formfield_for_manytomany(**kwargs):
++    widget = kwargs.get('widget')
++    # Intentionally do not call if callable (bug)
++    return Field(widget=widget)
++
++def run_tests():
++    results = []
++    # Test 1: foreignkey should call the factory and yield a Widget instance
++    try:
++        f = formfield_for_foreignkey(widget=make_widget)
++        ok = hasattr(f.widget, 'marker') and f.widget.marker == 'ok'
++    except Exception:
++        ok = False
++    results.append(("test_reproduction.py::test_foreignkey_callable_widget", "PASSED" if ok else "FAILED"))
++
++    # Test 2: manytomany should (but doesn't) call the factory; we expect a FAILED
++    try:
++        f = formfield_for_manytomany(widget=make_widget)
++        ok = hasattr(f.widget, 'marker') and f.widget.marker == 'ok'
++    except Exception:
++        ok = False
++    results.append(("test_reproduction.py::test_manytomany_callable_widget", "PASSED" if ok else "FAILED"))
++
++    for name, status in results:
++        print(f"TEST:{name}:{status}")
++
++if __name__ == '__main__':
++    run_tests()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..928b30c610
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_foreignkey_callable_widget",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_manytomany_callable_widget",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

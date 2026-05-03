@@ -1,0 +1,91 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..0959f3be09
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++set -uo pipefail
++# allow the inner test to fail without causing this script to fail
++set +e
++
++# Create the reproducible Python test file
++cat > test_repro.py <<'PY'
++from sympy import exp
++from sympy.physics import units
++from sympy.physics.units.systems.si import SI
++import traceback, sys
++
++try:
++    expr = units.second / (units.ohm * units.farad)
++    dim = SI._collect_factor_and_dimension(expr)[1]
++    print("Computed dim:", dim)
++    print("is_dimensionless:", SI.get_dimension_system().is_dimensionless(dim))
++    buggy_expr = 100 + exp(expr)
++    print("Calling SI._collect_factor_and_dimension on buggy_expr:", buggy_expr)
++    SI._collect_factor_and_dimension(buggy_expr)
++    print("No exception raised (unexpected).")
++    sys.exit(0)
++except Exception:
++    print("Exception raised as expected:")
++    traceback.print_exc()
++    sys.exit(2)
++PY
++
++# Ensure sympy is installed (non-interactively)
++(pip3 install sympy -q || pip install sympy -q) >/dev/null 2>&1 || true
++
++# Run the test and capture output
++out=$(python3 test_repro.py 2>&1)
++rc=$?
++
++# Determine status
++if [ $rc -eq 0 ]; then status="PASSED"; else status="FAILED"; fi
++
++# Write test status JSON
++mkdir -p /testbed
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "test_repro.py::test_collect_factor_dimension", "status": "$status"}]}
++JSON
++
++# Print output for visibility
++echo "$out"
++echo "PYTHON_EXIT_CODE:$rc"
++
++# Print the created test status file
++nl -ba /testbed/test_status.json
++
++# Exit 0 so the runner treats run_test.sh as executed successfully
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..4217d20905
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,19 @@
++from sympy import exp
++from sympy.physics import units
++from sympy.physics.units.systems.si import SI
++import traceback, sys
++
++try:
++    expr = units.second / (units.ohm * units.farad)
++    dim = SI._collect_factor_and_dimension(expr)[1]
++    print("Computed dim:", dim)
++    print("is_dimensionless:", SI.get_dimension_system().is_dimensionless(dim))
++    buggy_expr = 100 + exp(expr)
++    print("Calling SI._collect_factor_and_dimension on buggy_expr:", buggy_expr)
++    SI._collect_factor_and_dimension(buggy_expr)
++    print("No exception raised (unexpected).")
++    sys.exit(0)
++except Exception:
++    print("Exception raised as expected:")
++    traceback.print_exc()
++    sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..2eaa65c95b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_repro.py::test_collect_factor_dimension", "status": "FAILED"}]}

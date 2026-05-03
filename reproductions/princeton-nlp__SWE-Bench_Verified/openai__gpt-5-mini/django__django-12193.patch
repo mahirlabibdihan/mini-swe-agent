@@ -1,0 +1,124 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..af232aced3
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,29 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Ensure Django is available (non-fatal if already installed)
++pip3 install -q 'Django>=2.2' || true
++
++# Run the reproduction script and capture output and exit code
++rc=0
++output=$(python3 /testbed/test_reproduction.py 2>&1) || rc=$?
++rc=${rc:-0}
++
++# Map rc to status
++if [ "$rc" -eq 0 ]; then
++  status="PASSED"
++elif [ "$rc" -eq 1 ]; then
++  status="FAILED"
++else
++  status="ERROR"
++fi
++
++# Write the required /testbed/test_status.json based on actual result
++printf '%s\n' "{\"tests\":[{\"name\":\"testbed/test_reproduction.py::test_shared_attrs_checkbox_mutation\",\"status\":\"$status\"}]}" > /testbed/test_status.json
++
++# Print the test output and indicate the written status
++echo "=== test output ==="
++echo "$output"
++echo "=== wrote /testbed/test_status.json with status=$status ==="
++
++# Exit 0 so the runner treats this as successfully executed; test result is recorded in JSON
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..3541857a9b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,30 @@
++# Reproduction script for CheckboxInput attrs mutation bug
++from django.forms.widgets import CheckboxInput
++import json, sys
++
++def run_test():
++    attrs = {}  # shared attrs dict as SplitArrayField would pass
++    widget = CheckboxInput()
++    ctx1 = widget.get_context('cb_0', True, attrs)
++    ctx2 = widget.get_context('cb_1', False, attrs)
++
++    second_has_checked = ctx2.get('widget', {}).get('attrs', {}).get('checked', False) is True
++    shared_checked = attrs.get('checked', False) is True
++
++    result = {
++        "ctx1_widget_attrs": ctx1.get('widget', {}).get('attrs', {}),
++        "ctx2_widget_attrs": ctx2.get('widget', {}).get('attrs', {}),
++        "shared_attrs_after_calls": dict(attrs),
++        "second_has_checked": second_has_checked,
++        "shared_checked": shared_checked
++    }
++
++    print(json.dumps(result))
++    # Exit 1 if bug reproduced (second or shared attrs indicate checked), else 0
++    if second_has_checked or shared_checked:
++        sys.exit(1)
++    else:
++        sys.exit(0)
++
++if __name__ == '__main__':
++    run_test()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..7773095a31
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"testbed/test_reproduction.py::test_shared_attrs_checkbox_mutation","status":"FAILED"}]}
+diff --git a/testbed/test_reproduction.py b/testbed/test_reproduction.py
+new file mode 100644
+index 0000000000..92e016b996
+--- /dev/null
++++ b/testbed/test_reproduction.py
+@@ -0,0 +1,40 @@
++# Reproduction script for CheckboxInput attrs mutation bug
++from django.forms.widgets import CheckboxInput
++import json, sys
++
++def run_test():
++    attrs = {}  # shared attrs dict as SplitArrayField would pass
++    widget = CheckboxInput()
++    ctx1 = widget.get_context('cb_0', True, attrs)
++    # After first True, CheckboxInput may set attrs['checked'] = True
++    ctx2 = widget.get_context('cb_1', False, attrs)
++    # Check whether the second context or the shared attrs contain checked True
++    second_has_checked = False
++    # Check in returned context widget attrs if present
++    try:
++        second_has_checked = ctx2.get('widget', {}).get('attrs', {}).get('checked', False) is True
++    except Exception:
++        second_has_checked = False
++    # Also check the shared attrs dict itself
++    shared_checked = attrs.get('checked', False) is True
++
++    result = {
++        "ctx1_widget_attrs": ctx1.get('widget', {}).get('attrs', {}),
++        "ctx2_widget_attrs": ctx2.get('widget', {}).get('attrs', {}),
++        "shared_attrs_after_calls": dict(attrs),
++        "second_has_checked": second_has_checked,
++        "shared_checked": shared_checked
++    }
++
++    # Print machine-readable JSON for the runner to parse
++    print(json.dumps(result))
++
++    # Exit code 0 means no bug detected; non-zero indicates bug detected
++    if second_has_checked or shared_checked:
++        # Bug reproduced: second widget ended up checked despite False value
++        sys.exit(1)
++    else:
++        sys.exit(0)
++
++if __name__ == '__main__':
++    run_test()

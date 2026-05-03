@@ -1,0 +1,125 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..f9bccb55a8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,24 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++python3 /testbed/test_repro.py > /testbed/test_repro.out 2>&1 || true
++OUTPUT=$(cat /testbed/test_repro.out || true)
++
++python3 - <<'PY2' "$OUTPUT"
++import sys, json
++out = sys.argv[1] if len(sys.argv) > 1 else ''
++status = 'PASSED'
++if 'TRACEBACK_OCCURRED' in out or 'Traceback' in out:
++    status = 'ERROR'
++elif 'DETECTION: BUG_PRESENT' in out or 'BUG_REPRODUCED' in out:
++    status = 'FAILED'
++data = {'tests': [{'name': 'testbed/repro/test_clear_denoms.py::test_bad_poly', 'status': status}]}
++with open('/testbed/test_status.json', 'w') as f:
++    json.dump(data, f, indent=2)
++print(out)
++print()
++print('--- /testbed/test_status.json ---')
++print(json.dumps(data, indent=2))
++PY2
++
++echo "Runner completed"
+diff --git a/test_repro.out b/test_repro.out
+new file mode 100644
+index 0000000000..791ec506fc
+--- /dev/null
++++ b/test_repro.out
+@@ -0,0 +1,8 @@
++COEFFICIENT: 217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)
++BAD_POLY_REPR: Poly(0, x, domain='EX')
++BAD_POLY.REP: DMP([EX(0)], EX, None)
++bad_poly.as_expr(): 0
++bad_poly.is_zero: False
++BUG_REPRODUCED
++terms_gcd_exception: IndexError('tuple index out of range')
++DETECTION: BUG_PRESENT
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100755
+index 0000000000..92fe9c8de3
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,60 @@
++#!/usr/bin/env python3
++import sys
++try:
++    from sympy import symbols, Poly, sympify
++except Exception as e:
++    print("IMPORT_ERROR", e)
++    raise
++x = symbols("x")
++s = ("-117968192370600*18**(1/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + "
++     "2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) - "
++     "15720318185*2**(2/3)*3**(1/3)*(24201 + 253*sqrt(9165))**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) + "
++     "15720318185*12**(1/3)*(24201 + 253*sqrt(9165))**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) + "
++     "117968192370600*2**(1/3)*3**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3))")
++try:
++    f = Poly(sympify(s), x)
++    coeff, bad_poly = f.clear_denoms()
++    print("COEFFICIENT:", coeff)
++    print("BAD_POLY_REPR:", bad_poly)
++    try:
++        rep = getattr(bad_poly, "rep", None)
++        print("BAD_POLY.REP:", repr(rep))
++    except Exception as e:
++        print("REP_INSPECTION_ERROR:", e)
++    try:
++        as_expr = bad_poly.as_expr()
++    except Exception as e:
++        as_expr = "AS_EXPR_ERROR: " + repr(e)
++    try:
++        is_zero = bad_poly.is_zero
++    except Exception as e:
++        is_zero = "IS_ZERO_ERROR: " + repr(e)
++    print("bad_poly.as_expr():", as_expr)
++    print("bad_poly.is_zero:", is_zero)
++    rep_text = repr(rep) if rep is not None else ""
++    bug_detected = False
++    try:
++        expr_is_zero = (as_expr == 0) or (str(as_expr) == "0")
++    except Exception:
++        expr_is_zero = False
++    if expr_is_zero and is_zero is False and ("DMP" in rep_text and "0" in rep_text):
++        print("BUG_REPRODUCED")
++        bug_detected = True
++    terms_gcd_error = None
++    try:
++        tg = bad_poly.terms_gcd()
++        print("terms_gcd_result:", tg)
++    except Exception as e:
++        terms_gcd_error = repr(e)
++        print("terms_gcd_exception:", terms_gcd_error)
++    if bug_detected or (terms_gcd_error and ("IndexError" in terms_gcd_error or "ZeroDivisionError" in terms_gcd_error)):
++        print("DETECTION: BUG_PRESENT")
++        sys.exit(0)
++    else:
++        print("DETECTION: NO_BUG")
++        sys.exit(0)
++except Exception as e:
++    import traceback
++    traceback.print_exc()
++    print("TRACEBACK_OCCURRED")
++    sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..5b7259700f
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/repro/test_clear_denoms.py::test_bad_poly",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

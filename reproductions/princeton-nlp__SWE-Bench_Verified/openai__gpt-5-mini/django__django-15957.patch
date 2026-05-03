@@ -1,0 +1,200 @@
+diff --git a/run_and_test.sh b/run_and_test.sh
+new file mode 100644
+index 0000000000..27433b7f40
+--- /dev/null
++++ b/run_and_test.sh
+@@ -0,0 +1,89 @@
++#!/bin/bash
++set -euo pipefail
++# Install Django
++pip install -q Django
++
++# Prepare testapp
++mkdir -p /testbed/testapp
++cat > /testbed/testapp/__init__.py <<'PY'
++# testapp package
++PY
++
++cat > /testbed/testapp/models.py <<'PY'
++from django.db import models
++
++class Category(models.Model):
++    name = models.CharField(max_length=100)
++
++class Post(models.Model):
++    title = models.CharField(max_length=100)
++    category = models.ForeignKey(Category, on_delete=models.CASCADE)
++PY
++
++# Reproduction script that triggers Prefetch with a sliced queryset
++cat > /testbed/test_reproduction.py <<'PY'
++#!/usr/bin/env python3
++import traceback, sys
++try:
++    from django.conf import settings
++    import django
++    settings.configure(
++        DEBUG=True,
++        SECRET_KEY='test',
++        INSTALLED_APPS=['testapp'],
++        DATABASES={'default': {'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++        MIDDLEWARE=[],
++    )
++    django.setup()
++    from testapp.models import Category, Post
++    from django.db import connection
++    # Create DB tables without migrations
++    with connection.schema_editor() as editor:
++        editor.create_model(Category)
++        editor.create_model(Post)
++    # Create sample data
++    c1 = Category.objects.create(name='c1')
++    c2 = Category.objects.create(name='c2')
++    for i in range(5):
++        Post.objects.create(title=f'p{i}', category=c1)
++    for i in range(2):
++        Post.objects.create(title=f'q{i}', category=c2)
++    # Attempt the problematic Prefetch with a sliced queryset
++    from django.db.models import Prefetch
++    qs = Category.objects.prefetch_related(Prefetch('post_set', queryset=Post.objects.all()[:3], to_attr='example_posts'))
++    # Force evaluation
++    list(qs)
++    print("NO_EXCEPTION")
++except Exception:
++    print("EXCEPTION")
++    traceback.print_exc()
++    sys.exit(1)
++PY
++
++# run_test.sh: executes the reproduction and writes test_status.json
++cat > /testbed/run_test.sh <<'PY'
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "----- EXECUTION OUTPUT -----"
++echo "$output"
++status="PASSED"
++# If we see the specific AssertionError message, mark as FAILED
++if echo "$output" | grep -q "Cannot filter a query once a slice has been taken"; then
++  status="FAILED"
++# If execution exited with exception but different message, mark as ERROR
++elif echo "$output" | grep -q "EXCEPTION"; then
++  status="ERROR"
++fi
++python3 - <<PYCODE
++import json
++from pathlib import Path
++tests = [{"name": "test_reproduction.py::test_prefetch_with_slice", "status": "$status"}]
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print("/testbed/test_status.json written with status:", "$status")
++PYCODE
++PY
++
++chmod +x /testbed/run_test.sh
++bash /testbed/run_test.sh
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..08f16db17e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "----- EXECUTION OUTPUT -----"
++echo "$output"
++status="PASSED"
++if echo "$output" | grep -q "Cannot filter a query once a slice has been taken"; then
++  status="FAILED"
++elif echo "$output" | grep -q "EXCEPTION"; then
++  status="ERROR"
++fi
++python3 - <<PY
++import json
++from pathlib import Path
++tests = [{"name": "test_reproduction.py::test_prefetch_with_slice", "status": "$status"}]
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print("/testbed/test_status.json written with status:", "$status")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100755
+index 0000000000..4752f03625
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,37 @@
++
++#!/usr/bin/env python3
++import traceback, sys
++try:
++    from django.conf import settings
++    import django
++    settings.configure(
++        DEBUG=True,
++        SECRET_KEY='test',
++        INSTALLED_APPS=['testapp'],
++        DATABASES={'default': {'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++        MIDDLEWARE=[],
++    )
++    django.setup()
++    from testapp.models import Category, Post
++    from django.db import connection
++    # Create DB tables without migrations
++    with connection.schema_editor() as editor:
++        editor.create_model(Category)
++        editor.create_model(Post)
++    # Create sample data
++    c1 = Category.objects.create(name='c1')
++    c2 = Category.objects.create(name='c2')
++    for i in range(5):
++        Post.objects.create(title=f'p{i}', category=c1)
++    for i in range(2):
++        Post.objects.create(title=f'q{i}', category=c2)
++    # Attempt the problematic Prefetch with a sliced queryset
++    from django.db.models import Prefetch
++    qs = Category.objects.prefetch_related(Prefetch('post_set', queryset=Post.objects.all()[:3], to_attr='example_posts'))
++    # Force evaluation
++    list(qs)
++    print("NO_EXCEPTION")
++except Exception:
++    print("EXCEPTION")
++    traceback.print_exc()
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..590f86d36e
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_prefetch_with_slice",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..b3cf674c80
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,9 @@
++
++from django.db import models
++
++class Category(models.Model):
++    name = models.CharField(max_length=100)
++
++class Post(models.Model):
++    title = models.CharField(max_length=100)
++    category = models.ForeignKey(Category, on_delete=models.CASCADE)

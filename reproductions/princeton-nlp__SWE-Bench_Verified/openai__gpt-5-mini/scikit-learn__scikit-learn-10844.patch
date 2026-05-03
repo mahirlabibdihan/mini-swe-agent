@@ -1,0 +1,119 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..5af8ff004
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,62 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the Python reproduction script that triggers int32 overflow to negative
++cat > /testbed/test_repro.py <<'PY'
++import numpy as np
++import warnings
++
++# Choose values that produce a negative int32 product (overflow wrap)
++pk = np.array(50000, dtype=np.int32)
++qk = np.array(50000, dtype=np.int32)
++tk = np.array(1, dtype=np.int32)
++
++print("Types:", pk.dtype, qk.dtype, tk.dtype)
++with warnings.catch_warnings(record=True) as w:
++    warnings.simplefilter("always")
++    try:
++        # Original problematic expression from PR:
++        res = tk / np.sqrt(pk * qk)
++    except Exception as e:
++        print("EXCEPTION:", repr(e))
++        res = None
++    recorded = list(w)
++
++print("pk * qk (raw):", pk * qk)
++print("result (original):", res)
++if recorded:
++    for i, rw in enumerate(recorded, 1):
++        print(f"warning[{i}]:", rw.category.__name__, rw.message)
++else:
++    print("warning: none")
++
++# Alternative safe computation (using float to avoid integer overflow)
++res_alt = (np.sqrt(tk.astype(float) / pk.astype(float)) * np.sqrt(tk.astype(float) / qk.astype(float)))
++print("result (alternative safe):", res_alt)
++PY
++
++# Run the reproduction script and capture output
++output="$(python /testbed/test_repro.py 2>&1 || true)"
++printf "%s\n" "$output"
++
++# Determine test status: FAIL if a warning and original result is nan/inf
++status="PASSED"
++lower_out="$(printf '%s' "$output" | tr '[:upper:]' '[:lower:]')"
++if printf '%s' "$lower_out" | grep -q "warning" || printf '%s' "$lower_out" | grep -q "runtimewarning"; then
++  if printf '%s' "$lower_out" | grep -q "result (original): *nan" || printf '%s' "$lower_out" | grep -q "result (original): *inf"; then
++    status="FAILED"
++  else
++    status="FAILED"
++  fi
++fi
++
++# Write the test_status.json based on actual run
++python - <<PY "$output" "$status"
++import json, sys, pathlib
++out = sys.argv[1]
++status = sys.argv[2]
++tests = [{"name": "testbed/test_repro.py::test_overflow_int32", "status": status}]
++p = pathlib.Path("/testbed/test_status.json")
++p.write_text(json.dumps({"tests": tests}, indent=2))
++print("Wrote /testbed/test_status.json with status:", status)
++PY
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..6ca798780
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,30 @@
++import numpy as np
++import warnings
++
++# Choose values that produce a negative int32 product (overflow wrap)
++pk = np.array(50000, dtype=np.int32)
++qk = np.array(50000, dtype=np.int32)
++tk = np.array(1, dtype=np.int32)
++
++print("Types:", pk.dtype, qk.dtype, tk.dtype)
++with warnings.catch_warnings(record=True) as w:
++    warnings.simplefilter("always")
++    try:
++        # Original problematic expression from PR:
++        res = tk / np.sqrt(pk * qk)
++    except Exception as e:
++        print("EXCEPTION:", repr(e))
++        res = None
++    recorded = list(w)
++
++print("pk * qk (raw):", pk * qk)
++print("result (original):", res)
++if recorded:
++    for i, rw in enumerate(recorded, 1):
++        print(f"warning[{i}]:", rw.category.__name__, rw.message)
++else:
++    print("warning: none")
++
++# Alternative safe computation (using float to avoid integer overflow)
++res_alt = (np.sqrt(tk.astype(float) / pk.astype(float)) * np.sqrt(tk.astype(float) / qk.astype(float)))
++print("result (alternative safe):", res_alt)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..bedd46cd8
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_repro.py::test_overflow_int32",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

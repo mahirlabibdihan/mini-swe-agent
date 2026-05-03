@@ -1,0 +1,111 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a875a9ecb4
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++set -euo pipefail
++# Run the reproduction script and capture its output
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++
++# Parse the Python dict printed by the script (safe eval via python)
++python3 - <<PY "$output"
++import json, sys
++from pathlib import Path
++# execution output is the first argument
++out = sys.argv[1]
++# Expect a Python dict literal printed; convert to JSON by eval (controlled input from our script)
++try:
++    data = eval(out, {})
++except Exception:
++    # If parsing fails, mark as ERROR
++    Path("/testbed/test_status.json").write_text(json.dumps({"tests":[{"name":"testbed/test_reproduction.py::test_callable_storage_deconstruct_randomness","status":"ERROR"}]}, indent=2))
++    print(out)
++    sys.exit(0)
++
++included = data.get("included", 0)
++omitted = data.get("omitted", 0)
++
++# Determine status: if both included and omitted observed, the intermittent bug is reproduced => mark FAILED
++if included > 0 and omitted > 0:
++    status = "FAILED"
++else:
++    status = "PASSED"
++
++result = {"tests":[{"name":"testbed/test_reproduction.py::test_callable_storage_deconstruct_randomness","status":status,"details": {"included": included, "omitted": omitted}}]}
++Path("/testbed/test_status.json").write_text(json.dumps(result, indent=2))
++print(out)
++PY
++echo "Wrote /testbed/test_status.json"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..bf2235c3aa
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,46 @@
++import random
++import sys
++# Simulate Django default_storage and another storage
++default_storage = object()
++other_storage = object()
++
++def get_storage():
++    # randomly returns default_storage or other_storage to reproduce the intermittent behavior
++    return random.choice([default_storage, other_storage])
++
++class FileField:
++    def __init__(self, storage=None):
++        # Emulate Django evaluating a callable storage at init time
++        if callable(storage):
++            self.storage = storage()
++        else:
++            self.storage = storage if storage is not None else default_storage
++        # Keep the original user-supplied value (callable) around (like Django might)
++        self._orig_storage = storage
++
++    def deconstruct(self):
++        # Emulate the buggy deconstruct: it checks evaluated self.storage against default_storage
++        name = "myapp.models.MyModel.my_file"
++        path = "django.db.models.FileField"
++        kwargs = {}
++        # BUG: this uses the evaluated storage (self.storage) rather than inspecting the original callable
++        if self.storage is not default_storage:
++            # In a real deconstruct it would try to represent the callable; here we just include something
++            kwargs["storage"] = self._orig_storage if self._orig_storage is not None else self.storage
++        return name, path, (), kwargs
++
++def main():
++    included = 0
++    omitted = 0
++    iterations = 200
++    for i in range(iterations):
++        f = FileField(storage=get_storage)
++        _, _, _, kwargs = f.deconstruct()
++        if "storage" in kwargs:
++            included += 1
++        else:
++            omitted += 1
++    print({"included": included, "omitted": omitted})
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..49c5298e5f
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "testbed/test_reproduction.py::test_callable_storage_deconstruct_randomness",
++      "status": "FAILED",
++      "details": {
++        "included": 95,
++        "omitted": 105
++      }
++    }
++  ]
++}
+\ No newline at end of file

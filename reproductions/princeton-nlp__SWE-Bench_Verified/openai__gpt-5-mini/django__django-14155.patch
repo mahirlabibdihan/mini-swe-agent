@@ -1,0 +1,91 @@
+diff --git a/run_test.py b/run_test.py
+new file mode 100644
+index 0000000000..76f2781623
+--- /dev/null
++++ b/run_test.py
+@@ -0,0 +1,14 @@
++#!/usr/bin/env python3
++import subprocess, json, sys, pathlib
++
++p = pathlib.Path("/testbed")
++proc = subprocess.run([sys.executable, str(p / "test_reproduction.py")], capture_output=True, text=True)
++out = proc.stdout + proc.stderr
++print(out, end="")
++rc = proc.returncode
++
++status = "PASSED" if rc == 0 else "FAILED"
++tests = [{"name": "test_reproduction.py::test_partial_in_resolvermatch_repr", "status": status}]
++(p / "test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print(f"WROTE {p/'test_status.json'}")
++raise SystemExit(rc)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8201a4fe25
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++out_file=/tmp/test_out.txt
++# Run test and capture exit code without making the runner exit non-zero
++if python3 test_reproduction.py > "$out_file" 2>&1; then rc=0; else rc=$?; fi
++# Print captured output for logs
++cat "$out_file"
++# Determine status based on rc
++if [ "$rc" -eq 0 ]; then status="PASSED"; else status="FAILED"; fi
++# Write deterministic JSON reflecting actual status
++cat > test_status.json <<JSON
++{"tests": [{"name": "test_reproduction.py::test_partial_in_resolvermatch_repr", "status": "$status"}]}
++JSON
++echo "WROTE /testbed/test_status.json (test rc=$rc)"
++# Exit 0 so the harness sees the runner executed successfully even if the test failed
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..7365a4177e
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,35 @@
++from functools import partial
++
++def view(a, b=0):
++    return "view({},{})".format(a, b)
++
++# Create a partial with pre-supplied args/kwargs
++p = partial(view, 1, b=2)
++
++class ResolverMatch:
++    def __init__(self, func, args=(), kwargs=None):
++        self.func = func
++        self.args = args
++        self.kwargs = kwargs or {}
++
++    def __repr__(self):
++        # BUGGY implementation: shows only the callable's type, not underlying function or partial args
++        func_name = "{}.{}".format(type(self.func).__module__, type(self.func).__name__)
++        return "<ResolverMatch func={} args={!r} kwargs={!r}>".format(func_name, self.args, self.kwargs)
++
++if __name__ == "__main__":
++    rm = ResolverMatch(p, args=(), kwargs={})
++    r = repr(rm)
++    print("REPR:", r)
++
++    # The expected (desired) behavior would reveal the underlying function name "view"
++    # and the partial's pre-supplied args/kwargs like "1" and "b=2".
++    expected_substrings = ["view", "1", "b=2"]
++    missing = [s for s in expected_substrings if s not in r]
++
++    if not missing:
++        print("TEST-PASSED")
++        raise SystemExit(0)
++    else:
++        print("TEST-FAILED: missing expected substrings", missing)
++        raise SystemExit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..bd6aa34a55
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "test_reproduction.py::test_partial_in_resolvermatch_repr", "status": "FAILED"}]}

@@ -1,0 +1,73 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..9a260116e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,21 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++if echo "$output" | grep -q "REPRODUCED"; then
++  status_repro="PASSED"
++  status_expected_fix="FAILED"
++else
++  status_repro="FAILED"
++  status_expected_fix="PASSED"
++fi
++mkdir -p /testbed
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {"name":"test_reproduction.py::test_evalf_implemented_function_reproduced","status":"$status_repro"},
++    {"name":"test_reproduction.py::test_evalf_implemented_function_fixed","status":"$status_expected_fix"}
++  ]
++}
++JSON
++echo "/testbed/test_status.json written with statuses: reproduced=$status_repro, fixed=$status_expected_fix"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..e52532e2b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,21 @@
++import sys
++from sympy.utilities.lambdify import implemented_function
++
++f = implemented_function('f', lambda x: x ** 2)
++g = implemented_function('g', lambda x: 2 * x)
++
++a = f(2).evalf()
++b = g(2).evalf()
++c = f(g(2)).evalf()
++
++print("a:", a)
++print("b:", b)
++print("c:", c)
++
++reproduced = (str(a).startswith('4') and str(b).startswith('4') and str(c) == 'f(g(2))')
++
++if reproduced:
++    print("REPRODUCED")
++else:
++    print("NOT_REPRODUCED")
++    print("types:", type(a), type(b), type(c), "repr(c):", repr(c))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..8bb6694b6
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_evalf_implemented_function_reproduced",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_evalf_implemented_function_fixed",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

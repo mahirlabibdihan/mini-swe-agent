@@ -1,0 +1,127 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 000000000..9c5a011cd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,64 @@
++#!/bin/bash
++set -euo pipefail
++
++mkdir -p /testbed
++
++# Write the MRT input file
++cat > /testbed/tab.txt <<'TXT'
++Title:
++Authors:
++Table:
++================================================================================
++Byte-by-byte Description of file: tab.txt
++--------------------------------------------------------------------------------
++   Bytes Format Units          		Label      Explanations
++--------------------------------------------------------------------------------
++   1- 10 A10    ---            		ID         ID
++  12- 21 F10.5  10+3J/m/s/kpc2    	SBCONT     Cont surface brightness
++  23- 32 F10.5  10-7J/m/kpc2 		SBLINE     Line surface brightness
++--------------------------------------------------------------------------------
++ID0001     70.99200   38.51040      
++ID0001     13.05120   28.19240      
++ID0001     3.83610    10.98370      
++ID0001     1.99101    6.78822       
++ID0001     1.31142    5.01932      
++TXT
++
++# Write the Python reproduction script
++cat > /testbed/test_repro.py <<'PY'
++from astropy.table import Table
++
++def main():
++    path = '/testbed/tab.txt'
++    t = Table.read(path, format='ascii.cds')
++    print(t)
++    for name in ['SBCONT', 'SBLINE']:
++        col = t[name]
++        unit = getattr(col, 'unit', None)
++        print(f"{name} unit: {unit!r}")
++
++if __name__ == '__main__':
++    main()
++PY
++
++# Install the astropy version reported in the issue
++python -m pip install --no-cache-dir astropy==5.2.1
++
++# Run the reproduction script and capture output
++python /testbed/test_repro.py > /testbed/run_output.txt 2>&1 || true
++
++# Analyze output and write the required JSON result
++python - <<'PY2'
++import re, json, pathlib
++s = open('/testbed/run_output.txt').read()
++print(s)
++m1 = re.search(r"^SBCONT unit:\s*(.*)$", s, flags=re.M)
++m2 = re.search(r"^SBLINE unit:\s*(.*)$", s, flags=re.M)
++u1 = m1.group(1) if m1 else None
++u2 = m2.group(1) if m2 else None
++expected1 = "'10+3J/m/s/kpc2'"
++expected2 = "'10-7J/m/kpc2'"
++status = 'PASSED' if (u1 == expected1 and u2 == expected2) else 'FAILED'
++pathlib.Path('/testbed/test_status.json').write_text(json.dumps({'tests':[{'name':'test_reproduce_mrt_cds_units','status':status}]}, indent=2))
++print("\\nWROTE /testbed/test_status.json with status:", status)
++PY2
+diff --git a/tab.txt b/tab.txt
+new file mode 100644
+index 000000000..679e03a8c
+--- /dev/null
++++ b/tab.txt
+@@ -0,0 +1,17 @@
++Title:
++Authors:
++Table:
++================================================================================
++Byte-by-byte Description of file: tab.txt
++--------------------------------------------------------------------------------
++   Bytes Format Units          		Label      Explanations
++--------------------------------------------------------------------------------
++   1- 10 A10    ---            		ID         ID
++  12- 21 F10.5  10+3J/m/s/kpc2    	SBCONT     Cont surface brightness
++  23- 32 F10.5  10-7J/m/kpc2 		SBLINE     Line surface brightness
++--------------------------------------------------------------------------------
++ID0001     70.99200   38.51040      
++ID0001     13.05120   28.19240      
++ID0001     3.83610    10.98370      
++ID0001     1.99101    6.78822       
++ID0001     1.31142    5.01932      
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..82420c00c
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,13 @@
++from astropy.table import Table
++
++def main():
++    path = '/testbed/tab.txt'
++    t = Table.read(path, format='ascii.cds')
++    print(t)
++    for name in ['SBCONT', 'SBLINE']:
++        col = t[name]
++        unit = getattr(col, 'unit', None)
++        print(f"{name} unit: {unit!r}")
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..7215ed1d8
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduce_mrt_cds_units",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

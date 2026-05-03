@@ -1,0 +1,52 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..952296a4
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,24 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++rc=$?
++name="/testbed/test_reproduction.py"
++if printf "%s" "$output" | grep -q "UnicodeError"; then
++  status="FAILED"
++elif printf "%s" "$output" | grep -q "LocationParseError"; then
++  status="FAILED"
++elif printf "%s" "$output" | grep -q "Failed to parse"; then
++  status="FAILED"
++elif printf "%s" "$output" | grep -q "label empty or too long"; then
++  status="FAILED"
++elif printf "%s" "$output" | grep -q -E "InvalidUrl|InvalidURL"; then
++  status="PASSED"
++elif printf "%s" "$output" | grep -q "NO_EXCEPTION"; then
++  status="PASSED"
++else
++  status="ERROR"
++fi
++printf -v json_out "{\"tests\":[{\"name\":\"%s\",\"status\":\"%s\"}]}" "$name" "$status"
++echo "$json_out" > /testbed/test_status.json
++printf "%s\n" "$output"
++exit $rc
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..8ebbc359
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,9 @@
++import requests, traceback, sys
++try:
++    requests.get("http://.example.com")
++    print("NO_EXCEPTION")
++    sys.exit(0)
++except Exception as e:
++    print(type(e).__name__ + ": " + str(e))
++    traceback.print_exc()
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..5c845a3b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"/testbed/test_reproduction.py","status":"FAILED"}]}

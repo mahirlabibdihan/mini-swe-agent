@@ -1,0 +1,127 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a3704731b0
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++status="PASSED"
++if echo "$output" | grep -q "DUPLICATES_FOUND"; then
++  status="FAILED"
++fi
++python3 - <<PY "$output" > /dev/null
++import json, sys
++out = sys.argv[1]
++status = "FAILED" if "DUPLICATES_FOUND" in out else "PASSED"
++data = {"tests": [{"name": "test_reproduction.py::test_limit_choices_to_duplicates", "status": status}]}
++open("test_status.json","w").write(json.dumps(data, indent=2))
++PY
++echo "WROTE /testbed/test_status.json"
++cat test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..29f468bd3b
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,55 @@
++import sys
++from django.conf import settings
++
++settings.configure(
++    DEBUG=True,
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    INSTALLED_APPS=['tests'],
++    SECRET_KEY='testing',
++    DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++)
++
++import django
++django.setup()
++
++from django.db import connection
++from tests.models import Parent, Child, Toy
++# Create tables without migrations
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Parent)
++    schema_editor.create_model(Child)
++    schema_editor.create_model(Toy)
++
++# Create data: Parent A will have two matching Child rows (duplicates on join), Parent B one.
++p1 = Parent.objects.create(name='Parent1')
++p2 = Parent.objects.create(name='Parent2')
++Child.objects.create(name='Charlie', parent=p1)
++Child.objects.create(name='Charlie', parent=p1)  # duplicate matching child for p1
++Child.objects.create(name='Charlie', parent=p2)
++
++from django import forms
++
++class ToyForm(forms.ModelForm):
++    class Meta:
++        model = Toy
++        fields = ['owner']
++
++form = ToyForm()
++choices = form.fields['owner'].choices  # list of (value, label) pairs
++
++# Print choices for manual inspection
++print("CHOICES:", choices)
++
++# Detect duplicates in the values (primary keys)
++from collections import Counter
++vals = [str(v) for v, _ in choices if v is not None]
++counts = Counter(vals)
++duplicates = {k: c for k, c in counts.items() if c > 1}
++
++if duplicates:
++    print("DUPLICATES_FOUND", duplicates)
++    # exit non-zero to indicate failure in some contexts, but we'll keep exit 0 and report via stdout
++    sys.exit(0)
++else:
++    print("NO_DUPLICATES")
++    sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..380aa28b6f
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_limit_choices_to_duplicates",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/tests/__init__.py b/tests/__init__.py
+new file mode 100644
+index 0000000000..c4b3620156
+--- /dev/null
++++ b/tests/__init__.py
+@@ -0,0 +1 @@
++# test app package
+diff --git a/tests/models.py b/tests/models.py
+new file mode 100644
+index 0000000000..7123136848
+--- /dev/null
++++ b/tests/models.py
+@@ -0,0 +1,14 @@
++from django.db import models
++from django.db.models import Q
++
++class Parent(models.Model):
++    name = models.CharField(max_length=50)
++    def __str__(self):
++        return self.name
++
++class Child(models.Model):
++    name = models.CharField(max_length=50)
++    parent = models.ForeignKey(Parent, related_name='children', on_delete=models.CASCADE)
++
++class Toy(models.Model):
++    owner = models.ForeignKey(Parent, limit_choices_to=Q(children__name='Charlie'), on_delete=models.CASCADE)

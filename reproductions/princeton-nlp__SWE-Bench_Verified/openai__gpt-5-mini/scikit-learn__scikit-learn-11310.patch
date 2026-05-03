@@ -1,0 +1,94 @@
+diff --git a/$PYOUT b/$PYOUT
+new file mode 100644
+index 000000000..c61793ba4
+--- /dev/null
++++ b/$PYOUT
+@@ -0,0 +1,5 @@
++ERROR: GridSearchCV has no attribute 'refit_time_'
++Traceback (most recent call last):
++  File "test_reproduction.py", line 20, in <module>
++    raise AssertionError("Missing attribute refit_time_ on GridSearchCV instance")
++AssertionError: Missing attribute refit_time_ on GridSearchCV instance
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..e1e6c5484
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++#!/bin/bash
++# Execute the reproduction test and write /testbed/test_status.json reflecting the actual result.
++set -uo pipefail
++mkdir -p /testbed
++PYOUT=/testbed/test_output.txt
++
++# Run the test and capture exit code (do not exit the script on failure)
++python test_reproduction.py >"$PYOUT" 2>&1
++RC=$?
++
++STATUS="PASSED"
++if [ "$RC" -ne 0 ]; then
++  STATUS="FAILED"
++fi
++
++# Write the required JSON result file
++python - <<PYCODE "$STATUS"
++import json,sys
++status=sys.argv[1]
++data={"tests":[{"name":"test_reproduction.py::test_gridsearch_refit_time","status":status}]}
++open("/testbed/test_status.json","w").write(json.dumps(data,indent=2))
++print(json.dumps(data))
++PYCODE
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 000000000..c61793ba4
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,5 @@
++ERROR: GridSearchCV has no attribute 'refit_time_'
++Traceback (most recent call last):
++  File "test_reproduction.py", line 20, in <module>
++    raise AssertionError("Missing attribute refit_time_ on GridSearchCV instance")
++AssertionError: Missing attribute refit_time_ on GridSearchCV instance
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..00ff398f6
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,22 @@
++import sklearn.datasets
++import sklearn.model_selection
++import sklearn.ensemble
++import sys
++
++X, y = sklearn.datasets.load_iris(return_X_y=True)
++
++rs = sklearn.model_selection.GridSearchCV(
++    estimator=sklearn.ensemble.RandomForestClassifier(),
++    param_grid={'n_estimators': [2, 3]},
++    cv=2,
++    n_jobs=1,
++    refit=True
++)
++rs.fit(X, y)
++
++# Reproduction check: assert presence of refit_time_ attribute
++if not hasattr(rs, "refit_time_"):
++    print("ERROR: GridSearchCV has no attribute 'refit_time_'", file=sys.stderr)
++    raise AssertionError("Missing attribute refit_time_ on GridSearchCV instance")
++else:
++    print("FOUND: refit_time_ =", rs.refit_time_)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..412184076
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_gridsearch_refit_time",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,63 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..4e409e6fe
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -u
++output="$(python3 /testbed/test_repro.py 2>&1 || true)"
++status="FAILED"
++if echo "$output" | grep -qE "ModuleNotFoundError|ImportError"; then
++  status="ERROR"
++elif echo "$output" | grep -q "TypeError" && echo "$output" | grep -qi "store_cv_values"; then
++  # The bug reproduces: record as FAILED
++  status="FAILED"
++elif echo "$output" | grep -q "NO_ERROR"; then
++  # No error => bug fixed => PASSED
++  status="PASSED"
++else
++  status="FAILED"
++fi
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"testbed/test_repro.py::test_store_cv_values_support","status":"$status"}]}
++JSON
++echo "=== CAPTURED OUTPUT ==="
++echo "$output"
++echo "=== WROTE /testbed/test_status.json ==="
++cat /testbed/test_status.json
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..10a8a742f
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,22 @@
++import numpy as np
++try:
++    from sklearn import linear_model as lm
++except Exception as e:
++    print("EXCEPTION_TYPE:", type(e).__name__)
++    print("EXCEPTION_MSG:", str(e))
++    raise
++
++n = 100
++x = np.random.randn(n, 30)
++y = np.random.normal(size = n)
++
++try:
++    rr = lm.RidgeClassifierCV(alphas = np.arange(0.1, 1000, 0.1), normalize = True, 
++                              store_cv_values = True).fit(x, y)
++    print("NO_ERROR: instantiation+succeeded")
++except Exception as e:
++    import traceback
++    print("EXCEPTION_TYPE:", type(e).__name__)
++    print("EXCEPTION_MSG:", str(e))
++    print(traceback.format_exc())
++    raise
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..b4e3f9197
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"testbed/test_repro.py::test_store_cv_values_support","status":"FAILED"}]}

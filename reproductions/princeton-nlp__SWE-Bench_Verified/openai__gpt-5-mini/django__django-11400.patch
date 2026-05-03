@@ -1,0 +1,198 @@
+diff --git a/run_and_test.sh b/run_and_test.sh
+new file mode 100644
+index 0000000000..ba643b8ac3
+--- /dev/null
++++ b/run_and_test.sh
+@@ -0,0 +1,85 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Install specific Django version
++python3 -m pip install "Django==2.2.1" -q
++
++# Write the Python checker that inspects django.contrib.admin.filters
++cat > /testbed/test_reproduction.py <<'PY'
++import inspect, re, sys
++from importlib import import_module
++
++try:
++    filters = import_module('django.contrib.admin.filters')
++except Exception as e:
++    print('IMPORT_ERROR:', e)
++    sys.exit(2)
++
++rflf_src = ''
++roflf_src = ''
++try:
++    rflf_src = inspect.getsource(filters.RelatedFieldListFilter)
++except Exception as e:
++    print('SOURCE_ERROR_RFLF:', e)
++try:
++    roflf_src = inspect.getsource(filters.RelatedOnlyFieldListFilter)
++except Exception as e:
++    print('SOURCE_ERROR_ROFLF:', e)
++
++# Check 1: RelatedFieldListFilter sets ordering to empty tuple/list
++found_ordering_empty = bool(re.search(r'\bordering\s*=\s*\(\s*\)', rflf_src)) or bool(re.search(r'\bordering\s*=\s*\[\s*\]', rflf_src)) or bool(re.search(r'\bordering\s*=\s*tuple\s*\(\s*\)', rflf_src))
++
++# Check 2: RelatedOnlyFieldListFilter calls get_choices without ordering kwarg
++get_choices_calls = re.findall(r'get_choices\s*\((.*?)\)', roflf_src, re.S)
++get_choices_has_ordering = False
++for inside in get_choices_calls:
++    if re.search(r'\bordering\s*=', inside):
++        get_choices_has_ordering = True
++        break
++
++print('RELATEDFIELDLISTFILTER_EMPTY_ORDERING:', found_ordering_empty)
++print('RELATEDONLYFIELDLISTFILTER_GET_CHOICES_HAS_ORDERING:', get_choices_has_ordering)
++PY
++
++# Run the checker and capture output
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++
++rf_line=$(echo "$output" | awk -F': ' '/RELATEDFIELDLISTFILTER_EMPTY_ORDERING:/ {print $2; exit}')
++ro_line=$(echo "$output" | awk -F': ' '/RELATEDONLYFIELDLISTFILTER_GET_CHOICES_HAS_ORDERING:/ {print $2; exit}')
++
++rf_status="ERROR"
++ro_status="ERROR"
++
++if [ "$rf_line" = "True" ]; then
++  # Found empty ordering in RelatedFieldListFilter -> bug reproduced
++  rf_status="FAILED"
++elif [ "$rf_line" = "False" ]; then
++  rf_status="PASSED"
++fi
++
++if [ "$ro_line" = "True" ]; then
++  # get_choices HAS ordering arg -> good behavior
++  ro_status="PASSED"
++elif [ "$ro_line" = "False" ]; then
++  ro_status="FAILED"
++fi
++
++# Write the test_status.json as required
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test_relatedfieldlistfilter_falls_back_to_model_meta_ordering",
++      "status": "$rf_status"
++    },
++    {
++      "name": "test_relatedonlyfieldlistfilter_passes_ordering_to_get_choices",
++      "status": "$ro_status"
++    }
++  ]
++}
++JSON
++
++echo "WROTE /testbed/test_status.json"
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..88cc4ee888
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,41 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++
++rf_line=$(echo "$output" | awk -F': ' '/RELATEDFIELDLISTFILTER_EMPTY_ORDERING:/ {print $2; exit}')
++ro_line=$(echo "$output" | awk -F': ' '/RELATEDONLYFIELDLISTFILTER_GET_CHOICES_HAS_ORDERING:/ {print $2; exit}')
++
++rf_status="ERROR"
++ro_status="ERROR"
++
++if [ "$rf_line" = "True" ]; then
++  rf_status="FAILED"
++elif [ "$rf_line" = "False" ]; then
++  rf_status="PASSED"
++fi
++
++if [ "$ro_line" = "True" ]; then
++  ro_status="PASSED"
++elif [ "$ro_line" = "False" ]; then
++  ro_status="FAILED"
++fi
++
++cat > test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test_relatedfieldlistfilter_falls_back_to_model_meta_ordering",
++      "status": "$rf_status"
++    },
++    {
++      "name": "test_relatedonlyfieldlistfilter_passes_ordering_to_get_choices",
++      "status": "$ro_status"
++    }
++  ]
++}
++JSON
++
++echo "WROTE /testbed/test_status.json"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..0c01ad2390
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,35 @@
++import inspect, re, sys
++from importlib import import_module
++
++try:
++    filters = import_module('django.contrib.admin.filters')
++except Exception as e:
++    print('IMPORT_ERROR:', e)
++    sys.exit(2)
++
++rflf_src = ''
++roflf_src = ''
++try:
++    rflf_src = inspect.getsource(filters.RelatedFieldListFilter)
++except Exception as e:
++    print('SOURCE_ERROR_RFLF:', e)
++try:
++    roflf_src = inspect.getsource(filters.RelatedOnlyFieldListFilter)
++except Exception as e:
++    print('SOURCE_ERROR_ROFLF:', e)
++
++# Check 1: RelatedFieldListFilter sets ordering to empty tuple/list or similar
++found_ordering_empty = bool(re.search(r'\bordering\s*=\s*\(\s*\)', rflf_src)) or \
++                       bool(re.search(r'\bordering\s*=\s*\[\s*\]', rflf_src)) or \
++                       bool(re.search(r'\bordering\s*=\s*tuple\s*\(\s*\)', rflf_src))
++
++# Check 2: RelatedOnlyFieldListFilter calls get_choices without ordering kwarg
++get_choices_calls = re.findall(r'get_choices\s*\((.*?)\)', roflf_src, re.S)
++get_choices_has_ordering = False
++for inside in get_choices_calls:
++    if re.search(r'\bordering\s*=', inside):
++        get_choices_has_ordering = True
++        break
++
++print('RELATEDFIELDLISTFILTER_EMPTY_ORDERING:', found_ordering_empty)
++print('RELATEDONLYFIELDLISTFILTER_GET_CHOICES_HAS_ORDERING:', get_choices_has_ordering)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..3fc9bdf5e2
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_relatedfieldlistfilter_falls_back_to_model_meta_ordering",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_relatedonlyfieldlistfilter_passes_ordering_to_get_choices",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

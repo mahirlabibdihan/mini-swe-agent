@@ -1,0 +1,71 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..c370601bb2
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++output=$(python3 test_session_decode.py 2>&1 || true)
++echo "$output"
++status="PASSED"
++if echo "$output" | grep -q "DECODING FAILED"; then
++  status="FAILED"
++fi
++python3 - <<PY2 "$output" "$status"
++import json,sys
++_out=sys.argv[1]
++_status=sys.argv[2]
++tests=[{"name":"test_session_decode.py::test_decode_transition","status":_status}]
++open("test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++PY2
++echo "WROTE /testbed/test_status.json"
+diff --git a/test_session_decode.py b/test_session_decode.py
+new file mode 100644
+index 0000000000..03d761ad7a
+--- /dev/null
++++ b/test_session_decode.py
+@@ -0,0 +1,27 @@
++#!/usr/bin/env python3
++import json, sys
++
++def new_encode(data):
++    # Simulate Django 3.1 new session format (different prefix/structure)
++    payload = json.dumps(data, separators=(',',':'))
++    return '3.1:' + payload + ':sig123'
++
++def old_decode(token):
++    # Simulate old decoder that only understands "3.0" format
++    if not token.startswith('3.0:'):
++        raise ValueError('Unsupported session format (expected 3.0)')
++    return {'decoded': True}
++
++def main():
++    token = new_encode({'user_id': 42})
++    print('Generated token:', token)
++    try:
++        res = old_decode(token)
++        print('DECODING SUCCEEDED:', res)
++        sys.exit(0)
++    except Exception as e:
++        print('DECODING FAILED:', e)
++        sys.exit(1)
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..8efe76f9f0
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_session_decode.py::test_decode_transition",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

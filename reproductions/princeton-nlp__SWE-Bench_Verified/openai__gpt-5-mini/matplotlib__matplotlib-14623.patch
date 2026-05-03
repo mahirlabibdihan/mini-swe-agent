@@ -1,0 +1,94 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..ac604a7c2
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,27 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++# Print full output for debugging
++echo "$output" >&2
++
++# Parse RESULT lines and build JSON entries
++tests=()
++while IFS= read -r line; do
++  if [[ $line =~ ^RESULT:\ (.+)\ (PASSED|FAILED|SKIPPED|ERROR) ]]; then
++    name=${BASH_REMATCH[1]}
++    status=${BASH_REMATCH[2]}
++    tests+=("{\"name\": \"${name}\", \"status\": \"${status}\"}")
++  fi
++done <<< "$output"
++
++# If no RESULT lines were found, mark overall ERROR
++if [ ${#tests[@]} -eq 0 ]; then
++  tests+=("{\"name\": \"test_reproduction.py::run\",\"status\":\"ERROR\"}")
++fi
++
++# Write the test status JSON to the required path
++printf '{\n  "tests": [\n    %s\n  ]\n}\n' "$(IFS=,\n; echo "${tests[*]}")" > /testbed/test_status.json
++
++# Also print the resulting JSON to stdout
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..dee856812
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,44 @@
++import sys
++import numpy as np
++
++def run_test(yscale):
++    try:
++        import matplotlib
++        matplotlib.use('Agg')
++        import matplotlib.pyplot as plt
++    except Exception as e:
++        print(f"RESULT: test_reproduction.py::test_{yscale}_inversion SKIPPED Matplotlib unavailable: {e}")
++        return None
++
++    y = np.linspace(1000e2, 1, 100)
++    x = np.exp(-np.linspace(0, 1, y.size))
++
++    fig, ax = plt.subplots()
++    ax.plot(x, y)
++    ax.set_yscale(yscale)
++    ax.set_ylim(y.max(), y.min())
++    y0, y1 = ax.get_ylim()
++    inverted = y0 > y1
++    return inverted
++
++def main():
++    try:
++        import matplotlib
++        print("MATPLOTLIB_VERSION:", getattr(matplotlib, "__version__", "unknown"))
++    except Exception:
++        pass
++
++    for scale in ('linear', 'log'):
++        try:
++            res = run_test(scale)
++            if res is None:
++                # SKIPPED already printed inside run_test
++                continue
++            expected = True  # we expect the axis to be inverted after set_ylim(max,min)
++            status = "PASSED" if res == expected else "FAILED"
++            print(f"RESULT: test_reproduction.py::test_{scale}_inversion {status} observed_inverted={res} expected_inverted={expected}")
++        except Exception as e:
++            print(f"RESULT: test_reproduction.py::test_{scale}_inversion ERROR {e}")
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..07ab98311
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,5 @@
++{
++  "tests": [
++    {"name": "test_reproduction.py::test_linear_inversion", "status": "PASSED"},{"name": "test_reproduction.py::test_log_inversion", "status": "FAILED"}
++  ]
++}

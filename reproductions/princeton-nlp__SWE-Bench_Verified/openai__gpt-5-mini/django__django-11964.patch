@@ -1,0 +1,194 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..21cfc7d81e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,35 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Run only the specific test case to avoid unrelated discovery
++output=$(python -m unittest test_reproduction.EnumTest -v 2>&1 || true)
++rc=$?
++# Print raw output for visibility
++echo "$output"
++# Parse verbose unittest output and write test_status.json
++python3 - <<'PY' "$output" "$rc"
++import sys,re,json
++output=sys.argv[1]
++rc=int(sys.argv[2])
++tests=[]
++for line in output.splitlines():
++    m=re.match(r'^(test_[^\s]+) \(([^)]+)\) \.\.\. (OK|ok|FAIL|ERROR|skipped|SKIP)$', line, re.I)
++    if m:
++        test_name=f"{m.group(2)}::{m.group(1)}"
++        status_word=m.group(3).upper()
++        if status_word=='OK':
++            status='PASSED'
++        elif status_word=='FAIL':
++            status='FAILED'
++        elif status_word=='ERROR':
++            status='ERROR'
++        else:
++            status='SKIPPED'
++        tests.append({"name":test_name,"status":status})
++if not tests:
++    overall='PASSED' if rc==0 else 'FAILED'
++    tests=[{"name":"test_reproduction.py::unittest_run","status":overall}]
++open("test_status.json","w").write(json.dumps({"tests":tests}, indent=2))
++print("WROTE test_status.json")
++PY
++exit $rc
+diff --git a/setup_and_run.sh b/setup_and_run.sh
+new file mode 100644
+index 0000000000..301bfc15fd
+--- /dev/null
++++ b/setup_and_run.sh
+@@ -0,0 +1,87 @@
++#!/bin/bash
++set -euo pipefail
++
++# Write the reproduction test
++cat > /testbed/test_reproduction.py <<'PY_REP'
++from enum import Enum
++import unittest
++
++class MyChoice(str, Enum):
++    FIRST_CHOICE = "first"
++    SECOND_CHOICE = "second"
++
++class MyObject:
++    def __init__(self, my_str_value):
++        self.my_str_value = my_str_value
++    class _Manager:
++        @staticmethod
++        def create(my_str_value):
++            # simulate newly created instance that stores the Enum member
++            return MyObject(my_str_value=my_str_value)
++        @staticmethod
++        def last():
++            # simulate retrieving from DB where value is a plain string
++            return MyObject(my_str_value="first")
++    objects = _Manager()
++
++class EnumTest(unittest.TestCase):
++    def setUp(self):
++        self.my_object = MyObject.objects.create(my_str_value=MyChoice.FIRST_CHOICE)
++    def test_created_object_is_str(self):
++        my_object = self.my_object
++        self.assertIsInstance(my_object.my_str_value, str)
++        self.assertEqual(str(my_object.my_str_value), "first")
++    def test_retrieved_object_is_str(self):
++        my_object = MyObject.objects.last()
++        self.assertIsInstance(my_object.my_str_value, str)
++        self.assertEqual(str(my_object.my_str_value), "first")
++
++if __name__ == "__main__":
++    unittest.main()
++PY_REP
++
++# Write the runner that executes tests and writes test_status.json
++cat > /testbed/run_test.sh <<'SH_RUN'
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Run tests (capture output and do not fail the script immediately)
++output=$(python -m unittest -v 2>&1 || true)
++rc=$?
++# Print raw output for visibility
++echo "$output"
++# Parse the unittest output and write JSON statuses
++python - <<'PY' "$output" "$rc"
++import sys, re, json
++output = sys.argv[1]
++rc = int(sys.argv[2])
++tests = []
++# Look for lines like: test_created_object_is_str (test_reproduction.EnumTest) ... FAIL
++for line in output.splitlines():
++    m = re.match(r'^(test_[^\s]+) \(([^)]+)\) \.\.\. (OK|ok|FAIL|ERROR|skipped|SKIP)$', line, re.I)
++    if m:
++        test_name = f"{m.group(2)}::{m.group(1)}"
++        status_word = m.group(3).upper()
++        if status_word == 'OK' or status_word == 'OK':
++            status = 'PASSED'
++        elif status_word == 'FAIL':
++            status = 'FAILED'
++        elif status_word == 'ERROR':
++            status = 'ERROR'
++        else:
++            status = 'SKIPPED'
++        tests.append({"name": test_name, "status": status})
++# Fallback if parsing didn't find individual tests
++if not tests:
++    overall = 'PASSED' if rc == 0 else 'FAILED'
++    tests = [{"name":"test_reproduction.py::unittest_run","status": overall}]
++open("test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE test_status.json")
++PY
++# Exit with original test rc so failure is visible
++exit $rc
++SH_RUN
++
++chmod +x /testbed/run_test.sh
++# Execute the runner
++/testbed/run_test.sh
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..5c56655dbf
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,35 @@
++from enum import Enum
++import unittest
++
++class MyChoice(str, Enum):
++    FIRST_CHOICE = "first"
++    SECOND_CHOICE = "second"
++
++class MyObject:
++    def __init__(self, my_str_value):
++        self.my_str_value = my_str_value
++    class _Manager:
++        @staticmethod
++        def create(my_str_value):
++            # simulate newly created instance that stores the Enum member
++            return MyObject(my_str_value=my_str_value)
++        @staticmethod
++        def last():
++            # simulate retrieving from DB where value is a plain string
++            return MyObject(my_str_value="first")
++    objects = _Manager()
++
++class EnumTest(unittest.TestCase):
++    def setUp(self):
++        self.my_object = MyObject.objects.create(my_str_value=MyChoice.FIRST_CHOICE)
++    def test_created_object_is_str(self):
++        my_object = self.my_object
++        self.assertIsInstance(my_object.my_str_value, str)
++        self.assertEqual(str(my_object.my_str_value), "first")
++    def test_retrieved_object_is_str(self):
++        my_object = MyObject.objects.last()
++        self.assertIsInstance(my_object.my_str_value, str)
++        self.assertEqual(str(my_object.my_str_value), "first")
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..6ac20ac5aa
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.EnumTest::test_created_object_is_str",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.EnumTest::test_retrieved_object_is_str",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

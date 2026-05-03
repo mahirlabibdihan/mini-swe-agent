@@ -1,0 +1,85 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..ec290a0497
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,35 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Create reproduction script
++cat <<'PY' > test_reproduction.py
++import sympy as sp
++n = sp.symbols('n', real=True)
++expr = sp.Eq(n*sp.cos(n) - 3*sp.sin(n), 0)
++try:
++    s = expr.as_set()
++    print("AS_SET_RETURNED:", s)
++except Exception as e:
++    print("EXCEPTION:", type(e).__name__, str(e))
++PY
++
++# Run and capture output
++output="$(python3 test_reproduction.py 2>&1 || true)"
++echo "$output"
++
++# Determine status: bug reproduced -> FAILED
++status="PASSED"
++if echo "$output" | grep -q "EXCEPTION: NotImplementedError"; then
++  status="FAILED"
++fi
++
++# Write strict JSON to /testbed/test_status.json using environment variable
++STATUS="$status" python3 - <<PY
++import os, json, pathlib
++status = os.environ.get("STATUS", "UNKNOWN")
++data = {"tests":[{"name":"test_reproduction.py::as_set_on_trig_eq","status":status}]}
++pathlib.Path("/testbed/test_status.json").write_text(json.dumps(data, indent=2))
++print("Wrote /testbed/test_status.json with status:", status)
++PY
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..229f3b5a42
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,8 @@
++import sympy as sp
++n = sp.symbols('n', real=True)
++expr = sp.Eq(n*sp.cos(n) - 3*sp.sin(n), 0)
++try:
++    s = expr.as_set()
++    print("AS_SET_RETURNED:", s)
++except Exception as e:
++    print("EXCEPTION:", type(e).__name__, str(e))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..5c1c36f91b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::as_set_on_trig_eq",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testbed/test_status.json b/testbed/test_status.json
+new file mode 100644
+index 0000000000..e2ad8f27a0
+--- /dev/null
++++ b/testbed/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::as_set_on_trig_eq",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

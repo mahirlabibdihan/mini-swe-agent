@@ -1,0 +1,91 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 0000000000..b4ac4818ec
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,48 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the reproduction Python script
++cat <<'PY' > /testbed/test_repro.py
++import sys
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=['django.contrib.auth', 'django.contrib.contenttypes'],
++        SECRET_KEY='test-secret-key',
++        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    )
++
++import django
++django.setup()
++
++from django.contrib.auth.forms import AuthenticationForm
++
++form = AuthenticationForm(None)
++username_html = str(form['username'])
++# Output a clear marker for parsing and the HTML itself
++if 'maxlength' in username_html:
++    print('MAXLENGTH_PRESENT')
++else:
++    print('MAXLENGTH_MISSING')
++print(username_html)
++PY
++
++# Run the reproduction script and capture output
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++
++# Determine status based on marker in output
++status="PASSED"
++if echo "$output" | grep -q "MAXLENGTH_MISSING"; then
++  status="FAILED"
++fi
++
++# Write required test_status.json
++cat > /testbed/test_status.json <<JSON
++{"tests": [{"name": "/testbed/test_repro.py::test_username_maxlength", "status": "$status"}]}
++JSON
++
++# Print outputs for visibility
++echo "$output"
++echo "---- /testbed/test_status.json ----"
++cat /testbed/test_status.json
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..cf163c548b
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,23 @@
++import sys
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=['django.contrib.auth', 'django.contrib.contenttypes'],
++        SECRET_KEY='test-secret-key',
++        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    )
++
++import django
++django.setup()
++
++from django.contrib.auth.forms import AuthenticationForm
++
++form = AuthenticationForm(None)
++username_html = str(form['username'])
++# Print a clear marker plus the rendered HTML for parsing
++if 'maxlength' in username_html:
++    print('MAXLENGTH_PRESENT')
++else:
++    print('MAXLENGTH_MISSING')
++print(username_html)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..13c3962f9a
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "/testbed/test_repro.py::test_username_maxlength", "status": "FAILED"}]}
+\ No newline at end of file

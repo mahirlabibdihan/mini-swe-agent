@@ -1,0 +1,104 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000..4151462
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,65 @@
++#!/bin/bash
++set -eu -o pipefail
++
++mkdir -p /testbed
++
++PY2=$(command -v python2 || command -v python || true)
++if [ -z "$PY2" ]; then
++  python - <<PY
++import json
++open("/testbed/test_status.json","w").write(json.dumps({"tests":[{"name":"/testbed/test_repro.py","status":"ERROR"}]}))
++PY
++  exit 1
++fi
++
++# Start a minimal server to accept one connection and respond, running in background
++"$PY2" - <<'PYSRV' &
++import socket
++s=socket.socket()
++s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
++s.bind(("127.0.0.1",9000))
++s.listen(1)
++conn,addr=s.accept()
++try:
++    data=conn.recv(65536)
++    try:
++        conn.send("HTTP/1.1 200 OK\r\nContent-Length:2\r\n\r\nOK")
++    except:
++        conn.send(b"HTTP/1.1 200 OK\r\nContent-Length:2\r\n\r\nOK")
++finally:
++    conn.close()
++s.close()
++PYSRV
++SERVER_PID=$!
++
++# Run the test and capture output and exit code
++OUTPUT=$("$PY2" /testbed/test_repro.py 2>&1 || true)
++RET=$?
++
++# Stop server
++kill "$SERVER_PID" >/dev/null 2>&1 || true
++wait "$SERVER_PID" 2>/dev/null || true
++
++# Determine status based on actual output
++STATUS="PASSED"
++if echo "$OUTPUT" | grep -q "UnicodeDecodeError"; then
++  STATUS="FAILED"
++elif [ "$RET" -ne 0 ]; then
++  if echo "$OUTPUT" | grep -q "Traceback"; then
++    STATUS="ERROR"
++  else
++    STATUS="FAILED"
++  fi
++fi
++
++# Write valid JSON using Python to avoid quoting/formatting issues
++python - <<PY
++import json
++obj = {"tests": [{"name": "/testbed/test_repro.py", "status": "$STATUS"}]}
++open("/testbed/test_status.json", "w").write(json.dumps(obj))
++PY
++
++# Print captured output for visibility
++echo "---- TEST OUTPUT ----"
++echo "$OUTPUT"
++echo "---- /testbed/test_status.json written with status: $STATUS ----"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100755
+index 0000000..1bc8029
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,19 @@
++#!/usr/bin/env python
++# Reproduction for Python 2 Unicode method + binary body causing UnicodeDecodeError
++import sys
++try:
++    import httplib  # Python 2
++except ImportError:
++    import http.client as httplib  # Python 3 fallback (may not reproduce)
++# Non-ASCII single byte in body
++body = "\xcf"
++conn = httplib.HTTPConnection("127.0.0.1", 9000, timeout=5)
++try:
++    # Use a unicode method and path to trigger unicode header construction
++    conn.request(u"POST", u"/", body=body, headers={u"Content-Type": u"application/octet-stream"})
++    resp = conn.getresponse()
++    print("RESPONSE_STATUS:", resp.status)
++except Exception:
++    import traceback
++    traceback.print_exc()
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000..69fa72c
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "/testbed/test_repro.py", "status": "FAILED"}]}
+\ No newline at end of file

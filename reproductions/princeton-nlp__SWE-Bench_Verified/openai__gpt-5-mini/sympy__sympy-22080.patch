@@ -1,0 +1,137 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..69d64824fb
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,4 @@
++DEFAULT_RESULT:4
++DEFAULT_SRC:def _lambdifygenerated(x, y):\n    return -x % y\n
++EMPTY_RESULT:4
++EMPTY_SRC:def _lambdifygenerated(x, y):\n    return -x % y\n
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..118dd571ea
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,53 @@
++\
++    #!/bin/bash
++    set -u
++    cd "$(dirname "$0")"
++    # Run the reproduction script, capture all output
++    python3 test_reproduction.py > run_output.txt 2>&1 || true
++    OUT="$(cat run_output.txt)"
++
++    # Parse markers and build statuses
++    python3 - <<'PY2'
++import re, json, sys
++out = open('run_output.txt').read()
++def marker(name):
++    m = re.search(rf'{name}:(.*)', out)
++    return m.group(1).strip() if m else None
++
++statuses = []
++
++# Default test
++default_err = marker('DEFAULT_ERROR')
++if default_err:
++    statuses.append({"name":"test_reproduction.py::test_default_lambdify","status":"ERROR"})
++else:
++    default_res = marker('DEFAULT_RESULT')
++    try:
++        val = int(default_res) if default_res is not None else None
++        if val == -3:
++            statuses.append({"name":"test_reproduction.py::test_default_lambdify","status":"PASSED"})
++        else:
++            statuses.append({"name":"test_reproduction.py::test_default_lambdify","status":"FAILED"})
++    except Exception:
++        statuses.append({"name":"test_reproduction.py::test_default_lambdify","status":"ERROR"})
++
++# Empty-modules test: reproduction expects the buggy behavior (result == 4)
++empty_err = marker('EMPTY_ERROR')
++if empty_err:
++    statuses.append({"name":"test_reproduction.py::test_empty_modules_lambdify","status":"ERROR"})
++else:
++    empty_res = marker('EMPTY_RESULT')
++    try:
++        val = int(empty_res) if empty_res is not None else None
++        if val == 4:
++            # Bug reproduced
++            statuses.append({"name":"test_reproduction.py::test_empty_modules_lambdify","status":"PASSED"})
++        else:
++            statuses.append({"name":"test_reproduction.py::test_empty_modules_lambdify","status":"FAILED"})
++    except Exception:
++        statuses.append({"name":"test_reproduction.py::test_empty_modules_lambdify","status":"ERROR"})
++
++open('test_status.json','w').write(json.dumps({"tests":statuses}, indent=2))
++print(out)
++print("\\nWROTE test_status.json")
++PY2
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..b1da6bab2d
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,43 @@
++import sys
++try:
++    from sympy import symbols, Mod, lambdify
++except Exception as e:
++    print("IMPORT_ERROR:" + str(e))
++    sys.exit(0)
++
++import inspect
++
++x, y = symbols('x y')
++expr = -Mod(x, y)
++
++# Default modules
++try:
++    f = lambdify([x, y], expr)
++    try:
++        val = f(3, 7)
++        print("DEFAULT_RESULT:" + str(val))
++    except Exception as e:
++        print("DEFAULT_ERROR:" + str(e))
++    try:
++        src = inspect.getsource(f)
++        print("DEFAULT_SRC:" + src.replace("\n", "\\n"))
++    except Exception as e:
++        print("DEFAULT_SRC_ERROR:" + str(e))
++except Exception as e:
++    print("DEFAULT_ERROR:" + str(e))
++
++# modules = []
++try:
++    g = lambdify([x, y], expr, modules=[])
++    try:
++        valg = g(3, 7)
++        print("EMPTY_RESULT:" + str(valg))
++    except Exception as e:
++        print("EMPTY_ERROR:" + str(e))
++    try:
++        src = inspect.getsource(g)
++        print("EMPTY_SRC:" + src.replace("\n", "\\n"))
++    except Exception as e:
++        print("EMPTY_SRC_ERROR:" + str(e))
++except Exception as e:
++    print("EMPTY_ERROR:" + str(e))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..0f0a13f777
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_default_lambdify",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_empty_modules_lambdify",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

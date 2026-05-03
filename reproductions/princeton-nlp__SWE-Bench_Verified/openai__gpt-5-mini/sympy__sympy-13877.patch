@@ -1,0 +1,103 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..d706e1a52
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,39 @@
++#!/bin/bash
++set -euo pipefail
++PYTHON=python3
++
++# Ensure sympy is installed
++$PYTHON -c "import sympy" >/dev/null 2>&1 || $PYTHON -m pip install sympy -q
++
++# Run the reproduction script and capture output
++output=$($PYTHON /testbed/test_reproduction.py 2>&1) || true
++echo "$output"
++
++# Build test status JSON based on observed output
++$PYTHON - <<'PY' "$output"
++import sys, json, re
++out = sys.argv[1]
++tests = []
++for n in range(1,7):
++    res_match = re.search(rf'^RESULT {n}: (.*)$', out, re.MULTILINE)
++    err_match = re.search(rf'^ERROR {n}: (\w+): (.*)$', out, re.MULTILINE)
++    if res_match:
++        val = res_match.group(1).strip()
++        if val.lower() == 'nan':
++            status = "FAILED"
++        else:
++            status = "PASSED"
++        tests.append({"name": f"/testbed/test_reproduction.py::f({n})", "status": status})
++    elif err_match:
++        exc_type = err_match.group(1)
++        exc_msg = err_match.group(2)
++        if "Invalid NaN comparison" in exc_msg or exc_type == "TypeError":
++            status = "FAILED"
++        else:
++            status = "ERROR"
++        tests.append({"name": f"/testbed/test_reproduction.py::f({n})", "status": status})
++    else:
++        tests.append({"name": f"/testbed/test_reproduction.py::f({n})", "status": "ERROR"})
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..a63de83e9
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,17 @@
++from sympy import *
++from sympy.abc import a
++import traceback
++
++def f(n):
++    return det(Matrix([[i + a*j for i in range(n)] for j in range(n)]))
++
++if __name__ == "__main__":
++    for n in range(1,7):
++        try:
++            v = f(n)
++            print("RESULT %d: %s" % (n, str(v)))
++        except Exception as e:
++            tb = traceback.format_exc()
++            # Print a single-line indicator with the exception type and message plus full traceback
++            print("ERROR %d: %s: %s" % (n, type(e).__name__, str(e)))
++            print(tb)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..86fa4a8d7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,28 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::f(1)",
++      "status": "PASSED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::f(2)",
++      "status": "PASSED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::f(3)",
++      "status": "PASSED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::f(4)",
++      "status": "PASSED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::f(5)",
++      "status": "FAILED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::f(6)",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,124 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..8f4e588e9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,73 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the Python reproduction script
++cat > /testbed/test_kmeans_repro.py <<'PY'
++import sys
++try:
++    import numpy as np
++    from sklearn.cluster import KMeans
++    from sklearn.datasets import make_blobs
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    sys.exit(3)
++
++# Check whether KMeans accepts the n_jobs argument (older sklearns did)
++try:
++    _ = KMeans(n_clusters=2, random_state=0, n_jobs=1)
++except TypeError:
++    # Signal to the runner that n_jobs is not supported in this sklearn build
++    print("SKIP_N_JOBS_NOT_SUPPORTED")
++    sys.exit(2)
++
++# Generate data and run KMeans for n_jobs = 1..4
++X, y = make_blobs(n_samples=10000, centers=10, n_features=2, random_state=2)
++for n_jobs in range(1, 5):
++    k = KMeans(n_clusters=10, random_state=2, n_jobs=n_jobs)
++    k.fit(X)
++    print(f"(n_jobs={n_jobs}) kmeans.inertia_ = {k.inertia_}")
++sys.exit(0)
++PY
++
++# Run the Python script and capture output
++output=$(python3 /testbed/test_kmeans_repro.py 2>&1)
++rc=$? || true
++echo "$output"
++
++name="/testbed/test_kmeans_repro.py::test_n_jobs_consistency"
++status="ERROR"
++
++if echo "$output" | grep -q "SKIP_N_JOBS_NOT_SUPPORTED"; then
++  status="SKIPPED"
++elif echo "$output" | grep -q "IMPORT_ERROR:"; then
++  status="ERROR"
++else
++  # extract inertias
++  inertias=()
++  while IFS= read -r line; do
++    if [[ $line =~ ^\(n_jobs=([0-9]+)\)\ kmeans\.inertia_\ =\ ([0-9eE+.\-]+)$ ]]; then
++      inertias+=("${BASH_REMATCH[2]}")
++    fi
++  done <<< "$output"
++
++  if [ "${#inertias[@]}" -eq 0 ]; then
++    status="ERROR"
++  else
++    # compare all inertias to the first within a small tolerance
++    first="${inertias[0]}"
++    status="PASSED"
++    for v in "${inertias[@]}"; do
++      if ! awk -v a="$first" -v b="$v" 'BEGIN{ a+=0; b+=0; d=(a>b)?a-b:b-a; if (d > 1e-8) exit 1; else exit 0 }'; then
++        status="FAILED"
++      fi
++    done
++  fi
++fi
++
++# Write results JSON
++python3 - <<PY
++import json
++result = {"tests": [{"name": "$name", "status": "$status"}]}
++open("/testbed/test_status.json","w").write(json.dumps(result, indent=2))
++print(json.dumps(result, indent=2))
++PY
+diff --git a/test_kmeans_repro.py b/test_kmeans_repro.py
+new file mode 100644
+index 000000000..26d490214
+--- /dev/null
++++ b/test_kmeans_repro.py
+@@ -0,0 +1,24 @@
++import sys
++try:
++    import numpy as np
++    from sklearn.cluster import KMeans
++    from sklearn.datasets import make_blobs
++except Exception as e:
++    print("IMPORT_ERROR:", e)
++    sys.exit(3)
++
++# Check whether KMeans accepts the n_jobs argument (older sklearns did)
++try:
++    _ = KMeans(n_clusters=2, random_state=0, n_jobs=1)
++except TypeError:
++    # Signal to the runner that n_jobs is not supported in this sklearn build
++    print("SKIP_N_JOBS_NOT_SUPPORTED")
++    sys.exit(2)
++
++# Generate data and run KMeans for n_jobs = 1..4
++X, y = make_blobs(n_samples=10000, centers=10, n_features=2, random_state=2)
++for n_jobs in range(1, 5):
++    k = KMeans(n_clusters=10, random_state=2, n_jobs=n_jobs)
++    k.fit(X)
++    print(f"(n_jobs={n_jobs}) kmeans.inertia_ = {k.inertia_}")
++sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..ea95227d4
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_kmeans_repro.py::test_n_jobs_consistency",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

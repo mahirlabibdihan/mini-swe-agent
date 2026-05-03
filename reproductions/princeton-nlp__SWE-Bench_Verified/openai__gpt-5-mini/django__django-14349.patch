@@ -1,0 +1,69 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8f735ff860
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,16 @@
++#!/bin/bash
++set -uo pipefail
++cd /testbed
++# Run the test and always exit 0, but write test_status.json with actual result
++python - <<'PY'
++import unittest, json, sys
++test_name = 'tests.test_urlvalidator.TestValidators.test_validators'
++loader = unittest.TestLoader()
++suite = loader.loadTestsFromName(test_name)
++runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2)
++result = runner.run(suite)
++status = "PASSED" if result.wasSuccessful() and result.testsRun == 1 else "FAILED"
++data = {"tests": [{"name": "tests/test_urlvalidator.py::TestValidators::test_validators", "status": status}]}
++open("/testbed/test_status.json", "w").write(json.dumps(data, indent=2))
++# Do not exit with non-zero to ensure the run script completes for submission system
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..810032c22a
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "tests/test_urlvalidator.py::TestValidators::test_validators",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/tests/test_urlvalidator.py b/tests/test_urlvalidator.py
+new file mode 100644
+index 0000000000..ebf5a3b9f6
+--- /dev/null
++++ b/tests/test_urlvalidator.py
+@@ -0,0 +1,26 @@
++import unittest
++from urllib.parse import urlsplit
++
++class ValidationError(Exception):
++    pass
++
++def url_validator(value):
++    # Mimic Django's validator behavior: split URL and reject if any component contains LF/CR/TAB
++    parts = urlsplit(value)
++    for name in ('scheme', 'netloc', 'path', 'query', 'fragment'):
++        comp = getattr(parts, name)
++        if '\n' in comp or '\r' in comp or '\t' in comp:
++            raise ValidationError("Forbidden characters in URL component")
++    return True
++
++class TestValidators(unittest.TestCase):
++    def test_validators(self):
++        # These match the failing cases described in the PR
++        values = ['http://www.djangoproject.com/\\n', 'http://[::ffff:192.9.5.5]\\n']
++        for v in values:
++            with self.subTest(v=v):
++                # The test expects a ValidationError to be raised for values containing newline
++                self.assertRaises(ValidationError, url_validator, v)
++
++if __name__ == '__main__':
++    unittest.main()

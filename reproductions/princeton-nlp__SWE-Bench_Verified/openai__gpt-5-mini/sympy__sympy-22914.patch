@@ -1,0 +1,79 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..0098f8c034
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,43 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create reproduction Python script
++cat > /testbed/test_reproduction.py <<'PYREPO'
++from sympy import symbols, Min, Max, pycode
++a, b = symbols("a b")
++c = Min(a, b)
++d = Max(a, b)
++print("MIN_PYCODE_OUTPUT_START")
++print(pycode(c))
++print("MIN_PYCODE_OUTPUT_END")
++print("MAX_PYCODE_OUTPUT_START")
++print(pycode(d))
++print("MAX_PYCODE_OUTPUT_END")
++PYREPO
++
++# Ensure sympy is available
++if ! python3 -c "import sympy" >/dev/null 2>&1; then
++  echo "Installing sympy..."
++  python3 -m pip install --user sympy -q || python3 -m pip install sympy -q
++fi
++
++# Run the reproduction and capture output
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++
++# Determine status: PASS only if both 'min(' and 'max(' appear; otherwise FAIL
++status="FAILED"
++if printf "%s" "$output" | grep -q "min(" && printf "%s" "$output" | grep -q "max("; then
++  status="PASSED"
++fi
++
++# Write test_status.json in required schema
++python3 - "$status" <<PYJSON > /testbed/test_status.json
++import json,sys
++status=sys.argv[1]
++tests=[{"name":"test_reproduction.py::test_Min_Max_pycode","status":status}]
++print(json.dumps({"tests":tests}, indent=2))
++PYJSON
++
++echo "WROTE /testbed/test_status.json"
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..4ae7639bef
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,10 @@
++from sympy import symbols, Min, Max, pycode
++a, b = symbols("a b")
++c = Min(a, b)
++d = Max(a, b)
++print("MIN_PYCODE_OUTPUT_START")
++print(pycode(c))
++print("MIN_PYCODE_OUTPUT_END")
++print("MAX_PYCODE_OUTPUT_START")
++print(pycode(d))
++print("MAX_PYCODE_OUTPUT_END")
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..4e24e0ffaa
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_Min_Max_pycode",
++      "status": "FAILED"
++    }
++  ]
++}

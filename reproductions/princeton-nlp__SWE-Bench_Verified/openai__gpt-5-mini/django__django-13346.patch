@@ -1,0 +1,127 @@
+diff --git a/db.sqlite3 b/db.sqlite3
+new file mode 100644
+index 0000000000..77b5dce019
+Binary files /dev/null and b/db.sqlite3 differ
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..c01395ff80
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,37 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++output=$(python3 test_reproduction.py 2>&1 || true)
++echo "$output"
++first_count=""
++second_count=""
++status="ERROR"
++if echo "$output" | grep -q "Traceback"; then
++  status="ERROR"
++else
++  first_count=$(echo "$output" | sed -n 's/^FIRST_COUNT: //p' | tr -d '\r\n' || true)
++  second_count=$(echo "$output" | sed -n 's/^SECOND_COUNT: //p' | tr -d '\r\n' || true)
++  if [ -n "$first_count" ] && [ -n "$second_count" ]; then
++    # Mark FAILED when reproduction matches the reported bug:
++    # first_count == 0 and second_count == 312
++    if [ "$first_count" -eq 0 ] && [ "$second_count" -eq 312 ]; then
++      status="FAILED"
++    else
++      status="PASSED"
++    fi
++  else
++    status="ERROR"
++  fi
++fi
++
++python3 - <<PYTHON
++import json, pathlib
++tests = [{"name": "test_reproduction.py::test_json_in_lookup", "status": "$status"}]
++path = pathlib.Path("test_status.json")
++path.write_text(json.dumps({"tests": tests}, indent=2))
++print("WROTE", path.resolve())
++PYTHON
++
++# ensure file is in /testbed
++mv test_status.json /testbed/test_status.json || true
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..2c5f432afb
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,39 @@
++import traceback, sys
++from django.conf import settings
++
++try:
++    settings.configure(
++        DEBUG=True,
++        DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": "/testbed/db.sqlite3"}},
++        INSTALLED_APPS=["testapp"],
++        DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++    )
++    import django
++    django.setup()
++    from testapp.models import OurModel
++    from django.db import connection
++
++    # Create table if not exists
++    table_name = OurModel._meta.db_table
++    existing = connection.introspection.table_names()
++    if table_name not in existing:
++        with connection.schema_editor() as schema_editor:
++            schema_editor.create_model(OurModel)
++
++    # Insert 312 rows with {"key": 0}
++    OurModel.objects.all().delete()
++    objs = [OurModel(our_field={"key": 0}) for _ in range(312)]
++    OurModel.objects.bulk_create(objs)
++
++    # Run the two queries
++    qs1 = OurModel.objects.filter(**{"our_field__key__in": [0]})
++    qs2 = OurModel.objects.filter(**{"our_field__key": 0})
++
++    print(f"FIRST_COUNT: {qs1.count()}")
++    print(f"SECOND_COUNT: {qs2.count()}")
++    print("FIRST_SQL:", qs1.query)
++    print("SECOND_SQL:", qs2.query)
++    sys.exit(0)
++except Exception:
++    traceback.print_exc()
++    sys.exit(2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..98e5cb97ae
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_json_in_lookup",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..b868da5b1b
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# package init
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..b2870c6bd7
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,7 @@
++from django.db import models
++
++class OurModel(models.Model):
++    our_field = models.JSONField(null=True)
++
++    class Meta:
++        app_label = "testapp"

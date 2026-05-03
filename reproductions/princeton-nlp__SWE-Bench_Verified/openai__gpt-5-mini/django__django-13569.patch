@@ -1,0 +1,261 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..39840c24de
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,61 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++
++# Install Django (try pinned version then fallback)
++pip3 install -q "Django==2.2" || pip3 install -q Django
++
++# Run reproduction in Python: compute q1 and q3, write /testbed/test_status.json with PASS/FAIL, but exit 0
++python3 - <<'PY'
++import sys, json, os
++# Ensure testapp is importable
++sys.path.insert(0, '/testbed')
++
++from django.conf import settings
++settings.configure(
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    INSTALLED_APPS=['testapp'],
++)
++import django
++django.setup()
++
++from django.db import connection
++from django.db.models import Count
++from testapp.models import Thing, Related
++
++# Create tables
++with connection.schema_editor() as editor:
++    editor.create_model(Thing)
++    editor.create_model(Related)
++
++# Populate data
++t = Thing.objects.create()
++Related.objects.create(thing=t)
++Related.objects.create(thing=t)
++
++# Queries
++q1 = Thing.objects.annotate(rc=Count('related')).order_by('rc').values('id','rc')
++q3 = Thing.objects.annotate(rc=Count('related')).order_by('?').values('id','rc')
++
++q1_rows = list(q1)
++q3_rows = list(q3)
++
++print('q1_rows:', q1_rows)
++print('q3_rows:', q3_rows)
++
++# Expected: q3_rows == q1_rows (aggregation preserved). If not, this reproduces the bug.
++status = 'PASSED' if q3_rows == q1_rows else 'FAILED'
++tests = [{'name':'test_repro.py::test_order_by_random_should_not_break_aggregation','status': status}]
++
++# Ensure /testbed exists and write the JSON
++os.makedirs('/testbed', exist_ok=True)
++with open('/testbed/test_status.json','w') as f:
++    json.dump({'tests': tests}, f, indent=2)
++
++print('WROTE /testbed/test_status.json with status:', status)
++
++# Exit 0 so the wrapper script completes successfully regardless of test outcome
++sys.exit(0)
++PY
++
++echo "run_test.sh completed"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..c0560a1a42
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,52 @@
++import sys, json
++# Ensure testapp is importable
++sys.path.insert(0, "/testbed")
++
++from django.conf import settings
++settings.configure(
++    DATABASES={'default':{'ENGINE':'django.db.backends.sqlite3','NAME':':memory:'}},
++    INSTALLED_APPS=['testapp'],
++)
++import django
++django.setup()
++
++from django.db import connection
++from django.db.models import Count
++from testapp.models import Thing, Related
++
++# Create tables
++with connection.schema_editor() as editor:
++    editor.create_model(Thing)
++    editor.create_model(Related)
++
++# Populate data
++t = Thing.objects.create()
++Related.objects.create(thing=t)
++Related.objects.create(thing=t)
++
++# Queries as in PR description
++q1 = Thing.objects.annotate(rc=Count("related")).order_by("rc").values("id","rc")
++q2 = Thing.objects.annotate(rc=Count("related")).order_by("related").values("id","rc")
++q3 = Thing.objects.annotate(rc=Count("related")).order_by("?").values("id","rc")
++
++out = {
++    "q1_sql": str(q1.query),
++    "q1_rows": list(q1),
++    "q2_sql": str(q2.query),
++    "q2_rows": list(q2),
++    "q3_sql": str(q3.query),
++    "q3_rows": list(q3),
++}
++
++q3_sql_upper = out["q3_sql"].upper()
++group_by_random = ("GROUP BY" in q3_sql_upper) and (("RANDOM" in q3_sql_upper) or ("RAND" in q3_sql_upper))
++
++print(json.dumps(out, indent=2))
++print("GROUP_BY_RANDOM_DETECTED:", group_by_random)
++
++# Write required test status file
++status = "PASSED" if group_by_random else "FAILED"
++tests = [{"name":"test_repro.py::test_order_by_random_breaks_aggregation","status":status}]
++with open("/testbed/test_status.json","w") as f:
++    json.dump({"tests": tests}, f, indent=2)
++print("WROTE /testbed/test_status.json with status:", status)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..c6ac779bf7
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_order_by_random_should_not_break_aggregation",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..9793a5cf5f
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,7 @@
++from django.db import models
++
++class Thing(models.Model):
++    pass
++
++class Related(models.Model):
++    thing = models.ForeignKey(Thing, related_name="related", on_delete=models.CASCADE)
+diff --git a/testbed/run_test.sh b/testbed/run_test.sh
+new file mode 100644
+index 0000000000..80408f5105
+--- /dev/null
++++ b/testbed/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Try to install a Django version likely to reproduce the behavior
++pip3 install -q "Django==2.2" || pip3 install -q Django
++
++# Run the reproduction script and capture output
++output=$(python3 test_repro.py 2>&1) || true
++echo "$output"
++
++# Parse detection line
++group_by_random_detected=$(echo "$output" | awk -F: '/GROUP_BY_RANDOM_DETECTED/ {print $2}' | tr -d '[:space:]' || true)
++
++status="FAILED"
++if [ "$group_by_random_detected" = "True" ] || [ "$group_by_random_detected" = "true" ] || [ "$group_by_random_detected" = "1" ]; then
++  status="PASSED"
++fi
++
++mkdir -p /testbed
++python3 - <<PY - "$output" "$status"
++import json,sys
++status = sys.argv[2]
++tests = [{"name": "test_repro.py::test_order_by_random_breaks_aggregation", "status": "PASSED" if status=="PASSED" else "FAILED"}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("WROTE /testbed/test_status.json with status:", status)
+diff --git a/testbed/test_repro.py b/testbed/test_repro.py
+new file mode 100644
+index 0000000000..ec0d40b6e0
+--- /dev/null
++++ b/testbed/test_repro.py
+@@ -0,0 +1,44 @@
++import json
++from django.conf import settings
++
++settings.configure(
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    INSTALLED_APPS=['testapp'],
++    DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++)
++import django
++django.setup()
++
++from django.db import connection
++from django.db.models import Count
++from testapp.models import Thing, Related
++
++# Create tables
++with connection.schema_editor() as editor:
++    editor.create_model(Thing)
++    editor.create_model(Related)
++
++# Populate data
++t = Thing.objects.create()
++Related.objects.create(thing=t)
++Related.objects.create(thing=t)
++
++# Run queries
++q1 = Thing.objects.annotate(rc=Count('related')).order_by('rc').values('id','rc')
++q2 = Thing.objects.annotate(rc=Count('related')).order_by('related').values('id','rc')
++q3 = Thing.objects.annotate(rc=Count('related')).order_by('?').values('id','rc')
++
++out = {
++    'q1_sql': str(q1.query),
++    'q1_rows': list(q1),
++    'q2_sql': str(q2.query),
++    'q2_rows': list(q2),
++    'q3_sql': str(q3.query),
++    'q3_rows': list(q3),
++}
++
++# Detect whether RANDOM()/RAND() appears in GROUP BY clause of q3 SQL
++group_by_random = 'GROUP BY' in out['q3_sql'].upper() and ('RANDOM' in out['q3_sql'].upper() or 'RAND' in out['q3_sql'].upper())
++
++print(json.dumps(out, indent=2))
++print("GROUP_BY_RANDOM_DETECTED:", group_by_random)
+diff --git a/testbed/testapp/__init__.py b/testbed/testapp/__init__.py
+new file mode 100644
+index 0000000000..3af93b9289
+--- /dev/null
++++ b/testbed/testapp/__init__.py
+@@ -0,0 +1 @@
++# testapp package
+diff --git a/testbed/testapp/models.py b/testbed/testapp/models.py
+new file mode 100644
+index 0000000000..cb8b7fc039
+--- /dev/null
++++ b/testbed/testapp/models.py
+@@ -0,0 +1,7 @@
++from django.db import models
++
++class Thing(models.Model):
++    pass
++
++class Related(models.Model):
++    thing = models.ForeignKey(Thing, related_name='related', on_delete=models.CASCADE)

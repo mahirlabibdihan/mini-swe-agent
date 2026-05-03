@@ -1,0 +1,94 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..ab191a6842
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++# Install specific Django version to match the report
++python -m pip install --quiet Django==4.0.1
++
++output=$(python test_reproduction.py 2>&1) || true
++echo "$output"
++# Decide status based on whether an OperationalError or syntax error appeared in output
++status="PASSED"
++if echo "$output" | grep -q -E "OperationalError|syntax error|sqlite3.OperationalError"; then
++  status="FAILED"
++fi
++
++mkdir -p /testbed
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::reproduce_sum_default_after_annotate",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++echo "Wrote /testbed/test_status.json with status: $status"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..0225793405
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,43 @@
++import sys, traceback
++from django.conf import settings
++
++settings.configure(
++    DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
++    DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++)
++import django
++django.setup()
++
++from django.db import models, connection
++from django.db.models import F, Sum
++
++class Book(models.Model):
++    title = models.CharField(max_length=100, default='b')
++    class Meta:
++        app_label = 'testapp'
++
++# Create table
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Book)
++
++# Insert sample data
++Book.objects.bulk_create([Book() for _ in range(5)])
++
++print("Book.objects.count() ->", Book.objects.count())
++print("Running annotate + aggregate without default...")
++try:
++    res = Book.objects.annotate(idx=F("id")).aggregate(Sum("id"))
++    print("Result:", res)
++except Exception as e:
++    print("ERROR (no default):", repr(e))
++    traceback.print_exc()
++
++print("Running annotate + aggregate with default=0...")
++try:
++    res2 = Book.objects.annotate(idx=F("id")).aggregate(Sum("id", default=0))
++    print("Result with default:", res2)
++except Exception as e:
++    print("ERROR (with default):", repr(e))
++    traceback.print_exc()
++    # propagate non-zero exit to indicate failure for run_test.sh parsing if desired
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..fc19297582
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::reproduce_sum_default_after_annotate",
++      "status": "FAILED"
++    }
++  ]
++}

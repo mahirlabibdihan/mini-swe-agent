@@ -1,0 +1,134 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..e07da942bb
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,4 @@
++#!/bin/bash
++set -euo pipefail
++# Run the test script but don't propagate its non-zero exit so the wrapper always succeeds.
++python3 /testbed/test_repro.py || true
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100755
+index 0000000000..7f9466ad3b
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,95 @@
++#!/usr/bin/env python3
++import json, sys
++from pathlib import Path
++
++# Configure Django programmatically
++from django.conf import settings
++
++if not settings.configured:
++    settings.configure(
++        INSTALLED_APPS=[],
++        DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
++        TIME_ZONE="UTC",
++        USE_TZ=False,
++        SECRET_KEY="testkey",
++    )
++
++import django
++django.setup()
++
++from django.db import models, connection
++
++# Define models with app_label so they don't need a real app
++class OneModel(models.Model):
++    id = models.BigAutoField(primary_key=True)
++    root = models.ForeignKey("OneModel", on_delete=models.CASCADE, null=True)
++    oneval = models.BigIntegerField(null=True)
++
++    class Meta:
++        app_label = "testapp"
++        ordering = ("-id",)
++
++class TwoModel(models.Model):
++    id = models.BigAutoField(primary_key=True)
++    record = models.ForeignKey(OneModel, on_delete=models.CASCADE)
++    twoval = models.BigIntegerField(null=True)
++
++    class Meta:
++        app_label = "testapp"
++
++# Create tables
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(OneModel)
++    schema_editor.create_model(TwoModel)
++
++# Insert some data
++OneModel.objects.create(oneval=1)
++OneModel.objects.create(oneval=2)
++OneModel.objects.create(oneval=3)
++om = OneModel.objects.first()
++TwoModel.objects.create(record=om, twoval=10)
++TwoModel.objects.create(record=om, twoval=20)
++
++# Prepare the queries to inspect
++qs1 = TwoModel.objects.filter(record__oneval__in=[1,2,3]).order_by("record__root_id")
++qs2 = TwoModel.objects.filter(record__oneval__in=[1,2,3]).order_by("record__root__id")
++qs3 = TwoModel.objects.filter(record__oneval__in=[1,2,3]).order_by("-record__root_id")
++
++sql1 = str(qs1.query)
++sql2 = str(qs2.query)
++sql3 = str(qs3.query)
++
++print("=== SQL for order_by('record__root_id') ===")
++print(sql1)
++print("\n=== SQL for order_by('record__root__id') ===")
++print(sql2)
++print("\n=== SQL for order_by('-record__root_id') ===")
++print(sql3)
++
++# We'll assert the "correct"/expected SQL: no extra LEFT OUTER JOIN and proper ASC/DESC on the root_id column.
++u1 = sql1.upper()
++u2 = sql2.upper()
++u3 = sql3.upper()
++
++# Expected desirable behaviors (these are what we consider correct):
++# qs1: should NOT have LEFT OUTER JOIN and should ORDER BY root_id ASC on the joined table (no extra alias)
++test1_pass = ("LEFT OUTER JOIN" not in u1) and ("ORDER BY" in u1) and ("ASC" in u1.split("ORDER BY",1)[1])
++# qs2: should NOT have LEFT OUTER JOIN and ORDER BY ... ASC (this matches the optimal case shown in PR)
++test2_pass = ("LEFT OUTER JOIN" not in u2) and ("ORDER BY" in u2) and ("ASC" in u2.split("ORDER BY",1)[1])
++# qs3: for the inverted order, should NOT have LEFT OUTER JOIN and should ORDER BY ... DESC
++test3_pass = ("LEFT OUTER JOIN" not in u3) and ("ORDER BY" in u3) and ("DESC" in u3.split("ORDER BY",1)[1])
++
++statuses = [
++    {"name": "test_reproduction::order_by_record_root_id", "status": "PASSED" if test1_pass else "FAILED"},
++    {"name": "test_reproduction::order_by_record_root__id", "status": "PASSED" if test2_pass else "FAILED"},
++    {"name": "test_reproduction::order_by_minus_record_root_id", "status": "PASSED" if test3_pass else "FAILED"},
++]
++
++out_path = Path("/testbed/test_status.json")
++out_path.write_text(json.dumps({"tests": statuses}, indent=2))
++print("\nWrote /testbed/test_status.json with results:")
++print(json.dumps({"tests": statuses}, indent=2))
++
++# Exit non-zero if any test failed (so the test script indicates the bug reproduction)
++if any(t["status"] != "PASSED" for t in statuses):
++    sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..d154c59148
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction::order_by_record_root_id",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction::order_by_record_root__id",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction::order_by_minus_record_root_id",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

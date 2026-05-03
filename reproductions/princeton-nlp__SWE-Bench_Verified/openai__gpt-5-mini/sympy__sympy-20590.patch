@@ -1,0 +1,89 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..9e894ca03a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++# Do not use -e: we want to capture the test exit code and always finish the runner successfully.
++set -u -o pipefail
++
++# Run the reproduction script and capture its real exit code
++python3 test_reproduction.py > test_output.txt 2>&1
++rc=$?
++output=$(cat test_output.txt)
++
++# Print the script output for visibility
++echo "$output"
++
++# Determine test status from the actual exit code
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++
++# Write the required /testbed/test_status.json
++python3 - <<PY "$output" "$rc" "$status"
++import json, sys
++out = sys.argv[1]
++rc = int(sys.argv[2])
++status = sys.argv[3]
++tests = [{"name": "test_reproduction.py::test_expect_no___dict__", "status": status}]
++open("/testbed/test_status.json", "w").write(json.dumps({"tests": tests}, indent=2))
++print(json.dumps({"tests": tests}, indent=2))
++PY
++
++# Exit 0 so the runner is considered to have executed successfully, even if the test reproduced a failure.
++exit 0
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 0000000000..a3d593e882
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,4 @@
++sympy version: 1.7.1
++__dict__ present: {}
++__slots__ on class: ('name',)
++Result: unexpected (__dict__ present). This reproduces the change introduced in 1.7+.
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..4279a71b0e
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,21 @@
++import sys
++import sympy
++
++print("sympy version:", sympy.__version__)
++s = sympy.Symbol('s')
++try:
++    d = s.__dict__
++    print("__dict__ present:", d)
++    has_dict = True
++except AttributeError:
++    print("__dict__ missing (AttributeError)")
++    has_dict = False
++
++print("__slots__ on class:", getattr(type(s), '__slots__', None))
++
++if has_dict:
++    print("Result: unexpected (__dict__ present). This reproduces the change introduced in 1.7+.")
++    sys.exit(1)
++else:
++    print("Result: expected (no __dict__). Matches 1.6.2 behavior.")
++    sys.exit(0)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..2919b19a07
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_expect_no___dict__",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

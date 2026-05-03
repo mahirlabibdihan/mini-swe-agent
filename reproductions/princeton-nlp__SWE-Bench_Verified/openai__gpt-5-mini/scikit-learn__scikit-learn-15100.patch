@@ -1,0 +1,88 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..a3e85d749
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,39 @@
++\
++    #!/bin/bash
++    set -euo pipefail
++    cd "$(dirname "$0")"
++
++    output=$(python3 test_reproduction.py 2>&1 || true)
++    echo "$output"
++
++    status="ERROR"
++    test_name="test_reproduction.py::test_strip_accents_unicode"
++
++    if echo "$output" | grep -q '^IMPORT_ERROR'; then
++        status="SKIPPED"
++    else
++        r1_eq_n=$(echo "$output" | sed -n 's/^R1_EQ_N: *//p' | tr -d '\r' || true)
++        r2_eq_n=$(echo "$output" | sed -n 's/^R2_EQ_N: *//p' | tr -d '\r' || true)
++
++        r1_eq_n=$(echo "$r1_eq_n" | tr '[:upper:]' '[:lower:]')
++        r2_eq_n=$(echo "$r2_eq_n" | tr '[:upper:]' '[:lower:]')
++
++        if [ "$r1_eq_n" = "true" ] && [ "$r2_eq_n" = "false" ]; then
++            status="FAILED"
++        elif [ "$r1_eq_n" = "true" ] && [ "$r2_eq_n" = "true" ]; then
++            status="PASSED"
++        else
++            status="ERROR"
++        fi
++    fi
++
++    # Write test_status.json using an embedded Python here-doc
++    python3 - <<PYEOF "$status" "$test_name"
++import json, sys, pathlib
++status = sys.argv[1]
++test_name = sys.argv[2]
++out = {"tests": [{"name": test_name, "status": status}]}
++p = pathlib.Path("test_status.json")
++p.write_text(json.dumps(out, indent=2), encoding="utf-8")
++print("WROTE", str(p.resolve()))
++PYEOF
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..d9af50923
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,22 @@
++import sys
++try:
++    from sklearn.feature_extraction.text import strip_accents_unicode
++except Exception as e:
++    print("IMPORT_ERROR", e)
++    sys.exit(0)
++
++# Use chr(...) to avoid embedding non-ASCII directly
++s1 = chr(241)                # composed: LATIN SMALL LETTER N WITH TILDE
++s2 = chr(110) + chr(771)     # decomposed: 'n' + COMBINING TILDE
++
++r1 = strip_accents_unicode(s1)
++r2 = strip_accents_unicode(s2)
++
++# Print machine-friendly results (escape non-ASCII)
++print("S1_ESCAPED:", s1.encode('unicode_escape').decode())
++print("S2_ESCAPED:", s2.encode('unicode_escape').decode())
++print("R1_ESCAPED:", r1.encode('unicode_escape').decode())
++print("R2_ESCAPED:", r2.encode('unicode_escape').decode())
++print("R1_EQ_N:", r1 == 'n')
++print("R2_EQ_N:", r2 == 'n')
++print("R2_UNCHANGED:", r2 == s2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..d0a951f18
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_strip_accents_unicode",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

@@ -1,0 +1,55 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..6443d6d3e6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++set -euo pipefail
++PYOUT=$(/usr/bin/env python3 - <<PY
++import json
++s = '中国'
++d_default = json.dumps(s)
++d_unescaped = json.dumps(s, ensure_ascii=False)
++# Check actual behaviors
++has_escape = ('\u4e2d\u56fd' in d_default)
++has_chinese_in_default = ('中国' in d_default)
++tests = []
++tests.append({"name":"test_repro.py::test_json_dumps_unicode_escape", "status": "PASSED" if has_escape else "FAILED"})
++tests.append({"name":"test_repro.py::test_json_dumps_default_unescaped", "status": "PASSED" if has_chinese_in_default else "FAILED"})
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests}, indent=2, ensure_ascii=False))
++print(json.dumps({"tests":tests}, indent=2, ensure_ascii=False))
++PY
++)
++echo "$PYOUT"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..ebfa79d364
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,6 @@
++import json
++s = '中国'
++d = json.dumps(s)
++d2 = json.dumps(s, ensure_ascii=False)
++print("default:", d)
++print("ensure_ascii_false:", d2)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..278d4cf421
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_json_dumps_unicode_escape",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro.py::test_json_dumps_default_unescaped",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

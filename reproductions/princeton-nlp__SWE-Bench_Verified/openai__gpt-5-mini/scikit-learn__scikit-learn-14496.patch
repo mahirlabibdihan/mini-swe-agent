@@ -1,0 +1,85 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..adbf8e47e
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++set -uo pipefail
++
++PYTHON=python3
++mkdir -p /testbed
++
++# Create the reproduction Python script
++cat > /testbed/test_reproduction.py <<'PY'
++import numpy as np
++from sklearn.cluster import OPTICS
++
++def main():
++    rng = np.random.RandomState(0)
++    X = rng.rand(100, 2)
++    # Intentionally pass min_samples as float to reproduce the reported error
++    clust = OPTICS(min_samples=0.1, metric="minkowski", n_jobs=-1)
++    clust.fit(X)
++    print("OPTICS fitted successfully")
++
++if __name__ == "__main__":
++    main()
++PY
++
++# Ensure scikit-learn and numpy are importable; attempt to install if not
++$PYTHON - <<PY >/dev/null 2>&1
++import sklearn, numpy
++PY
++if [ $? -ne 0 ]; then
++  echo "scikit-learn or numpy not importable; attempting pip install..." >&2
++  pip3 install -q scikit-learn numpy || true
++fi
++
++# Run the reproduction script and capture output and exit code (do not exit this runner on failure)
++rc=0
++output="$($PYTHON /testbed/test_reproduction.py 2>&1)" || rc=$?
++
++# Determine test status based on actual return code
++if [ "$rc" -eq 0 ]; then
++  status="PASSED"
++else
++  status="FAILED"
++fi
++
++# Write the required test_status.json using the actual status
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"test_reproduction.py::reproduce_optics_min_samples_float","status":"$status"}]}
++JSON
++
++# Print the reproduction output for visibility
++printf "%s\n" "$output"
++
++# Exit 0 so the harness sees the script executed; the test result is recorded in test_status.json
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..4e010d359
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,13 @@
++import numpy as np
++from sklearn.cluster import OPTICS
++
++def main():
++    rng = np.random.RandomState(0)
++    X = rng.rand(100, 2)
++    # Intentionally pass min_samples as float to reproduce the reported error
++    clust = OPTICS(min_samples=0.1, metric="minkowski", n_jobs=-1)
++    clust.fit(X)
++    print("OPTICS fitted successfully")
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..57a16aeef
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py::reproduce_optics_min_samples_float","status":"FAILED"}]}

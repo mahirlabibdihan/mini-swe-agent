@@ -1,0 +1,127 @@
+diff --git a/real_tests/test_a.py b/real_tests/test_a.py
+new file mode 100644
+index 000000000..b953a0f5b
+--- /dev/null
++++ b/real_tests/test_a.py
+@@ -0,0 +1,2 @@
++def test_pass():
++    assert True
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..1a26b6e13
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,90 @@
++#!/bin/bash
++set -euo pipefail
++PYTEST_VERSION="6.1.0"
++
++# Prepare test layout:
++rm -rf /testbed/tests /testbed/real_tests /testbed/test_status.json
++mkdir -p /testbed/real_tests
++cat <<'PY' > /testbed/real_tests/test_a.py
++def test_pass():
++    assert True
++PY
++
++# Create a tests/ directory that only contains a symlink to the real tests dir
++mkdir -p /testbed/tests
++rm -f /testbed/tests/link_to_real
++ln -s ../real_tests /testbed/tests/link_to_real
++
++# Install pytest 6.1.0 (best-effort)
++python -m pip install -q "pytest==${PYTEST_VERSION}" || true
++
++PYTEST_CMD="python -m pytest"
++
++# Run tests and collect-only (capture outputs)
++run_out="$($PYTEST_CMD -q /testbed/tests --disable-warnings -ra 2>&1 || true)"
++run_ec=$?
++collect_out="$($PYTEST_CMD --collect-only -q /testbed/tests 2>&1 || true)"
++
++python - <<'PY' "$run_out" "$collect_out" "$run_ec"
++import sys, json, re, os
++run_out = sys.argv[1]
++collect_out = sys.argv[2]
++run_ec = int(sys.argv[3])
++
++# Determine if pytest collected nothing
++low_run = run_out.lower()
++low_coll = collect_out.lower()
++no_collected = any(kw in low for kw in ("no tests ran", "collected 0 items") for low in (low_run, low_coll))
++
++# Derive nodeids from collect-only output if present
++nodeids = []
++for line in collect_out.splitlines():
++    line = line.strip()
++    if not line:
++        continue
++    if "::" in line:
++        nodeids.append(line)
++    elif line.endswith(".py"):
++        try:
++            with open(line, 'r') as f:
++                content = f.read()
++            for m in re.finditer(r'^def (test_[A-Za-z0-9_]+)\\s*\\(', content, flags=re.M):
++                nodeids.append(f"{os.path.abspath(line)}::{m.group(1)}")
++        except Exception:
++            nodeids.append(line)
++
++# If nothing found, use the expected nodeid under the symlinked path
++if not nodeids:
++    nodeids = ["/testbed/tests/link_to_real/test_a.py::test_pass"]
++
++tests = []
++for nid in nodeids:
++    if no_collected:
++        # Observed behavior: pytest failed to collect the symlinked directory.
++        # For reproduction purposes, mark this as FAILED to indicate the bug.
++        status = "FAILED"
++    else:
++        # Infer status from run output and exit code
++        if re.search(r"\b1 passed\b", run_out):
++            status = "PASSED"
++        elif re.search(r"\b1 failed\b", run_out):
++            status = "FAILED"
++        elif re.search(re.escape(nid.split("::")[-1]) + r".*PASSED", run_out, re.I):
++            status = "PASSED"
++        elif re.search(re.escape(nid.split("::")[-1]) + r".*FAILED", run_out, re.I):
++            status = "FAILED"
++        else:
++            status = "PASSED" if run_ec == 0 else "FAILED"
++    tests.append({"name": nid, "status": status})
++
++out = {"tests": tests}
++open("/testbed/test_status.json", "w").write(json.dumps(out, indent=2))
++
++# Print outputs for visibility
++print("=== PYTEST RUN OUTPUT ===")
++print(run_out)
++print("=== PYTEST COLLECT-ONLY OUTPUT ===")
++print(collect_out)
++print("=== GENERATED /testbed/test_status.json ===")
++print(json.dumps(out, indent=2))
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..9872466fb
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/tests/link_to_real/test_a.py::test_pass",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/tests/link_to_real b/tests/link_to_real
+new file mode 120000
+index 000000000..ade0e67eb
+--- /dev/null
++++ b/tests/link_to_real
+@@ -0,0 +1 @@
++../real_tests
+\ No newline at end of file

@@ -1,0 +1,85 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..763b819b48
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++orig_match=$(echo "$output" | awk -F': ' '/ORIG_MATCH/ {print $2}' | tr -d '\r\n')
++fixed_match=$(echo "$output" | awk -F': ' '/FIXED_MATCH/ {print $2}' | tr -d '\r\n')
++
++# For reproduction we want to show the bug as a failing test:
++# - The original regex SHOULD match negative-duration strings (but it doesn't) -> mark FAILED if it does not match
++# - The fixed regex SHOULD match negative-duration strings -> mark PASSED if it matches
++status_orig=FAILED
++status_fixed=FAILED
++if [ "$orig_match" = "True" ]; then status_orig=PASSED; else status_orig=FAILED; fi
++if [ "$fixed_match" = "True" ]; then status_fixed=PASSED; else status_fixed=FAILED; fi
++
++python3 - <<PY
++import json
++from pathlib import Path
++statuses = [
++  {"name": "test_reproduction.py::original_regex_should_match_negative_duration", "status": "$status_orig"},
++  {"name": "test_reproduction.py::fixed_regex_should_match_negative_duration", "status": "$status_fixed"}
++]
++Path("/testbed/test_status.json").write_text(json.dumps({"tests": statuses}, indent=2))
++print("WROTE /testbed/test_status.json")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..7c23690298
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,29 @@
++import re, sys
++original = re.compile(
++    r'^'
++    r'(?:(?P<days>-?\d+) (days?, )?)?'
++    r'((?:(?P<hours>-?\d+):)(?=\d+:\d+))?'
++    r'(?:(?P<minutes>-?\d+):)?'
++    r'(?P<seconds>-?\d+)'
++    r'(?:\.(?P<microseconds>\d{1,6})\d{0,6})?'
++    r'$'
++)
++fixed = re.compile(
++    r'^'
++    r'(?:(?P<days>-?\d+) (days?, )?)?'
++    r'((?:(?P<hours>-?\d+):)(?=-?\d+:-?\d+))?'
++    r'(?:(?P<minutes>-?\d+):)?'
++    r'(?P<seconds>-?\d+)'
++    r'(?:\.(?P<microseconds>\d{1,6})\d{0,6})?'
++    r'$'
++)
++test_str = '-1:-02:-03'
++orig = bool(original.match(test_str))
++fixed_m = bool(fixed.match(test_str))
++print(f"TEST_STRING: {test_str}")
++print(f"ORIG_MATCH: {orig}")
++print(f"FIXED_MATCH: {fixed_m}")
++if orig:
++    print("ORIG_GROUPS:", original.match(test_str).groupdict())
++if fixed_m:
++    print("FIXED_GROUPS:", fixed.match(test_str).groupdict())
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..b92ba2a6a3
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::original_regex_should_match_negative_duration",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::fixed_regex_should_match_negative_duration",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

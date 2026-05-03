@@ -1,0 +1,124 @@
+diff --git a/output.svg b/output.svg
+new file mode 100644
+index 0000000000..49a2cd18b4
+Binary files /dev/null and b/output.svg differ
+diff --git a/repro_output.txt b/repro_output.txt
+new file mode 100644
+index 0000000000..893ced7e3f
+--- /dev/null
++++ b/repro_output.txt
+@@ -0,0 +1,2 @@
++GID = My_label
++Saved SVG to /testbed/output.svg
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 0000000000..fef7a975bd
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,62 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the reproduction Python script
++cat > /testbed/test_reproduction.py <<'PY'
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++from matplotlib.offsetbox import OffsetImage, AnnotationBbox
++import numpy as np
++
++fig, ax = plt.subplots(figsize=(4,4))
++# create a simple red square image
++arr_img = np.zeros((20,20,3), dtype=float)
++arr_img[...,0] = 1.0
++imagebox = OffsetImage(arr_img, zoom=1)
++# ensure image knows about axes (as in user's example)
++imagebox.image.axes = ax
++
++xy = [0.5, 0.5]
++ab = AnnotationBbox(imagebox, xy,
++                    xybox=(20., -20.),
++                    xycoords='data',
++                    boxcoords="offset points",
++                    pad=0.5,
++                    arrowprops=dict(arrowstyle="->",
++                                    connectionstyle="angle,angleA=0,angleB=90,rad=3"))
++ab.set_gid('My_label')
++ax.add_artist(ab)
++ax.set_xlim(0,1)
++ax.set_ylim(0,1)
++
++print(f"GID = {ab.get_gid()}", flush=True)
++outpath = '/testbed/output.svg'
++fig.savefig(outpath, format='svg')
++print(f"Saved SVG to {outpath}", flush=True)
++PY
++
++# Run the reproduction script and capture output
++python /testbed/test_reproduction.py > /testbed/repro_output.txt 2>&1 || true
++
++# Determine status based on presence of id in SVG
++STATUS="ERROR"
++SVG="/testbed/output.svg"
++if [ -f "$SVG" ]; then
++  if grep -Fq 'id="My_label"' "$SVG"; then
++    STATUS="PASSED"
++  else
++    STATUS="FAILED"
++  fi
++fi
++
++# Write the required test_status.json
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"/testbed/test_reproduction.py::annotationbox_gid","status":"$STATUS"}]}
++JSON
++
++echo "Wrote /testbed/test_status.json with status: $STATUS"
++echo "----- Reproduction script output -----"
++sed -n '1,200p' /testbed/repro_output.txt || true
++echo "----- Snippet of SVG (first 200 lines) -----"
++sed -n '1,200p' /testbed/output.svg || true
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..e04382363a
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,31 @@
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++from matplotlib.offsetbox import OffsetImage, AnnotationBbox
++import numpy as np
++
++fig, ax = plt.subplots(figsize=(4,4))
++# create a simple red square image
++arr_img = np.zeros((20,20,3), dtype=float)
++arr_img[...,0] = 1.0
++imagebox = OffsetImage(arr_img, zoom=1)
++# ensure image knows about axes (as in user's example)
++imagebox.image.axes = ax
++
++xy = [0.5, 0.5]
++ab = AnnotationBbox(imagebox, xy,
++                    xybox=(20., -20.),
++                    xycoords='data',
++                    boxcoords="offset points",
++                    pad=0.5,
++                    arrowprops=dict(arrowstyle="->",
++                                    connectionstyle="angle,angleA=0,angleB=90,rad=3"))
++ab.set_gid('My_label')
++ax.add_artist(ab)
++ax.set_xlim(0,1)
++ax.set_ylim(0,1)
++
++print(f"GID = {ab.get_gid()}", flush=True)
++outpath = '/testbed/output.svg'
++fig.savefig(outpath, format='svg')
++print(f"Saved SVG to {outpath}", flush=True)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..68bf0695ef
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"/testbed/test_reproduction.py::annotationbox_gid","status":"FAILED"}]}

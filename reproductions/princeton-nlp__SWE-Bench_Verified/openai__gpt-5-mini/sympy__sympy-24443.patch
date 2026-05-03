@@ -1,0 +1,68 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..dae9c748d5
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/usr/bin/env bash
++set -euo pipefail
++# Run the reproduction and capture output
++output="$(python3 /testbed/test_reproduction.py 2>&1 || true)"
++
++# If sympy missing, install and rerun once
++if echo "$output" | grep -qE "ModuleNotFoundError: No module named 'sympy'|ImportError: No module named sympy"; then
++  echo "sympy not found, installing sympy..."
++  pip install -q sympy
++  output="$(python3 /testbed/test_reproduction.py 2>&1 || true)"
++fi
++
++# If the buggy ValueError appears, record FAILED (bug reproduced); otherwise PASSED
++if echo "$output" | grep -q "The given images do not define a homomorphism"; then
++  status="FAILED"
++else
++  status="PASSED"
++fi
++
++# Write valid JSON to /testbed/test_status.json
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"test_reproduction.py::test_homomorphism_permutationgroup","status":"$status"}]}
++JSON
++
++# Print captured output and the produced JSON for visibility
++echo "---- captured output ----"
++echo "$output"
++echo "---- end output ----"
++echo "Wrote /testbed/test_status.json with status: $status"
++echo "=== /testbed/test_status.json ==="
++cat /testbed/test_status.json
++echo "================================="
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..a4cc15f9bc
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,17 @@
++from sympy.combinatorics import *
++from sympy.combinatorics.homomorphisms import homomorphism
++import sys, traceback
++
++def reproduce():
++    D3 = DihedralGroup(3)
++    # This call (per the PR) currently raises ValueError; we reproduce that behavior
++    T = homomorphism(D3, D3, D3.generators, D3.generators)
++    print("NO_EXCEPTION: homomorphism returned:", T)
++
++if __name__ == "__main__":
++    try:
++        reproduce()
++    except Exception as e:
++        traceback.print_exc()
++        print("EXCEPTION_TYPE:", type(e).__name__)
++        sys.exit(1)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..aac8fd3950
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_reproduction.py::test_homomorphism_permutationgroup","status":"FAILED"}]}

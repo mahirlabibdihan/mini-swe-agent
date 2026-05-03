@@ -1,0 +1,109 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..87c97363d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++set -u
++PYOUT="$(python3 /testbed/test_repro.py 2>&1 || true)"
++echo "$PYOUT"
++# Parse output lines
++line1="$(echo "$PYOUT" | sed -n '1p' || true)"
++has_before="$(echo "$PYOUT" | sed -n '2p' | sed 's/HAS_VOCAB_BEFORE://g' || true)"
++has_after="$(echo "$PYOUT" | sed -n '3p' | sed 's/HAS_VOCAB_AFTER://g' || true)"
++
++# Now EXPECT the corrected behavior:
++# Test 1 expectation: get_feature_names should NOT raise (i.e., line1 == "NO_EXCEPTION")
++if [ "$line1" = "NO_EXCEPTION" ]; then
++  status1="PASSED"
++else
++  status1="FAILED"
++fi
++
++# Test 2 expectation: vocabulary_ should already exist before transform (has_before == True)
++if [ "$has_before" = "True" ]; then
++  status2="PASSED"
++else
++  status2="FAILED"
++fi
++
++python3 - <<PY > /testbed/test_status.json
++import json
++print(json.dumps({"tests": [
++  {"name": "test_repro.py::expect_get_feature_names_not_raise", "status": "$status1"},
++  {"name": "test_repro.py::expect_vocabulary_present_before_transform", "status": "$status2"}
++]}, indent=2))
++PY
++
++echo "WROTE /testbed/test_status.json"
++cat /testbed/test_status.json
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 000000000..c98ae8318
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,45 @@
++import sys
++from sklearn.feature_extraction.text import CountVectorizer
++try:
++    from sklearn.exceptions import NotFittedError
++except Exception:
++    class NotFittedError(Exception):
++        pass
++
++corpus = [
++    'This is the first document.',
++    'This is the second second document.',
++    'And the third one.',
++    'Is this the first document?',
++]
++
++vocabulary = ['and', 'document', 'first', 'is', 'one', 'second', 'the', 'third', 'this']
++
++v = CountVectorizer(vocabulary=vocabulary)
++
++res1 = None
++try:
++    # Prefer legacy method if present, otherwise try out-method
++    if hasattr(v, "get_feature_names"):
++        v.get_feature_names()
++    else:
++        # Some sklearn versions use get_feature_names_out
++        v.get_feature_names_out()
++    res1 = "NO_EXCEPTION"
++except Exception as e:
++    # Detect NotFittedError by type or name to be robust across versions
++    if isinstance(e, NotFittedError) or e.__class__.__name__ == "NotFittedError":
++        res1 = "RAISED_NOT_FITTED"
++    else:
++        res1 = "RAISED_OTHER:" + e.__class__.__name__
++
++has_vocab_before = hasattr(v, "vocabulary_")
++try:
++    v.transform(corpus)
++    has_vocab_after = hasattr(v, "vocabulary_")
++except Exception as e:
++    has_vocab_after = False
++
++print(res1)
++print("HAS_VOCAB_BEFORE:" + str(has_vocab_before))
++print("HAS_VOCAB_AFTER:" + str(has_vocab_after))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..9a5e57dab
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::expect_get_feature_names_not_raise",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_repro.py::expect_vocabulary_present_before_transform",
++      "status": "FAILED"
++    }
++  ]
++}

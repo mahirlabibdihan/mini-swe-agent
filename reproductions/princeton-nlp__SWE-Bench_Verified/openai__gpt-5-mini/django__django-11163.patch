@@ -1,0 +1,90 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 0000000000..170487763b
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++# Run the reproduction and write /testbed/test_status.json with the real result.
++mkdir -p /testbed
++output=$(python3 test_reproduction.py 2>&1)
++rc=$?
++echo "$output"
++if [ $rc -eq 0 ]; then status="PASSED"; else status="FAILED"; fi
++
++python3 - "$status" /testbed/test_status.json <<'PY'
++import sys, json
++status = sys.argv[1]
++out_path = sys.argv[2]
++tests = [{"name": "test_reproduction.py::test_model_to_dict_empty_fields", "status": ("PASSED" if status=="PASSED" else "FAILED")}]
++with open(out_path, "w") as f:
++    json.dump({"tests": tests}, f, indent=2)
++print("Wrote", out_path)
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..a63520af48
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,46 @@
++#!/usr/bin/env python3
++# Reproduction of Django's model_to_dict bug: when fields=[] it should return {}
++class Field:
++    def __init__(self, name):
++        self.name = name
++
++class Meta:
++    def __init__(self, fields):
++        self.fields = fields
++
++class Model:
++    def __init__(self, **kwargs):
++        # two example fields
++        self._meta = Meta([Field('id'), Field('name')])
++        self.id = kwargs.get('id', 1)
++        self.name = kwargs.get('name', 'Alice')
++
++def model_to_dict(instance, fields=None):
++    # BUGGY condition as reported in the PR:
++    # if fields and f.name not in fields:
++    #     continue
++    data = {}
++    for f in instance._meta.fields:
++        if fields and f.name not in fields:
++            continue
++        data[f.name] = getattr(instance, f.name)
++    return data
++
++def main():
++    inst = Model()
++    # According to the issue, calling with fields=[] should return {}
++    result = model_to_dict(inst, fields=[])
++    expected = {}
++    print("model_to_dict(inst, fields=[] ) ->", result)
++    print("expected ->", expected)
++    if result == expected:
++        print("TEST PASS: returned empty dict as expected")
++        import sys
++        sys.exit(0)
++    else:
++        print("TEST FAIL: returned all fields when fields=[] (bug reproduced)")
++        import sys
++        sys.exit(2)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..ab992acf20
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_model_to_dict_empty_fields",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

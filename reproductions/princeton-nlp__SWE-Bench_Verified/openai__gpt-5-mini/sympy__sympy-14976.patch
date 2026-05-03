@@ -1,0 +1,80 @@
+diff --git a/repro_test.py b/repro_test.py
+new file mode 100644
+index 000000000..e58bf2883
+--- /dev/null
++++ b/repro_test.py
+@@ -0,0 +1,21 @@
++import sys
++from sympy import Eq, rf, Symbol, S, lambdify, nsolve, Float
++import inspect
++x = Symbol('x')
++eqn = Eq(rf(18, x), 77 + S(1)/3)
++f = lambdify(x, eqn.lhs - eqn.rhs, 'mpmath')
++try:
++    src = inspect.getsource(f)
++except Exception as e:
++    src = "<could not get source: %s>" % e
++print("SOURCE:")
++print(src)
++try:
++    x0 = nsolve(eqn, Float('1.5', 64), prec=64)
++    val = rf(18, x0).evalf(64)
++    print("RF_EVAL:")
++    print(val)
++except Exception as e:
++    print("NSOLVE_ERROR:")
++    print(repr(e))
++    sys.exit(1)
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 000000000..65e898225
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,32 @@
++#!/bin/bash
++set -euo pipefail
++# Run the existing reproduction script and capture all output
++output=$(python3 /testbed/repro_test.py 2>&1 || true)
++echo "$output"
++
++# Determine status robustly: look for "232/3" with optional spaces, or patterns indicating mpmath wrapping
++status="SKIPPED"
++if echo "$output" | grep -E -q '232\s*/\s*3' ; then
++    status="FAILED"
++elif echo "$output" | grep -E -q 'mp\.mpf|mpmath\.mpf|mpf\(|mp\.mpf\(' ; then
++    status="PASSED"
++elif echo "$output" | grep -E -q 'ModuleNotFoundError|ImportError' ; then
++    status="ERROR"
++else
++    # If nsolve failed (non-zero exit) but no clear markers, mark as ERROR
++    # We can't get the exit code here because we captured output with || true; infer from content
++    if echo "$output" | grep -q "NSOLVE_ERROR:" ; then
++        status="ERROR"
++    else
++        status="SKIPPED"
++    fi
++fi
++
++# Write the JSON result
++python3 - <<PY "$status"
++import json,sys
++status=sys.argv[1]
++tests=[{"name":"/testbed/repro_test.py::test_lambdify_mpmath_rational","status":status}]
++open("/testbed/test_status.json","w").write(json.dumps({"tests":tests},indent=2))
++print("/testbed/test_status.json written with status:", status)
++PY
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..2ee121579
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/repro_test.py::test_lambdify_mpmath_rational",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

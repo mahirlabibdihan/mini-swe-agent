@@ -1,0 +1,110 @@
+diff --git a/build_sphinx.log b/build_sphinx.log
+new file mode 100644
+index 000000000..8b6681968
+--- /dev/null
++++ b/build_sphinx.log
+@@ -0,0 +1,21 @@
++Running Sphinx v4.3.0+/89d9efc9a
++building [mo]: targets for 0 po files that are out of date
++building [html]: targets for 1 source files that are out of date
++updating environment: [new config] 1 added, 0 changed, 0 removed
++reading sources... [100%] index
++
++looking for now-outdated files... none found
++pickling environment... done
++checking consistency... done
++preparing documents... done
++writing output... [100%] index
++
++generating indices... genindex done
++writing additional pages... search done
++copying static files... done
++copying extra files... done
++dumping search index in English (code: en)... done
++dumping object inventory... done
++build succeeded.
++
++The HTML pages are in build.
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..05061c01c
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,40 @@
++#!/bin/bash
++set -euo pipefail
++# Look in possible build directories
++paths=(/testbed/build /testbed/build/html /testbed/build/*)
++matches_parens=""
++matches_foo_bar=""
++matches_foo_baz=""
++for p in "${paths[@]}"; do
++  if [ -e "$p" ]; then
++    matches_parens+=$(grep -R -n -F 'bar()' "$p" 2>/dev/null || true)
++    matches_foo_bar+=$(grep -R -n -F 'Foo.bar' "$p" 2>/dev/null || true)
++    matches_foo_baz+=$(grep -R -n -F 'Foo.baz' "$p" 2>/dev/null || true)
++  fi
++done
++status="ERROR"
++if [ -n "$matches_parens" ]; then
++  status="FAILED"
++elif [ -n "$matches_foo_bar" ] || [ -n "$matches_foo_baz" ]; then
++  status="PASSED"
++else
++  status="ERROR"
++fi
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test/repro/sphinx_property_parens",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++echo "matches_parens:"
++echo "$matches_parens"
++echo "matches_foo_bar:"
++echo "$matches_foo_bar"
++echo "matches_foo_baz:"
++echo "$matches_foo_baz"
++echo "/testbed/test_status.json contents:"
++cat /testbed/test_status.json
+diff --git a/source/conf.py b/source/conf.py
+new file mode 100644
+index 000000000..399f74e7f
+--- /dev/null
++++ b/source/conf.py
+@@ -0,0 +1,4 @@
++project = 'sphinx-repro'
++master_doc = 'index'
++extensions = []
++nitpicky = False
+diff --git a/source/index.rst b/source/index.rst
+new file mode 100644
+index 000000000..07a21130f
+--- /dev/null
++++ b/source/index.rst
+@@ -0,0 +1,7 @@
++.. toctree::
++   :maxdepth: 1
++
++.. py:method:: Foo.bar
++   :property:
++
++.. py:property:: Foo.baz
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..68ad2ce94
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test/repro/sphinx_property_parens",
++      "status": "FAILED"
++    }
++  ]
++}

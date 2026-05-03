@@ -1,0 +1,98 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..8296b0a9b7
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,3 @@
++#!/bin/bash
++set -euo pipefail
++python3 /testbed/test_repro.py
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..d3e72b4844
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,64 @@
++#!/usr/bin/env python3
++import os
++import re
++import json
++from pathlib import Path
++
++def find_datetime_files():
++    candidates = []
++    for root, dirs, files in os.walk('.'):
++        if 'django' in root and os.path.basename(root) == 'functions' and 'datetime.py' in files:
++            candidates.append(os.path.join(root, 'datetime.py'))
++    if not candidates:
++        for root, dirs, files in os.walk('.'):
++            if 'datetime.py' in files and ('django' in root and 'models' in root and 'functions' in root):
++                candidates.append(os.path.join(root, 'datetime.py'))
++    if not candidates:
++        for root, dirs, files in os.walk('.'):
++            if os.path.basename(root) == 'functions' and 'datetime.py' in files:
++                candidates.append(os.path.join(root, 'datetime.py'))
++    return candidates
++
++def analyze_file(path):
++    text = Path(path).read_text(encoding="utf-8", errors="ignore")
++    results = {}
++    for cls in ("TruncDate", "TruncTime"):
++        m = re.search(r'class\s+' + re.escape(cls) + r'\b', text)
++        if not m:
++            results[cls] = {"found": False, "bug": False, "excerpt": ""}
++            continue
++        start = m.start()
++        next_class = re.search(r'\nclass\s+\w+', text[start+1:])
++        end = (start + 1 + next_class.start()) if next_class else len(text)
++        block = text[start:end]
++        excerpt = block[:2000]
++        uses_get_current = 'get_current_timezone_name()' in block or 'get_current_timezone()' in block
++        references_tzinfo = 'self.tzinfo' in block or 'tzinfo=' in block or re.search(r'\btzinfo\b', block) is not None
++        bug = uses_get_current and not references_tzinfo
++        results[cls] = {"found": True, "bug": bug, "uses_get_current": uses_get_current, "references_tzinfo": references_tzinfo, "excerpt": excerpt}
++    return results
++
++def main():
++    candidates = find_datetime_files()
++    overall_status = []
++    if not candidates:
++        overall_status.append({"name": "test_reproduction::find_datetime.py", "status": "ERROR"})
++        Path("/testbed/test_status.json").write_text(json.dumps({"tests": overall_status}, indent=2))
++        print("No datetime.py found to analyze.")
++        return
++    # Inspect first candidate
++    p = candidates[0]
++    res = analyze_file(p)
++    for cls, info in res.items():
++        name = f"test_reproduction::{os.path.relpath(p)}::{cls}_tzinfo_ignored"
++        if not info["found"]:
++            status = "ERROR"
++        else:
++            # Invert: if bug is detected, report FAILED to indicate repository is in the failing state described.
++            status = "FAILED" if info["bug"] else "PASSED"
++        overall_status.append({"name": name, "status": status})
++    Path("/testbed/test_status.json").write_text(json.dumps({"tests": overall_status}, indent=2))
++    print(json.dumps({"file_checked": [p], "results": overall_status}, indent=2))
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..455d50df18
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction::django/db/models/functions/datetime.py::TruncDate_tzinfo_ignored",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction::django/db/models/functions/datetime.py::TruncTime_tzinfo_ignored",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

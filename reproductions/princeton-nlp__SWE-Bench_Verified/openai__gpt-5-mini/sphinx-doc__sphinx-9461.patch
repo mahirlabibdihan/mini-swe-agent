@@ -1,0 +1,61 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..8b0843a5a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,23 @@
++\
++#!/bin/bash
++set -euo pipefail
++python3 - <<'PY2'
++import sys, json
++from pathlib import Path
++sys.path.insert(0, "/testbed")
++import test_module
++Base = test_module.BaseClass
++prop_val = getattr(Base, 'baseclass_property')
++class_prop_val = getattr(Base, 'baseclass_class_property')
++prop_is_property = isinstance(prop_val, property)
++class_prop_is_value = not isinstance(class_prop_val, property)
++bug = prop_is_property and class_prop_is_value
++status = "FAILED" if bug else "PASSED"
++result = {"tests":[{"name":"testbed/reproduce_classmethod_property_doc","status":status}]}
++Path("/testbed/test_status.json").write_text(json.dumps(result, indent=2))
++# Print details for human inspection
++print("prop_type:", type(prop_val).__name__)
++print("class_prop_type:", type(class_prop_val).__name__)
++print("class_prop_value_repr:", repr(class_prop_val))
++print("bug_reproduced:", bug)
++PY2
+diff --git a/test_module.py b/test_module.py
+new file mode 100644
+index 000000000..523a562c6
+--- /dev/null
++++ b/test_module.py
+@@ -0,0 +1,11 @@
++class BaseClass:
++    @property
++    def baseclass_property(self):
++        """Instance property docstring"""
++        return "prop"
++
++    @classmethod
++    @property
++    def baseclass_class_property(cls):
++        """Class property docstring"""
++        return "classprop"
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..6d4d118a6
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/reproduce_classmethod_property_doc",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

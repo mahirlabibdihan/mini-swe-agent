@@ -1,0 +1,78 @@
+diff --git a/launcher.py b/launcher.py
+new file mode 100644
+index 0000000000..a49797cb5d
+--- /dev/null
++++ b/launcher.py
+@@ -0,0 +1,18 @@
++import sys, os, subprocess
++def info(prefix):
++    xopts = getattr(sys, "_xoptions", {})
++    # open this file to show the default encoding used by open()
++    with open(__file__, "r") as f:
++        enc = f.encoding
++    print(f"{prefix} sys._xoptions: {xopts}")
++    print(f"{prefix} open(__file__).encoding: {enc}")
++
++if os.environ.get("IS_CHILD") == "1":
++    info("CHILD ")
++else:
++    info("PARENT ")
++    env = os.environ.copy()
++    env["IS_CHILD"] = "1"
++    # deliberately invoke the interpreter without forwarding -X options
++    proc = subprocess.run([sys.executable, __file__], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
++    print(proc.stdout, end='')
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..0c455cd4f1
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Run the reproduction with -X utf8 to set the parent's xoptions
++output=$(python -X utf8 launcher.py 2>&1 || true)
++echo "$output"
++
++# Determine if parent had utf8 xoption and child did not
++parent_has_utf8=$(printf "%s" "$output" | grep -A0 "PARENT sys._xoptions" -n || true | wc -l)
++# More robust checks: look for 'PARENT sys._xoptions:' line and whether it contains 'utf8'
++parent_line=$(printf "%s" "$output" | sed -n '1,200p' | grep "PARENT sys._xoptions" || true)
++child_line=$(printf "%s" "$output" | sed -n '1,200p' | grep "CHILD sys._xoptions" || true)
++parent_has=$(printf "%s" "$parent_line" | grep -o "utf8" || true)
++child_has=$(printf "%s" "$child_line" | grep -o "utf8" || true)
++
++status="FAILED"
++if [ -n "$parent_has" ] && [ -z "$child_has" ]; then
++  status="PASSED"
++fi
++
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "testbed/launcher.py::reloader_preserves_X_options",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++
++# Exit with success so the harness can read the test_status.json; failures are indicated in the JSON.
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..554b967054
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "testbed/launcher.py::reloader_preserves_X_options",
++      "status": "FAILED"
++    }
++  ]
++}

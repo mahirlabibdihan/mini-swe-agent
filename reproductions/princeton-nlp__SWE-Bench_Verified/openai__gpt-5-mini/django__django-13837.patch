@@ -1,0 +1,137 @@
+diff --git a/mypkg/__init__.py b/mypkg/__init__.py
+new file mode 100644
+index 0000000000..3381c76320
+--- /dev/null
++++ b/mypkg/__init__.py
+@@ -0,0 +1 @@
++# empty package
+diff --git a/mypkg/__main__.py b/mypkg/__main__.py
+new file mode 100644
+index 0000000000..6f15e55cb1
+--- /dev/null
++++ b/mypkg/__main__.py
+@@ -0,0 +1,20 @@
++import sys
++main = sys.modules.get('__main__')
++
++def old_detect():
++    # Simulate the brittle original logic: check for 'django' in __file__ or package == 'django'
++    f = getattr(main, '__file__', None)
++    if f and 'django' in f:
++        return True
++    pkg = getattr(main, '__package__', None)
++    return pkg == 'django'
++
++def new_detect():
++    spec = getattr(main, '__spec__', None)
++    parent = getattr(spec, 'parent', None) if spec else None
++    return parent
++
++print("MAIN_PACKAGE:", getattr(main, '__package__', None))
++print("MAIN_SPEC_PARENT:", new_detect())
++print("OLD_DETECT:", old_detect())
++print("NEW_DETECT_FOR_DJANGO_EQ:", (new_detect() == 'django'))
+diff --git a/pkg_other_than_django/__init__.py b/pkg_other_than_django/__init__.py
+new file mode 100644
+index 0000000000..6e0a183d82
+--- /dev/null
++++ b/pkg_other_than_django/__init__.py
+@@ -0,0 +1 @@
++# package initializer (empty)
+diff --git a/pkg_other_than_django/__main__.py b/pkg_other_than_django/__main__.py
+new file mode 100644
+index 0000000000..dc664d0282
+--- /dev/null
++++ b/pkg_other_than_django/__main__.py
+@@ -0,0 +1,31 @@
++import sys
++
++main = sys.modules.get('__main__')
++
++def old_detect():
++    """
++    Simulate the old brittle detection: check __file__ for 'django' or __package__ equals 'django'.
++    This will fail to detect when Python is started with -m pkg_other_than_django.
++    """
++    m = main
++    f = getattr(m, '__file__', None)
++    if f and 'django' in f:
++        return True
++    pkg = getattr(m, '__package__', None)
++    return pkg == 'django'
++
++def new_detect():
++    """
++    Simulate the robust detection using __spec__.parent as proposed in the PR.
++    """
++    spec = getattr(main, '__spec__', None)
++    parent = getattr(spec, 'parent', None) if spec else None
++    # Return the actual parent value for demonstration; tests will interpret it.
++    return parent
++
++# Print introspection info
++print("MAIN_PACKAGE:", getattr(main, '__package__', None))
++print("MAIN_SPEC_PARENT:", new_detect())
++print("OLD_DETECT:", old_detect())
++# For clarity, also print what a strict new-detection boolean WOULD be for 'django' detection:
++print("NEW_DETECT_FOR_DJANGO_EQ:", (new_detect() == 'django'))
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..1ee8108976
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,36 @@
++#!/bin/bash
++set -euo pipefail
++cd /testbed
++
++# Run the package as a module and capture output
++output="$(python -m mypkg 2>&1 || true)"
++echo "=== Module run output ==="
++echo "$output"
++echo "=== End output ==="
++
++# Extract fields
++main_pkg="$(printf '%s\n' "$output" | awk -F': ' '/MAIN_PACKAGE/ {print $2}')"
++spec_parent="$(printf '%s\n' "$output" | awk -F': ' '/MAIN_SPEC_PARENT/ {print $2}')"
++old_det="$(printf '%s\n' "$output" | awk -F': ' '/OLD_DETECT/ {print $2}')"
++
++# Default to PASSED, but mark FAILED if old_detect missed while spec_parent indicates module name
++status="PASSED"
++if [ "$old_det" != "True" ] && [ "$spec_parent" = "mypkg" ]; then
++  status="FAILED"
++fi
++
++python3 - <<PY > test_status.json
++import json
++from pathlib import Path
++tests = []
++# Main reproduction test
++tests.append({"name": "repro/test_autoreload_old_detection::mypkg_module_run", "status": "$status"})
++# Always record that we captured the package name
++pkg_status = "PASSED" if "$main_pkg" != "" else "SKIPPED"
++tests.append({"name": "repro/metadata::captured_main_package", "status": pkg_status})
++Path("test_status.json").write_text(json.dumps({"tests": tests}, indent=2))
++print(json.dumps({"tests": tests}, indent=2))
++PY
++
++echo "Wrote /testbed/test_status.json:"
++cat test_status.json
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..dba89ae950
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "repro/test_autoreload_old_detection::mypkg_module_run",
++      "status": "FAILED"
++    },
++    {
++      "name": "repro/metadata::captured_main_package",
++      "status": "PASSED"
++    }
++  ]
++}

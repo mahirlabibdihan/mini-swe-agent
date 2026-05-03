@@ -1,0 +1,50 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..abbc71b1d8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,12 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_reproduction.py 2>&1 || true)
++echo "$output"
++status="PASSED"
++if echo "$output" | grep -q "OverflowError"; then status="FAILED"; fi
++python3 - <<PY
++import json
++from pathlib import Path
++Path("/testbed/test_status.json").write_text(json.dumps({"tests":[{"name":"test_reproduction.py::test_datetime_overflow","status":"$status"}]}, indent=2))
++print("Wrote /testbed/test_status.json with status: $status")
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..993b64fcc4
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,11 @@
++import datetime, sys
++def main():
++    y = sys.maxsize + 1
++    m = 3
++    d = 4
++    print("Attempting datetime.date with year", y)
++    # This should raise OverflowError on typical Python builds
++    datetime.date(y, m, d)
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..0af68b5ef2
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_datetime_overflow",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

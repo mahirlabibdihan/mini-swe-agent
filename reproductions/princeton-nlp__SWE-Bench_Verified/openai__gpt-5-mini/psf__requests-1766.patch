@@ -1,0 +1,229 @@
+diff --git a/dummy_server.py b/dummy_server.py
+new file mode 100644
+index 0000000..fca812a
+--- /dev/null
++++ b/dummy_server.py
+@@ -0,0 +1,44 @@
++#!/usr/bin/env python3
++# dummy_server.py - simple HTTP server that serves two endpoints:
++# /unquoted -> emits WWW-Authenticate with qop unquoted (bad)
++# /quoted   -> emits WWW-Authenticate with qop quoted (good)
++from http.server import HTTPServer, BaseHTTPRequestHandler
++import threading, sys
++
++class H(BaseHTTPRequestHandler):
++    def do_GET(self):
++        if self.path.startswith("/unquoted"):
++            header = 'Digest realm="test", qop=auth,auth-int, nonce="n", algorithm=MD5'
++            body = b"unquoted"
++            self.send_response(401)
++            self.send_header("WWW-Authenticate", header)
++            self.send_header("Content-Length", str(len(body)))
++            self.end_headers()
++            self.wfile.write(body)
++        elif self.path.startswith("/quoted"):
++            header = 'Digest realm="test", qop="auth,auth-int", nonce="n", algorithm=MD5'
++            body = b"quoted"
++            self.send_response(401)
++            self.send_header("WWW-Authenticate", header)
++            self.send_header("Content-Length", str(len(body)))
++            self.end_headers()
++            self.wfile.write(body)
++        else:
++            self.send_response(404)
++            self.end_headers()
++
++    def log_message(self, format, *args):
++        # suppress default logging
++        pass
++
++def run_server(port=8000):
++    server = HTTPServer(("127.0.0.1", port), H)
++    print("Serving on 127.0.0.1:%d" % port, flush=True)
++    try:
++        server.serve_forever()
++    except KeyboardInterrupt:
++        pass
++    server.server_close()
++
++if __name__ == "__main__":
++    run_server(8000)
+diff --git a/out_quoted.txt b/out_quoted.txt
+new file mode 100644
+index 0000000..bfd5f09
+--- /dev/null
++++ b/out_quoted.txt
+@@ -0,0 +1,39 @@
++*   Trying 127.0.0.1:8000...
++* Connected to 127.0.0.1 (127.0.0.1) port 8000 (#0)
++* Server auth using Digest with user 'user'
++> GET /quoted HTTP/1.1
++> Host: 127.0.0.1:8000
++> User-Agent: curl/7.81.0
++> Accept: */*
++> 
++* Mark bundle as not supporting multiuse
++* HTTP 1.0, assume close after body
++< HTTP/1.0 401 Unauthorized
++< Server: BaseHTTP/0.6 Python/3.9.20
++< Date: Sun, 26 Apr 2026 22:56:30 GMT
++< WWW-Authenticate: Digest realm="test", qop="auth,auth-int", nonce="n", algorithm=MD5
++< Content-Length: 6
++< 
++* Closing connection 0
++* Issue another request to this URL: 'http://127.0.0.1:8000/quoted'
++* Hostname 127.0.0.1 was found in DNS cache
++*   Trying 127.0.0.1:8000...
++* Connected to 127.0.0.1 (127.0.0.1) port 8000 (#1)
++* Server auth using Digest with user 'user'
++> GET /quoted HTTP/1.0
++> Host: 127.0.0.1:8000
++> Authorization: Digest username="user", realm="test", nonce="n", uri="/quoted", cnonce="MDViMjUzMjQyNzdmMjkwMjkxNDhkZDUzMjJjZmUwMTk=", nc=00000001, qop=auth, response="9d329b13235c0192b37fd066b3d90632", algorithm=MD5
++> User-Agent: curl/7.81.0
++> Accept: */*
++> 
++* Mark bundle as not supporting multiuse
++* HTTP 1.0, assume close after body
++< HTTP/1.0 401 Unauthorized
++< Server: BaseHTTP/0.6 Python/3.9.20
++< Date: Sun, 26 Apr 2026 22:56:30 GMT
++* Authentication problem. Ignoring this.
++< WWW-Authenticate: Digest realm="test", qop="auth,auth-int", nonce="n", algorithm=MD5
++< Content-Length: 6
++< 
++{ [6 bytes data]
++* Closing connection 1
+diff --git a/out_unquoted.txt b/out_unquoted.txt
+new file mode 100644
+index 0000000..b9d26d9
+--- /dev/null
++++ b/out_unquoted.txt
+@@ -0,0 +1,19 @@
++*   Trying 127.0.0.1:8000...
++* Connected to 127.0.0.1 (127.0.0.1) port 8000 (#0)
++* Server auth using Digest with user 'user'
++> GET /unquoted HTTP/1.1
++> Host: 127.0.0.1:8000
++> User-Agent: curl/7.81.0
++> Accept: */*
++> 
++* Mark bundle as not supporting multiuse
++* HTTP 1.0, assume close after body
++< HTTP/1.0 401 Unauthorized
++< Server: BaseHTTP/0.6 Python/3.9.20
++< Date: Sun, 26 Apr 2026 22:56:30 GMT
++* Authentication problem. Ignoring this.
++< WWW-Authenticate: Digest realm="test", qop=auth,auth-int, nonce="n", algorithm=MD5
++< Content-Length: 8
++< 
++{ [8 bytes data]
++* Closing connection 0
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000..d5de2dc
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,77 @@
++#!/bin/bash
++set -euo pipefail
++# run_test.sh - starts dummy server, queries endpoints, and writes /testbed/test_status.json
++
++PYTHON_BIN=python3
++SERVER_SCRIPT=/testbed/dummy_server.py
++LOG=/testbed/server.log
++
++# Start server in background
++${PYTHON_BIN} "${SERVER_SCRIPT}" &> "${LOG}" &
++server_pid=$!
++trap 'kill ${server_pid} 2>/dev/null || true' EXIT
++
++# Wait up to 5 seconds for server to accept connections
++start_ts=$(date +%s)
++ready=0
++while true; do
++  # try to connect to the port
++  if timeout 1 bash -c "</dev/tcp/127.0.0.1/8000" &>/dev/null; then
++    ready=1
++    break
++  fi
++  now=$(date +%s)
++  if (( now - start_ts > 5 )); then
++    break
++  fi
++  sleep 0.2
++done
++
++if [[ $ready -ne 1 ]]; then
++  echo "Server did not start or port not open; see ${LOG}" >&2
++fi
++
++query_endpoint() {
++  local path="$1"
++  # Use -v to capture the raw WWW-Authenticate header (curl -v prints it to stderr)
++  curl -v --digest --user user:passwd "http://127.0.0.1:8000${path}" -o /dev/null -s 2>&1 || true
++}
++
++out_unquoted=$(query_endpoint /unquoted)
++out_quoted=$(query_endpoint /quoted)
++
++echo "$out_unquoted" > /testbed/out_unquoted.txt
++echo "$out_quoted" > /testbed/out_quoted.txt
++
++# Determine statuses based on what curl observed
++determine_status() {
++  local out="$1"
++  if echo "$out" | grep -q 'WWW-Authenticate: .*qop="auth,auth-int"'; then
++    echo "PASSED"
++  elif echo "$out" | grep -q 'WWW-Authenticate: .*qop=auth,auth-int'; then
++    # Unquoted qop observed — reproduces the bug (server returned unquoted, curl shows unquoted)
++    echo "FAILED"
++  else
++    echo "ERROR"
++  fi
++}
++
++status_unquoted=$(determine_status "$out_unquoted")
++status_quoted=$(determine_status "$out_quoted")
++
++python3 - <<PY
++import json
++tests = [
++  {"name": "/testbed/out_unquoted.txt::server_www_authenticate_unquoted", "status": "$status_unquoted"},
++  {"name": "/testbed/out_quoted.txt::server_www_authenticate_quoted", "status": "$status_quoted"}
++]
++open("/testbed/test_status.json","w").write(json.dumps({"tests": tests}, indent=2))
++print("Wrote /testbed/test_status.json")
++PY
++
++echo "=== /testbed/out_unquoted.txt ==="
++sed -n '1,200p' /testbed/out_unquoted.txt || true
++echo "=== /testbed/out_quoted.txt ==="
++sed -n '1,200p' /testbed/out_quoted.txt || true
++
++exit 0
+diff --git a/server.log b/server.log
+new file mode 100644
+index 0000000..87bb7c2
+--- /dev/null
++++ b/server.log
+@@ -0,0 +1 @@
++Serving on 127.0.0.1:8000
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000..dee7663
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/out_unquoted.txt::server_www_authenticate_unquoted",
++      "status": "FAILED"
++    },
++    {
++      "name": "/testbed/out_quoted.txt::server_www_authenticate_quoted",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

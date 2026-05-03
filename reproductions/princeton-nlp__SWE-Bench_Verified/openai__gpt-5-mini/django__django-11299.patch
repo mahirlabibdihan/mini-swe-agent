@@ -1,0 +1,97 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..2ff7a09598
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,73 @@
++#!/usr/bin/env bash
++set -euo pipefail
++mkdir -p /testbed
++DB="/tmp/test_django_constraint.db"
++rm -f "$DB"
++
++# SQL sequence that Django produced in the PR (includes fully-qualified names in the CHECK)
++SQL=$(cat <<'SQL'
++BEGIN;
++CREATE TABLE "app_testconstraint" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "field_1" integer NULL, "flag" bool NOT NULL);
++CREATE TABLE "new__app_testconstraint" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "field_1" integer NULL, "flag" bool NOT NULL, CONSTRAINT "field_1_has_value_if_flag_set" CHECK ((("new__app_testconstraint"."field_1" IS NOT NULL AND "new__app_testconstraint"."flag" = 1) OR "flag" = 0)));
++COMMIT;
++SQL
++)
++
++# Execute SQL (use sqlite3 CLI if available, otherwise Python)
++if command -v sqlite3 >/dev/null 2>&1; then
++  printf "%s\n" "$SQL" | sqlite3 "$DB" 2>&1 || true
++else
++  python3 - <<'PY'
++import sqlite3,sys,traceback
++sql = """%s"""
++try:
++    con = sqlite3.connect('/tmp/test_django_constraint.db')
++    con.executescript(sql)
++    con.close()
++except Exception as e:
++    print("PY_ERR:", e)
++    traceback.print_exc()
++PY
++fi
++
++# Inspect sqlite_master for the CREATE statement of the new table
++CREATED_SQL=""
++if command -v sqlite3 >/dev/null 2>&1; then
++  CREATED_SQL=$(sqlite3 "$DB" "SELECT sql FROM sqlite_master WHERE type='table' AND name='new__app_testconstraint';")
++else
++  CREATED_SQL=$(python3 - <<'PY'
++import sqlite3
++con = sqlite3.connect('/tmp/test_django_constraint.db')
++cur = con.cursor()
++cur.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='new__app_testconstraint';")
++row = cur.fetchone()
++print(row[0] if row else "")
++con.close()
++PY
++)
++fi
++
++echo "=== new__app_testconstraint CREATE SQL ==="
++printf "%s\n" "$CREATED_SQL"
++echo "========================================"
++
++# Determine if the CREATE SQL contains a fully-qualified reference to new__app_testconstraint.field_1
++STATUS="PASSED"
++if printf "%s\n" "$CREATED_SQL" | grep -q -E '"new__app_testconstraint"\."field_1' ; then
++  STATUS="FAILED"
++fi
++
++# Write test results as required
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "reproduction/sqlite_fully_qualified_check_in_new_table",
++      "status": "$STATUS"
++    }
++  ]
++}
++JSON
++
++echo "Wrote /testbed/test_status.json with status: $STATUS"
++exit 0
+diff --git a/test.db b/test.db
+new file mode 100644
+index 0000000000..7f92cedf06
+Binary files /dev/null and b/test.db differ
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..c671bf3274
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "reproduction/sqlite_fully_qualified_check_in_new_table",
++      "status": "FAILED"
++    }
++  ]
++}

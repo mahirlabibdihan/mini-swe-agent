@@ -1,0 +1,72 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..18e8b47ab9
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,18 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python3 /testbed/test_repro.py 2>&1 || true)
++# Echo the raw output for visibility
++echo "$output"
++# Decide test status based on whether "text/html" appears in the output for the tested files.
++python3 - <<'PY' "$output"
++import json, sys
++out = sys.argv[1]
++# If either mimetypes or FileResponse reports "text/html" for these compressed filenames,
++# consider the reproduction "FAILED" (bug present). Otherwise "PASSED".
++status = "FAILED" if "text/html" in out else "PASSED"
++tests = [{"name":"/testbed/test_repro.py::test_mime_guess_br_Z", "status": status}]
++Path = "/testbed/test_status.json"
++with open(Path, "w") as f:
++    json.dump({"tests": tests}, f, indent=2)
++print(json.dumps({"tests": tests}, indent=2))
++PY
+diff --git a/test.html.Z b/test.html.Z
+new file mode 100644
+index 0000000000..0858f1838e
+--- /dev/null
++++ b/test.html.Z
+@@ -0,0 +1 @@
++dummy html content
+diff --git a/test.html.br b/test.html.br
+new file mode 100644
+index 0000000000..0858f1838e
+--- /dev/null
++++ b/test.html.br
+@@ -0,0 +1 @@
++dummy html content
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..4378ee7096
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,13 @@
++import mimetypes, sys
++filenames = ['/testbed/test.html.br', '/testbed/test.html.Z']
++for f in filenames:
++    t,e = mimetypes.guess_type(f)
++    print(f"{f} -> mimetypes.guess_type: type={t!r}, encoding={e!r}")
++try:
++    from starlette.responses import FileResponse
++    for f in filenames:
++        fr = FileResponse(f)
++        # FileResponse may lazily set headers; inspect media_type and headers
++        print(f"{f} -> FileResponse.media_type={getattr(fr,'media_type', None)!r}, headers={dict(fr.headers)}")
++except Exception as exc:
++    print("starlette FileResponse not available or failed to import:", exc, file=sys.stderr)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..e7312fda33
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_repro.py::test_mime_guess_br_Z",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

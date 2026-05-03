@@ -1,0 +1,167 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..56d35db06c
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,31 @@
++Traceback (most recent call last):
++  File "/testbed/django/db/models/fields/__init__.py", line 1772, in get_prep_value
++    return int(value)
++TypeError: int() argument must be a string, a bytes-like object or a number, not 'SimpleLazyObject'
++
++The above exception was the direct cause of the following exception:
++
++Traceback (most recent call last):
++  File "/testbed/test_bug.py", line 52, in <module>
++    list(A.objects.annotate(owner_user=Subquery(owner_user)).filter(owner_user=user))
++  File "/testbed/django/db/models/query.py", line 928, in filter
++    return self._filter_or_exclude(False, *args, **kwargs)
++  File "/testbed/django/db/models/query.py", line 948, in _filter_or_exclude
++    clone._filter_or_exclude_inplace(negate, *args, **kwargs)
++  File "/testbed/django/db/models/query.py", line 955, in _filter_or_exclude_inplace
++    self._query.add_q(Q(*args, **kwargs))
++  File "/testbed/django/db/models/sql/query.py", line 1356, in add_q
++    clause, _ = self._add_q(q_object, self.used_aliases)
++  File "/testbed/django/db/models/sql/query.py", line 1378, in _add_q
++    split_subq=split_subq, check_filterable=check_filterable,
++  File "/testbed/django/db/models/sql/query.py", line 1273, in build_filter
++    condition = self.build_lookup(lookups, reffed_expression, value)
++  File "/testbed/django/db/models/sql/query.py", line 1163, in build_lookup
++    lookup = lookup_class(lhs, rhs)
++  File "/testbed/django/db/models/lookups.py", line 24, in __init__
++    self.rhs = self.get_prep_lookup()
++  File "/testbed/django/db/models/lookups.py", line 74, in get_prep_lookup
++    return self.lhs.output_field.get_prep_value(self.rhs)
++  File "/testbed/django/db/models/fields/__init__.py", line 1776, in get_prep_value
++    ) from e
++TypeError: Field 'owner' expected a number but got <SimpleLazyObject: 1>.
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..bf669a8168
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,43 @@
++#!/usr/bin/env bash
++# Repro run script: remove previous DB, install Django, run test, produce test_status.json
++set -o pipefail
++
++DB_FILE="/testbed/test_db.sqlite3"
++OUTPUT="/testbed/run_output.txt"
++STATUS_JSON="/testbed/test_status.json"
++
++# Clean previous DB and outputs
++rm -f "$DB_FILE" "$OUTPUT" || true
++
++# Ensure Django is available
++python -m pip install -q Django || true
++
++# Run the reproduction script and capture output
++python /testbed/test_bug.py > "$OUTPUT" 2>&1
++exit_code=$?
++
++# Read output
++output=$(cat "$OUTPUT" || true)
++
++# Decide status
++status="PASSED"
++if echo "$output" | grep -q "SimpleLazyObject" || echo "$output" | grep -q "Field 'owner' expected a number"; then
++    status="FAILED"
++elif echo "$output" | grep -q "NO_ERROR"; then
++    status="PASSED"
++elif [ "$exit_code" -ne 0 ]; then
++    status="ERROR"
++else
++    status="PASSED"
++fi
++
++# Write test_status.json with required schema
++python - <<PY > "$STATUS_JSON"
++import json
++print(json.dumps({"tests": [{"name": "test_bug.py::test_bug", "status": "$status"}]}, indent=2))
++PY
++
++echo "Wrote $STATUS_JSON with status: $status"
++echo "---- Reproduction output ----"
++cat "$OUTPUT"
++exit 0
+diff --git a/test_bug.py b/test_bug.py
+new file mode 100644
+index 0000000000..cbdf76bc50
+--- /dev/null
++++ b/test_bug.py
+@@ -0,0 +1,57 @@
++import sys, traceback
++from django.conf import settings
++
++settings.configure(
++    DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': 'test_db.sqlite3'}},
++    INSTALLED_APPS=['django.contrib.auth', 'django.contrib.contenttypes'],
++    TIME_ZONE='UTC',
++    USE_TZ=True,
++    SECRET_KEY='testsecret',
++    DEFAULT_AUTO_FIELD='django.db.models.AutoField',
++)
++
++import django
++django.setup()
++
++from django.db import models, connection
++from django.db.models import OuterRef, Subquery
++from django.utils.functional import SimpleLazyObject
++
++# Define models with an explicit app_label so they don't need to be in INSTALLED_APPS
++class A(models.Model):
++    class Meta:
++        app_label = 'tests'
++
++class B(models.Model):
++    a = models.ForeignKey(A, on_delete=models.CASCADE)
++    class Meta:
++        app_label = 'tests'
++
++class C(models.Model):
++    # Use IntegerField to emulate a FK owner's integer pk (so get_prep_value calls int(value))
++    owner = models.IntegerField()
++    class Meta:
++        app_label = 'tests'
++
++# Create tables for these models
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(A)
++    schema_editor.create_model(B)
++    schema_editor.create_model(C)
++
++# Now reproduce the queryset pattern from the PR
++try:
++    owner_user = (
++        B.objects.filter(a=OuterRef("pk"))
++        .annotate(owner_user=Subquery(C.objects.values("owner")))
++        .values("owner_user")
++    )
++    # SimpleLazyObject that yields an int when evaluated, but its type is SimpleLazyObject
++    user = SimpleLazyObject(lambda: 1)
++    # This filter should trigger Django to try int(user) and raise the TypeError shown in the PR
++    list(A.objects.annotate(owner_user=Subquery(owner_user)).filter(owner_user=user))
++    print("NO_ERROR")
++except Exception:
++    traceback.print_exc()
++    # Preserve non-zero exit so the runner can detect failure
++    sys.exit(2)
+diff --git a/test_db.sqlite3 b/test_db.sqlite3
+new file mode 100644
+index 0000000000..e229afe433
+Binary files /dev/null and b/test_db.sqlite3 differ
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..b387418813
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_bug.py::test_bug",
++      "status": "FAILED"
++    }
++  ]
++}

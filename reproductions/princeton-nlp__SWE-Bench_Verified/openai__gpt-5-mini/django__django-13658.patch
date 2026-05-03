@@ -1,0 +1,61 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..3d1970d256
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,19 @@
++#!/bin/bash
++set -euo pipefail
++output=$(python test_reproduction.py 2>&1 || true)
++echo "=== Execution Output ==="
++echo "$output"
++echo "=== End Output ==="
++status="PASSED"
++if echo "$output" | grep -q "Traceback" || echo "$output" | grep -q "TypeError"; then
++  status="FAILED"
++fi
++python - <<PY2 "$output" "$status"
++import json,sys
++from pathlib import Path
++out = sys.argv[1]
++status = sys.argv[2]
++Path("test_status.json").write_text(json.dumps({"tests":[{"name":"test_reproduction.py::repro_management_utility_prog_none","status":status}]}, indent=2))
++print("Wrote test_status.json with status:", status)
++PY2
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..939791cadf
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,15 @@
++import sys
++def main():
++    from django.core.management import execute_from_command_line
++    orig = sys.argv[:]
++    try:
++        # Intentionally set sys.argv[0] to None to reproduce the issue
++        sys.argv[0] = None
++        # Provide explicit argv so ManagementUtility computes prog_name from this argv,
++        # but internal CommandParser may still consult sys.argv[0] leading to an error.
++        execute_from_command_line(['myprog', 'help'])
++    finally:
++        sys.argv[:] = orig
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..9ab2433dda
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::repro_management_utility_prog_none",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

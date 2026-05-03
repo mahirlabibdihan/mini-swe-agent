@@ -1,0 +1,74 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..a8367dd985
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,31 @@
++#!/bin/bash
++set -u -o pipefail
++TMP_OUT=/tmp/test_repro.out
++
++# Run the test, capture output and exit code explicitly
++/usr/bin/env python3 /testbed/test_repro.py >"$TMP_OUT" 2>&1
++RET=$?
++
++if [ "$RET" -eq 0 ]; then
++  STATUS="PASSED"
++else
++  STATUS="FAILED"
++fi
++
++# Write the required test_status.json
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_ProjectState_real_apps_list",
++      "status": "$STATUS"
++    }
++  ]
++}
++JSON
++
++# Print the test output for visibility
++cat "$TMP_OUT"
++
++# Exit 0 so the runner indicates the script executed (test result is in test_status.json)
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..c374666674
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,17 @@
++#!/usr/bin/env python3
++class ProjectState:
++    def __init__(self, real_apps=None):
++        # New behavior per PR: assume callers pass a set; assert when non-None
++        assert real_apps is None or isinstance(real_apps, set), "real_apps must be a set or None"
++        self.real_apps = real_apps
++
++def run_test():
++    print("Test: instantiate ProjectState with real_apps as a list (should fail with AssertionError under new behavior)")
++    ps = ProjectState(real_apps=['app1'])  # This should trigger AssertionError in the PR behavior
++    # If we get here, check that real_apps became a set (old behavior would have converted or accepted it)
++    if not isinstance(ps.real_apps, set):
++        raise AssertionError("Expected real_apps to be a set after initialization")
++    print("TEST PASSED")
++
++if __name__ == '__main__':
++    run_test()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..43f378f9c9
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_ProjectState_real_apps_list",
++      "status": "FAILED"
++    }
++  ]
++}

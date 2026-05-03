@@ -1,0 +1,84 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..35945d351a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,24 @@
++#!/bin/bash
++set -eu -o pipefail
++cd /testbed
++output="$(python3 test_repro.py 2>&1 || true)"
++echo "=== SCRIPT OUTPUT ==="
++echo "$output"
++# Determine if the observed output matches the expected argparse error message
++expected="one of the arguments --shop-id --shop is required"
++status="FAILED"
++if echo "$output" | grep -qF "$expected"; then
++  status="PASSED"
++else
++  status="FAILED"
++fi
++python3 - <<PY - "$output" "$status"
++import json, sys, pathlib
++_out = sys.argv[1]
++_status = sys.argv[2]
++result = {"tests": [{"name": "test_repro.py::test_call_command_kwargs_vs_mutually_exclusive_group", "status": "PASSED" if _status=="PASSED" else "FAILED"}]}
++p = pathlib.Path("test_status.json")
++p.write_text(json.dumps(result, indent=2))
++print("Wrote", str(p))
++PY
++echo "Test status written to /testbed/test_status.json"
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..945a3bff35
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,33 @@
++import argparse
++import sys
++
++def build_parser():
++    parser = argparse.ArgumentParser(prog='my_command')
++    shop = parser.add_mutually_exclusive_group(required=True)
++    shop.add_argument('--shop-id', nargs='?', type=int, default=None, dest='shop_id')
++    shop.add_argument('--shop', nargs='?', type=str, default=None, dest='shop_name')
++    return parser
++
++def call_command(parser, **options):
++    # Mimic Django's call_command behavior: only pass through opt if opt.required and opt.dest in options
++    parse_args = [
++        '{}={}'.format(min(opt.option_strings), options[opt.dest])
++        for opt in parser._actions
++        if getattr(opt, 'required', False) and opt.dest in options
++    ]
++    # This will cause argparse to print the error and raise SystemExit when the required mutually exclusive group isn't satisfied
++    return parser.parse_args(parse_args)
++
++def main():
++    parser = build_parser()
++    # Simulate calling call_command('my_command', shop_id=1)
++    # According to the reported bug, this should result in argparse complaining that one of the group args is required.
++    try:
++        args = call_command(parser, shop_id=1)
++        print("Parsed args:", args)
++    except SystemExit as e:
++        # Re-raise to preserve argparse's error behavior (it already printed to stderr)
++        raise
++
++if __name__ == "__main__":
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..f654766c0d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_repro.py::test_call_command_kwargs_vs_mutually_exclusive_group",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

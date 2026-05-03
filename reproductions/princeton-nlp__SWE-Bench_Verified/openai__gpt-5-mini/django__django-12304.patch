@@ -1,0 +1,92 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..972106a348
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,50 @@
++#!/bin/bash
++set -euo pipefail
++
++# Write reproduction script that uses Variable.resolve to force calling a callable with no args
++cat > /testbed/test_repro.py <<'PY'
++from django.conf import settings
++if not settings.configured:
++    settings.configure(TEMPLATES=[{'BACKEND': 'django.template.backends.django.DjangoTemplates'}], INSTALLED_APPS=[])
++import django
++django.setup()
++
++from django.template.base import Variable
++from django.template import Context
++
++def func_requiring_arg(x):
++    # This function requires one argument; calling it with no args should raise TypeError.
++    return "ok-" + str(x)
++
++ctx = Context({'v': func_requiring_arg})
++
++print("Resolving Variable('v') via Variable.resolve (this should call the callable with no args and raise TypeError)...")
++# This should invoke func_requiring_arg() with no arguments and produce a TypeError
++value = Variable('v').resolve(ctx)
++print("Resolved value:", value)
++PY
++
++# Ensure Django is installed
++python3 -m pip install -q Django
++
++# Run the reproduction while capturing output and exit code
++set +e
++output=$(python3 /testbed/test_repro.py 2>&1)
++rc=$?
++set -e
++
++if [ "$rc" -ne 0 ]; then status="FAILED"; else status="PASSED"; fi
++
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {"name": "/testbed/test_repro.py::variable_resolve_calls_callable", "status": "$status"}
++  ]
++}
++JSON
++
++echo "----- reproduction output -----"
++echo "$output"
++echo "----- /testbed/test_status.json -----"
++nl -ba /testbed/test_status.json | sed -n '1,200p'
++exit 0
+diff --git a/test_repro.py b/test_repro.py
+new file mode 100644
+index 0000000000..d01b9b9ef6
+--- /dev/null
++++ b/test_repro.py
+@@ -0,0 +1,19 @@
++from django.conf import settings
++if not settings.configured:
++    settings.configure(TEMPLATES=[{'BACKEND': 'django.template.backends.django.DjangoTemplates'}], INSTALLED_APPS=[])
++import django
++django.setup()
++
++from django.template.base import Variable
++from django.template import Context
++
++def func_requiring_arg(x):
++    # This function requires one argument; calling it with no args should raise TypeError.
++    return "ok-" + str(x)
++
++ctx = Context({'v': func_requiring_arg})
++
++print("Resolving Variable('v') via Variable.resolve (this should call the callable with no args and raise TypeError)...")
++# This should invoke func_requiring_arg() with no arguments and produce a TypeError
++value = Variable('v').resolve(ctx)
++print("Resolved value:", value)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..5ed44d9815
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,5 @@
++{
++  "tests": [
++    {"name": "/testbed/test_repro.py::variable_resolve_calls_callable", "status": "FAILED"}
++  ]
++}

@@ -1,0 +1,87 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..70bbee927
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,42 @@
++#!/bin/bash
++set -euo pipefail
++
++# Best-effort install of dependencies (non-fatal)
++python3 -m pip install --quiet matplotlib numpy >/dev/null 2>&1 || true
++
++# Run the reproduction in an inline Python block, capture printed output, and write test_status.json
++output=$(python3 - <<'PYINNER'
++import numpy as np, json
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++
++np.random.seed(0)
++data = np.random.rand(10)
++
++n1, bins1, _ = plt.hist(data, "auto", range=(0, 1), density=True)
++print("DENSITY_BINS: " + repr(bins1))
++plt.clf()
++
++n2, bins2, _ = plt.hist(data, "auto", range=(0, 1), density=False)
++print("NODENSITY_BINS: " + repr(bins2))
++
++def check_bins(bins):
++    if bins is None:
++        return "ERROR"
++    if abs(bins[0] - 0.0) > 1e-8 or abs(bins[-1] - 1.0) > 1e-8:
++        return "FAILED"
++    return "PASSED"
++
++statuses = [
++    {"name": "/testbed/test_reproduction.py::test_density_true", "status": check_bins(bins1)},
++    {"name": "/testbed/test_reproduction.py::test_density_false", "status": check_bins(bins2)}
++]
++
++with open("/testbed/test_status.json", "w") as f:
++    json.dump({"tests": statuses}, f, indent=2)
++
++print(json.dumps({"tests": statuses}, indent=2))
++PYINNER
++)
++echo "$output"
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 000000000..4b9b25bf3
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,14 @@
++import numpy as np
++import matplotlib
++matplotlib.use('Agg')
++import matplotlib.pyplot as plt
++
++np.random.seed(0)
++data = np.random.rand(10)
++
++n1, bins1, patches1 = plt.hist(data, "auto", range=(0, 1), density=True)
++print("DENSITY_BINS: " + repr(bins1))
++plt.clf()
++
++n2, bins2, patches2 = plt.hist(data, "auto", range=(0, 1), density=False)
++print("NODENSITY_BINS: " + repr(bins2))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..614bcd2c2
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "/testbed/test_reproduction.py::test_density_true",
++      "status": "FAILED"
++    },
++    {
++      "name": "/testbed/test_reproduction.py::test_density_false",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

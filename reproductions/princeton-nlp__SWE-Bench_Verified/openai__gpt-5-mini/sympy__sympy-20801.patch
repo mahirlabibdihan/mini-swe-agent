@@ -1,0 +1,96 @@
+diff --git a/raw_out.txt b/raw_out.txt
+new file mode 100644
+index 0000000000..2a031e2b9b
+--- /dev/null
++++ b/raw_out.txt
+@@ -0,0 +1,4 @@
++left_eq: True
++right_eq: False
++int_left_eq: False
++int_right_eq: False
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..82d657f05d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,45 @@
++#!/bin/bash
++set -euo pipefail
++cd "$(dirname "$0")"
++# Ensure sympy is available
++python3 -m pip install --quiet --disable-pip-version-check sympy || true
++# Run the reproduction script and capture output
++python3 test_reproduction.py > raw_out.txt 2>&1 || true
++# Parse output and produce /testbed/test_status.json with EXPECTED (desired) behavior:
++# Desired: S(0.0) == S.false -> False (consistent with S(0))
++# Desired: S.false == S(0.0) -> False
++# Desired: S(0) == S.false -> False and S.false == S(0) -> False
++python3 - <<'PY'
++import json
++text = open('raw_out.txt').read()
++results = {}
++for line in text.strip().splitlines():
++    if ':' in line:
++        k,v = line.split(':',1)
++        results[k.strip()] = v.strip()
++tests = []
++# Desired expectations
++exp_left = "False"
++exp_right = "False"
++exp_int_left = "False"
++exp_int_right = "False"
++# Evaluate and mark PASS/FAIL based on desired expectations
++tests.append({
++    "name": "test_reproduction.py::test_S_float_eq_false_left",
++    "status": "PASSED" if results.get("left_eq") == exp_left else "FAILED"
++})
++tests.append({
++    "name": "test_reproduction.py::test_S_float_eq_false_right",
++    "status": "PASSED" if results.get("right_eq") == exp_right else "FAILED"
++})
++int_ok = (results.get("int_left_eq") == exp_int_left) and (results.get("int_right_eq") == exp_int_right)
++tests.append({
++    "name": "test_reproduction.py::test_S_int_eq_false_both",
++    "status": "PASSED" if int_ok else "FAILED"
++})
++open('/testbed/test_status.json','w').write(json.dumps({"tests": tests}, indent=2))
++# Print raw output and the JSON for visibility
++print(text)
++print("--- test_status.json ---")
++print(open('/testbed/test_status.json').read())
++PY
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..145fc1910f
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,6 @@
++from sympy import *
++# Print the comparisons exactly so the runner can parse them
++print("left_eq:", S(0.0) == S.false)
++print("right_eq:", S.false == S(0.0))
++print("int_left_eq:", S(0) == S.false)
++print("int_right_eq:", S.false == S(0))
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..7101f9605b
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_S_float_eq_false_left",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_S_float_eq_false_right",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_S_int_eq_false_both",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file

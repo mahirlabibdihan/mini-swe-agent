@@ -1,0 +1,147 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 00000000..035f94e6
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,17 @@
++#!/bin/bash
++set -euo pipefail
++mkdir -p /testbed
++
++# Install compatible pandas and seaborn versions to avoid the pandas option error.
++python3 -m pip install --quiet --upgrade "pandas==1.5.3" "seaborn==0.11.2" "matplotlib" || true
++
++# Run the test script
++python3 test_reproduction.py 2>&1 | sed -n '1,200p' || true
++
++# Show machine-readable output
++echo "=== /testbed/test_status.json ==="
++if [ -f /testbed/test_status.json ]; then
++  cat /testbed/test_status.json
++else
++  echo '{"tests":[{"name":"test_reproduction.py::NO_OUTPUT","status":"ERROR"}]}'
++fi
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 00000000..f84f7e12
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,95 @@
++import matplotlib
++matplotlib.use("Agg")
++import seaborn as sns
++import matplotlib.pyplot as plt
++import pandas as pd
++import numpy as np
++import sys
++from pathlib import Path
++import json
++
++def inspect_plots():
++    np.random.seed(0)
++    cats = list("abcd")
++    n_per_cat = 5
++    df = pd.DataFrame({
++        "cat": np.repeat(cats, n_per_cat),
++        "val": np.random.randn(len(cats) * n_per_cat)
++    })
++    sns.set_style("darkgrid")
++
++    results = {}
++
++    # Categorical on x
++    fig1 = plt.figure()
++    ax1 = sns.stripplot(x="cat", y="val", data=df)
++    cat_xlim = tuple(map(float, ax1.get_xlim()))
++    cat_xgrid_vis = any([l.get_visible() for l in ax1.get_xgridlines()])
++    plt.close(fig1)
++
++    # Nominal coded on x (with tick labels)
++    df["code"] = pd.Categorical(df["cat"]).codes
++    fig2 = plt.figure()
++    ax2 = sns.stripplot(x="code", y="val", data=df)
++    ax2.set_xticks(list(range(len(cats))))
++    ax2.set_xticklabels(cats)
++    nom_xlim = tuple(map(float, ax2.get_xlim()))
++    nom_xgrid_vis = any([l.get_visible() for l in ax2.get_xgridlines()])
++    plt.close(fig2)
++
++    results["cat_xlim"] = cat_xlim
++    results["nom_xlim"] = nom_xlim
++    results["cat_xgrid_visible"] = bool(cat_xgrid_vis)
++    results["nom_xgrid_visible"] = bool(nom_xgrid_vis)
++
++    # Categorical on y
++    fig3 = plt.figure()
++    ay1 = sns.stripplot(y="cat", x="val", data=df)
++    cat_ylim = tuple(map(float, ay1.get_ylim()))
++    cat_y_inverted = ay1.yaxis_inverted()
++    plt.close(fig3)
++
++    # Nominal coded on y
++    fig4 = plt.figure()
++    ay2 = sns.stripplot(y="code", x="val", data=df)
++    ay2.set_yticks(list(range(len(cats))))
++    ay2.set_yticklabels(cats)
++    nom_ylim = tuple(map(float, ay2.get_ylim()))
++    nom_y_inverted = ay2.yaxis_inverted()
++    plt.close(fig4)
++
++    results["cat_ylim"] = cat_ylim
++    results["nom_ylim"] = nom_ylim
++    results["cat_y_inverted"] = bool(cat_y_inverted)
++    results["nom_y_inverted"] = bool(nom_y_inverted)
++
++    return results
++
++def evaluate(results):
++    tests = []
++    # Expect parity: nominal should match categorical
++    x_parity = np.allclose(results["cat_xlim"], results["nom_xlim"], atol=1e-8)
++    tests.append({"name":"test_reproduction.py::test_nominal_matches_categorical_x_limits","status":"PASSED" if x_parity else "FAILED"})
++    grid_parity = (results["cat_xgrid_visible"] == results["nom_xgrid_visible"])
++    tests.append({"name":"test_reproduction.py::test_nominal_matches_categorical_xgrid_visibility","status":"PASSED" if grid_parity else "FAILED"})
++    yinv_parity = (results["cat_y_inverted"] == results["nom_y_inverted"])
++    tests.append({"name":"test_reproduction.py::test_nominal_matches_categorical_yaxis_inversion","status":"PASSED" if yinv_parity else "FAILED"})
++    return tests
++
++def main():
++    try:
++        results = inspect_plots()
++        tests = evaluate(results)
++        out = {"tests": [{"name": t["name"], "status": t["status"]} for t in tests]}
++        Path("/testbed/test_status.json").write_text(json.dumps(out, indent=2))
++        print("Observed results:", results)
++        print("Test summary:", tests)
++        # Exit 0; machine-readable file contains PASS/FAIL per test
++        sys.exit(0)
++    except Exception as e:
++        Path("/testbed/test_status.json").write_text(json.dumps({"tests":[{"name":"test_reproduction.py::ERROR","status":"ERROR"}]}, indent=2))
++        print("ERROR during test run:", e, file=sys.stderr)
++        sys.exit(1)
++
++if __name__ == '__main__':
++    main()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 00000000..ebfc1f85
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,16 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_nominal_matches_categorical_x_limits",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_nominal_matches_categorical_xgrid_visibility",
++      "status": "PASSED"
++    },
++    {
++      "name": "test_reproduction.py::test_nominal_matches_categorical_yaxis_inversion",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

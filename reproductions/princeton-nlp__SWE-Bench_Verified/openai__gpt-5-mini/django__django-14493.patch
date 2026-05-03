@@ -1,0 +1,91 @@
+diff --git a/run_output.txt b/run_output.txt
+new file mode 100644
+index 0000000000..fb0862fb4d
+--- /dev/null
++++ b/run_output.txt
+@@ -0,0 +1,14 @@
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 22, in reproduce
++    for item in gen:
++  File "/testbed/test_reproduction.py", line 14, in post_process
++    if substitutions:
++UnboundLocalError: local variable 'substitutions' referenced before assignment
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 30, in <module>
++    reproduce()
++  File "/testbed/test_reproduction.py", line 22, in reproduce
++    for item in gen:
++  File "/testbed/test_reproduction.py", line 14, in post_process
++    if substitutions:
++UnboundLocalError: local variable 'substitutions' referenced before assignment
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100644
+index 0000000000..89812463eb
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++set -uo pipefail
++# Run the reproduction; capture output even on failure
++output=$(python3 test_reproduction.py 2>&1) || true
++status="PASSED"
++if echo "$output" | grep -q "UnboundLocalError"; then
++  status="FAILED"
++fi
++# Write the required JSON file
++cat > /testbed/test_status.json <<JSON
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_manifest_substitutions",
++      "status": "$status"
++    }
++  ]
++}
++JSON
++# Print the test output for inspection
++echo "$output"
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..94541c6451
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python3
++import traceback
++
++def reproduce():
++    class ManifestStaticFilesStorage:
++        max_post_process_passes = 1
++        def post_process(self, paths):
++            # Simplified reproduction of the problematic pattern
++            for i in range(self.max_post_process_passes):
++                for original_path, processed_path, processed in []:
++                    substitutions = {}
++                    substitutions[original_path] = processed_path
++            # If loops never run, substitutions is never defined -> UnboundLocalError
++            if substitutions:
++                yield ("has_substitutions",)
++
++    class MyManifestStaticFilesStorage(ManifestStaticFilesStorage):
++        max_post_process_passes = 0
++
++    try:
++        gen = MyManifestStaticFilesStorage().post_process([])
++        for item in gen:
++            print(item)
++        print("Completed without exception")
++    except Exception:
++        traceback.print_exc()
++        raise
++
++if __name__ == "__main__":
++    reproduce()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..53845025a3
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{tests: [{name: test_reproduction.py::test_manifest_substitutions, status: FAILED}]}

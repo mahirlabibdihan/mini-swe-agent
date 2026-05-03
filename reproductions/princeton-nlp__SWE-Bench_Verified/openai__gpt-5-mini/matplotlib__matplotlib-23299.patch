@@ -1,0 +1,97 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..6d0b3e5f98
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,24 @@
++#!/bin/bash
++cd /testbed
++# Run the reproduction test and capture its real exit code and output
++python3 test_reproduction.py > test_output.txt 2>&1
++rc=$?
++# Determine status
++if [ "$rc" -eq 0 ]; then
++  status="PASSED"
++elif grep -q "AssertionError" test_output.txt || grep -q "ASSERTION FAILED" test_output.txt; then
++  status="FAILED"
++else
++  status="ERROR"
++fi
++# Write machine-readable test status
++cat > test_status.json <<JSON
++{"tests":[{"name":"testbed/test_reproduction.py::test_get_backend_clears_figs","status":"$status"}]}
++JSON
++# Print outputs for visibility
++echo "---- test output ----"
++cat test_output.txt || true
++echo "---- test_status.json ----"
++cat test_status.json || true
++# Exit 0 so the runner itself succeeds (submission harness requirement)
++exit 0
+diff --git a/test_output.txt b/test_output.txt
+new file mode 100644
+index 0000000000..ef132d87a7
+--- /dev/null
++++ b/test_output.txt
+@@ -0,0 +1,21 @@
++ASSERTION FAILED
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 16, in run
++    assert before == after, "\n" + before + "\n" + after
++           ^^^^^^^^^^^^^^^
++AssertionError: 
++93825007350912 OrderedDict([(1, <matplotlib.backend_bases.FigureManagerBase object at 0x7fff7cb09890>)])
++93825007350912 OrderedDict()
++BEFORE:
++93825007350912 OrderedDict([(1, <matplotlib.backend_bases.FigureManagerBase object at 0x7fff7cb09890>)])
++AFTER:
++93825007350912 OrderedDict()
++Traceback (most recent call last):
++  File "/testbed/test_reproduction.py", line 27, in <module>
++    run()
++  File "/testbed/test_reproduction.py", line 16, in run
++    assert before == after, "\n" + before + "\n" + after
++           ^^^^^^^^^^^^^^^
++AssertionError: 
++93825007350912 OrderedDict([(1, <matplotlib.backend_bases.FigureManagerBase object at 0x7fff7cb09890>)])
++93825007350912 OrderedDict()
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..3399957908
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,27 @@
++import matplotlib.pyplot as plt
++from matplotlib import get_backend, rc_context
++import sys, traceback
++
++def run():
++    try:
++        with rc_context():
++            fig2 = plt.figure()
++        before = f"{id(plt._pylab_helpers.Gcf)} {plt._pylab_helpers.Gcf.figs!r}"
++        get_backend()
++        after = f"{id(plt._pylab_helpers.Gcf)} {plt._pylab_helpers.Gcf.figs!r}"
++        print("BEFORE:")
++        print(before)
++        print("AFTER:")
++        print(after)
++        assert before == after, "\n" + before + "\n" + after
++    except AssertionError:
++        print("ASSERTION FAILED", file=sys.stderr)
++        traceback.print_exc()
++        raise
++    except Exception:
++        print("ERROR DURING TEST", file=sys.stderr)
++        traceback.print_exc()
++        raise
++
++if __name__ == "__main__":
++    run()
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..777eec8c7a
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"testbed/test_reproduction.py::test_get_backend_clears_figs","status":"FAILED"}]}

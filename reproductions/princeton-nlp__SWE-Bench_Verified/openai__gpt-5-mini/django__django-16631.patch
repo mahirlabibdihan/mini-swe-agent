@@ -1,0 +1,63 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..7abba1fa3d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,25 @@
++#!/bin/bash
++set -euo pipefail
++python -m pip install -q "Django>=4.0"
++python /testbed/test_reproduction.py > /tmp/test_output.txt 2>&1 || true
++python - <<'PY2'
++import json
++out = open("/tmp/test_output.txt").read()
++h_old = None
++h_new = None
++for l in out.splitlines():
++    if l.startswith("H_OLD:"):
++        h_old = l.split(":",1)[1].strip()
++    if l.startswith("H_NEW:"):
++        h_new = l.split(":",1)[1].strip()
++if h_old is None or h_new is None:
++    status = "ERROR"
++elif h_old != h_new:
++    status = "FAILED"
++else:
++    status = "PASSED"
++result = {"tests":[{"name":"test_reproduction.py::test_secret_fallback_session","status":status}]}
++open("/testbed/test_status.json","w").write(json.dumps(result, indent=2))
++print(out)
++print("WROTE /testbed/test_status.json with status:", status)
++PY2
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..5a4d2d0bfa
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,11 @@
++from django.conf import settings
++settings.configure(SECRET_KEY='oldsecret', SECRET_KEY_FALLBACKS=[])
++from django.utils.crypto import salted_hmac
++pwd = 'pbkdf2_sha256$example$hash'
++h_old = salted_hmac('django.contrib.auth.models.AbstractBaseUser.get_session_auth_hash', pwd).hexdigest()
++print("H_OLD:", h_old)
++settings.SECRET_KEY = 'newsecret'
++settings.SECRET_KEY_FALLBACKS = ['oldsecret']
++h_new = salted_hmac('django.contrib.auth.models.AbstractBaseUser.get_session_auth_hash', pwd).hexdigest()
++print("H_NEW:", h_new)
++print("EQUAL:", h_old == h_new)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..2fa7655a1d
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_secret_fallback_session",
++      "status": "FAILED"
++    }
++  ]
++}
+\ No newline at end of file

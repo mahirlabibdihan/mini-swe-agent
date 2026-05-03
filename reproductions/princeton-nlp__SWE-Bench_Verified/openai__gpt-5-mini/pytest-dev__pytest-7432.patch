@@ -1,0 +1,117 @@
+diff --git a/run_rs.txt b/run_rs.txt
+new file mode 100644
+index 000000000..f413ee7ba
+--- /dev/null
++++ b/run_rs.txt
+@@ -0,0 +1,10 @@
++============================= test session starts ==============================
++platform linux -- Python 3.9.20, pytest-5.4.1.dev593+ge6e300e72, py-1.11.0, pluggy-0.13.1
++rootdir: /testbed, configfile: pyproject.toml
++collected 1 item
++
++test_it.py s                                                             [100%]
++
++=========================== short test summary info ============================
++SKIPPED [1] test_it.py:3: unconditional skip
++============================== 1 skipped in 0.00s ==============================
+diff --git a/run_rs_runxfail.txt b/run_rs_runxfail.txt
+new file mode 100644
+index 000000000..2a69731b7
+--- /dev/null
++++ b/run_rs_runxfail.txt
+@@ -0,0 +1,10 @@
++============================= test session starts ==============================
++platform linux -- Python 3.9.20, pytest-5.4.1.dev593+ge6e300e72, py-1.11.0, pluggy-0.13.1
++rootdir: /testbed, configfile: pyproject.toml
++collected 1 item
++
++test_it.py s                                                             [100%]
++
++=========================== short test summary info ============================
++SKIPPED [1] src/_pytest/skipping.py:239: unconditional skip
++============================== 1 skipped in 0.00s ==============================
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..0932ef2a8
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,61 @@
++#!/bin/bash
++set -euo pipefail
++
++# Run pytest with and without --runxfail, capture outputs
++pytest -rs test_it.py > run_rs.txt 2>&1 || true
++pytest -rs --runxfail test_it.py > run_rs_runxfail.txt 2>&1 || true
++
++echo "=== pytest -rs output ==="
++sed -n '1,200p' run_rs.txt || true
++echo "=== pytest -rs --runxfail output ==="
++sed -n '1,200p' run_rs_runxfail.txt || true
++
++# Extract the SKIPPED summary lines (if present)
++skip1=$(grep -m1 "^SKIPPED" run_rs.txt || true)
++skip2=$(grep -m1 "^SKIPPED" run_rs_runxfail.txt || true)
++
++# Helper to extract the "path:line" piece from the SKIPPED summary
++extract_loc() {
++  local line="$1"
++  if [ -z "$line" ]; then
++    echo ""
++    return
++  fi
++  # remove everything up to "] " then remove ": <reason>..." to keep "path:lineno"
++  echo "$line" | sed 's/^[^]]*] //' | sed 's/: .*//'
++}
++
++loc1=$(extract_loc "$skip1")
++loc2=$(extract_loc "$skip2")
++
++echo "Parsed locations:"
++echo " without --runxfail: '${loc1:-<none>}'"
++echo " with --runxfail:    '${loc2:-<none>}'"
++
++# Decide status: mark FAILED if the reported skip locations differ (this reproduces the bug)
++status="ERROR"
++if [ -n "$loc1" ] && [ -n "$loc2" ]; then
++  if [ "$loc1" != "$loc2" ]; then
++    status="FAILED"
++  else
++    status="SKIPPED"
++  fi
++else
++  # Fallback: determine by presence of passed/failed/skipped in outputs
++  if grep -qE "([0-9]+) failed" run_rs.txt run_rs_runxfail.txt 2>/dev/null; then
++    status="FAILED"
++  elif grep -qE "([0-9]+) passed" run_rs.txt run_rs_runxfail.txt 2>/dev/null; then
++    status="PASSED"
++  elif grep -qE "([0-9]+) skipped" run_rs.txt run_rs_runxfail.txt 2>/dev/null; then
++    status="SKIPPED"
++  else
++    status="ERROR"
++  fi
++fi
++
++# Write the required JSON to /testbed/test_status.json
++cat > /testbed/test_status.json <<JSON
++{"tests":[{"name":"test_it.py::test_skip_location","status":"$status"}]}
++JSON
++
++echo "WROTE /testbed/test_status.json with status: $status"
+diff --git a/test_it.py b/test_it.py
+new file mode 100644
+index 000000000..0e5ca0671
+--- /dev/null
++++ b/test_it.py
+@@ -0,0 +1,5 @@
++import pytest
++
++@pytest.mark.skip
++def test_skip_location() -> None:
++    assert 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..b7982e8dc
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests":[{"name":"test_it.py::test_skip_location","status":"FAILED"}]}

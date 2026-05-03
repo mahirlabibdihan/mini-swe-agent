@@ -1,0 +1,157 @@
+diff --git a/repro_out.txt b/repro_out.txt
+new file mode 100644
+index 000000000..82f36c540
+--- /dev/null
++++ b/repro_out.txt
+@@ -0,0 +1,7 @@
++Traceback (most recent call last):
++  File "/testbed/repro_test.py", line 11, in main
++    res = norm(arr)
++  File "/testbed/lib/matplotlib/colors.py", line 1477, in __call__
++    raise ValueError("Invalid vmin or vmax")
++ValueError: Invalid vmin or vmax
++Calling LogNorm on array: [0. 1.]
+diff --git a/repro_test.py b/repro_test.py
+new file mode 100644
+index 000000000..fe715aad4
+--- /dev/null
++++ b/repro_test.py
+@@ -0,0 +1,19 @@
++import matplotlib.colors as mcolors
++import numpy as np
++import sys, traceback
++
++def main():
++    try:
++        # Construct LogNorm with vmin=0 which should cause the transform to be invalid
++        norm = mcolors.LogNorm(vmin=0.0, vmax=1.0)
++        arr = np.array([0.0, 1.0])
++        print("Calling LogNorm on array:", arr)
++        res = norm(arr)
++        print("Normalization result:", res)
++        sys.exit(0)
++    except Exception:
++        traceback.print_exc()
++        sys.exit(2)
++
++if __name__ == "__main__":
++    main()
+diff --git a/run_all.sh b/run_all.sh
+new file mode 100644
+index 000000000..e70c82620
+--- /dev/null
++++ b/run_all.sh
+@@ -0,0 +1,49 @@
++#!/bin/bash
++set -euo pipefail
++
++# Create the Python reproduction that should reproduce the LogNorm error
++cat > /testbed/repro_test.py <<'PY'
++import matplotlib.colors as mcolors
++import numpy as np
++import sys, traceback
++
++def main():
++    try:
++        # Construct LogNorm with vmin=0 which should lead to invalid transform (log(0) -> -inf)
++        norm = mcolors.LogNorm(vmin=0.0, vmax=1.0)
++        arr = np.array([0.0, 1.0])
++        print("Calling LogNorm on array:", arr)
++        res = norm(arr)
++        print("Normalization result:", res)
++        sys.exit(0)
++    except Exception:
++        traceback.print_exc()
++        sys.exit(2)
++
++if __name__ == "__main__":
++    main()
++PY
++
++# Run the reproduction and capture output and exit code without letting this script fail
++set +e
++python3 /testbed/repro_test.py > /testbed/repro_out.txt 2>&1
++rc=$?
++set -e
++
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++
++# Write required test_status.json
++cat > /testbed/test_status.json <<EOF
++{"tests": [{"name": "lib/matplotlib/tests/test_image.py::test_huge_range_log", "status": "${status}"}]}
++EOF
++
++# Print the reproduction output and the produced JSON for visibility
++echo "----- reproduction output -----"
++cat /testbed/repro_out.txt || true
++echo "----- /testbed/test_status.json -----"
++cat /testbed/test_status.json || true
++
++exit 0
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 000000000..059e01f05
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,51 @@
++#!/bin/bash
++set -euo pipefail
++
++mkdir -p /testbed
++
++# Create the reproduction Python that triggers the LogNorm ValueError
++cat > /testbed/repro_test.py <<'PY'
++import matplotlib.colors as mcolors
++import numpy as np
++import sys, traceback
++
++def main():
++    try:
++        # Construct LogNorm with vmin=0 which should cause the transform to be invalid
++        norm = mcolors.LogNorm(vmin=0.0, vmax=1.0)
++        arr = np.array([0.0, 1.0])
++        print("Calling LogNorm on array:", arr)
++        res = norm(arr)
++        print("Normalization result:", res)
++        sys.exit(0)
++    except Exception:
++        traceback.print_exc()
++        sys.exit(2)
++
++if __name__ == "__main__":
++    main()
++PY
++
++# Run the reproduction and capture its exit code without letting this wrapper fail
++set +e
++python3 /testbed/repro_test.py > /testbed/repro_out.txt 2>&1
++rc=$?
++set -e
++
++status="PASSED"
++if [ "$rc" -ne 0 ]; then
++  status="FAILED"
++fi
++
++# Write the required test_status.json
++cat > /testbed/test_status.json <<EOF
++{"tests": [{"name": "lib/matplotlib/tests/test_image.py::test_huge_range_log", "status": "${status}"}]}
++EOF
++
++# Print outputs for visibility
++echo "----- reproduction output (/testbed/repro_out.txt) -----"
++cat /testbed/repro_out.txt || true
++echo "----- /testbed/test_status.json -----"
++cat /testbed/test_status.json || true
++
++exit 0
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 000000000..cf52898f8
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1 @@
++{"tests": [{"name": "lib/matplotlib/tests/test_image.py::test_huge_range_log", "status": "FAILED"}]}

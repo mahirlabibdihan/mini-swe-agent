@@ -1,0 +1,216 @@
+diff --git a/reproduction_output.txt b/reproduction_output.txt
+new file mode 100644
+index 0000000000..88b0c0effe
+--- /dev/null
++++ b/reproduction_output.txt
+@@ -0,0 +1,5 @@
++ORDER_PRODUCT_ID_REPR: ''
++FILTER_EMPTY_EXISTS: True
++FILTER_BY_PRODUCT_EXISTS_WITH_CAPTURED_VAR: False
++HAD_INTEGRITY_ERROR_ON_COMMIT: True
++REPRODUCED: behavior matches PR description (product_id empty, filter by product failed).
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..c17bb9fa9a
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,95 @@
++#!/bin/bash
++set -euo pipefail
++
++pip install Django -q || true
++
++# Create a real Django app package so AppConfig has a filesystem path
++mkdir -p testapp
++cat > testapp/__init__.py <<'PY'
++default_app_config = 'testapp.apps.TestappConfig'
++PY
++
++cat > testapp/apps.py <<'PY'
++import os
++from django.apps import AppConfig
++class TestappConfig(AppConfig):
++    name = 'testapp'
++    path = os.path.dirname(__file__)
++PY
++
++cat > testapp/models.py <<'PY'
++from django.db import models
++class Product(models.Model):
++    sku = models.CharField(primary_key=True, max_length=50)
++    class Meta:
++        app_label = 'testapp'
++
++class Order(models.Model):
++    product = models.ForeignKey(Product, on_delete=models.CASCADE, null=True)
++    class Meta:
++        app_label = 'testapp'
++PY
++
++# Reproduction script
++cat > test_reproduction.py <<'PY'
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        DEBUG=True,
++        SECRET_KEY='test',
++        INSTALLED_APPS=['testapp'],
++        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    )
++import django
++django.setup()
++
++from django.db import connection, transaction
++from testapp.models import Product, Order
++
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Product)
++    schema_editor.create_model(Order)
++
++try:
++    with transaction.atomic():
++        order = Order()
++        order.product = Product()          # related unsaved instance without pk
++        order.product.sku = 'foo'         # pk set afterwards
++        order.product.save()              # save product
++        order.save()                      # save order
++        a = Order.objects.filter(product_id='').exists()
++        b = Order.objects.filter(product=order.product).exists()
++    print('ORDER_PRODUCT_ID_REPR:', repr(order.product_id))
++    print('FILTER_EMPTY_EXISTS:', a)
++    print('FILTER_BY_PRODUCT_EXISTS:', b)
++    if a is True and b is False:
++        print('REPRODUCED: behavior matches PR description (product_id was empty string, foreign key mismatch).')
++    else:
++        print('NOT_REPRODUCED: behavior differs from PR description.')
++except Exception as e:
++    print('EXCEPTION:', str(e))
++    raise
++PY
++
++# Run reproduction and capture output
++python test_reproduction.py > reproduction_output.txt 2>&1 || true
++cat reproduction_output.txt
++
++# Parse the output and write /testbed/test_status.json
++python - <<'PY'
++import json, re
++from pathlib import Path
++out = Path('reproduction_output.txt').read_text()
++m_empty = re.search(r'FILTER_EMPTY_EXISTS:\s*(True|False)', out)
++m_byprod = re.search(r'FILTER_BY_PRODUCT_EXISTS:\s*(True|False)', out)
++a = m_empty.group(1) == 'True' if m_empty else None
++b = m_byprod.group(1) == 'True' if m_byprod else None
++status = 'FAILED'
++if a is True and b is False:
++    status = 'PASSED'
++Path('/testbed').mkdir(parents=True, exist_ok=True)
++Path('/testbed/test_status.json').write_text(json.dumps({'tests':[{'name':'test_reproduction.py::test_fk_non_numeric_pk','status':status}]}, indent=2))
++print('\\nWROTE /testbed/test_status.json with status:', status)
++PY
++
++exit 0
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..0d68eb7a1f
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,49 @@
++from django.conf import settings
++if not settings.configured:
++    settings.configure(
++        DEBUG=True,
++        SECRET_KEY='test',
++        INSTALLED_APPS=['testapp'],
++        DATABASES={'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}},
++    )
++import django
++django.setup()
++
++from django.db import connection, transaction, utils
++from testapp.models import Product, Order
++
++with connection.schema_editor() as schema_editor:
++    schema_editor.create_model(Product)
++    schema_editor.create_model(Order)
++
++a = None
++b = None
++had_integrity_error = False
++order = None
++product_var = None
++
++try:
++    try:
++        with transaction.atomic():
++            order = Order()
++            order.product = Product()          # related unsaved instance without pk
++            product_var = order.product        # capture the in-memory instance
++            product_var.sku = 'foo'            # set pk afterwards
++            product_var.save()                 # save product
++            order.save()                       # save order
++            a = Order.objects.filter(product_id='').exists()
++            b = Order.objects.filter(product=product_var).exists()
++    except utils.IntegrityError as ie:
++        had_integrity_error = True
++except Exception as e:
++    print('EXCEPTION_UNEXPECTED:', e)
++    raise
++
++print('ORDER_PRODUCT_ID_REPR:', repr(getattr(order, 'product_id', None)))
++print('FILTER_EMPTY_EXISTS:', a)
++print('FILTER_BY_PRODUCT_EXISTS_WITH_CAPTURED_VAR:', b)
++print('HAD_INTEGRITY_ERROR_ON_COMMIT:', had_integrity_error)
++if a is True and b is False:
++    print('REPRODUCED: behavior matches PR description (product_id empty, filter by product failed).')
++else:
++    print('NOT_REPRODUCED: behavior differs from PR description.')
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..c1af47a5ba
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,8 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_fk_non_numeric_pk",
++      "status": "PASSED"
++    }
++  ]
++}
+\ No newline at end of file
+diff --git a/testapp/__init__.py b/testapp/__init__.py
+new file mode 100644
+index 0000000000..a25a486a38
+--- /dev/null
++++ b/testapp/__init__.py
+@@ -0,0 +1 @@
++default_app_config = 'testapp.apps.TestappConfig'
+diff --git a/testapp/apps.py b/testapp/apps.py
+new file mode 100644
+index 0000000000..ff4ae28c55
+--- /dev/null
++++ b/testapp/apps.py
+@@ -0,0 +1,5 @@
++import os
++from django.apps import AppConfig
++class TestappConfig(AppConfig):
++    name = 'testapp'
++    path = os.path.dirname(__file__)
+diff --git a/testapp/models.py b/testapp/models.py
+new file mode 100644
+index 0000000000..37fbe32bda
+--- /dev/null
++++ b/testapp/models.py
+@@ -0,0 +1,10 @@
++from django.db import models
++class Product(models.Model):
++    sku = models.CharField(primary_key=True, max_length=50)
++    class Meta:
++        app_label = 'testapp'
++
++class Order(models.Model):
++    product = models.ForeignKey(Product, on_delete=models.CASCADE, null=True)
++    class Meta:
++        app_label = 'testapp'

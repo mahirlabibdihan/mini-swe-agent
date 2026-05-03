@@ -1,0 +1,80 @@
+diff --git a/run_test.sh b/run_test.sh
+new file mode 100755
+index 0000000000..c4826a478d
+--- /dev/null
++++ b/run_test.sh
+@@ -0,0 +1,30 @@
++#!/bin/bash
++set -euo pipefail
++OUTPUT="$(python3 /testbed/test_reproduction.py 2>&1 || true)"
++echo "$OUTPUT"
++default_count=$(echo "$OUTPUT" | awk -F': ' '/^default_levels_count:/ {print $2}')
++explicit_count=$(echo "$OUTPUT" | awk -F': ' '/^explicit_levels_count:/ {print $2}')
++
++status_default="PASSED"
++status_explicit="FAILED"
++
++# Mark default as FAILED when it shows multiple levels (i.e., bug reproduced)
++if [ -n "$default_count" ] && [ "$default_count" -ne 1 ]; then
++  status_default="FAILED"
++fi
++# Mark explicit as PASSED only when it yields exactly one level
++if [ -n "$explicit_count" ] && [ "$explicit_count" -eq 1 ]; then
++  status_explicit="PASSED"
++fi
++
++python3 - <<PY > /testbed/test_status.json
++import json
++statuses = [
++  {"name": "test_reproduction.py::test_contour_boolean_default", "status": "$status_default"},
++  {"name": "test_reproduction.py::test_contour_boolean_explicit", "status": "$status_explicit"}
++]
++print(json.dumps({"tests": statuses}, indent=2))
++PY
++
++echo "Wrote /testbed/test_status.json"
++cat /testbed/test_status.json
+diff --git a/test_reproduction.py b/test_reproduction.py
+new file mode 100644
+index 0000000000..7ef1ac4b3f
+--- /dev/null
++++ b/test_reproduction.py
+@@ -0,0 +1,20 @@
++import matplotlib
++matplotlib.use('Agg')
++import numpy as np
++import matplotlib.pyplot as plt
++
++ii, jj = np.ogrid[:100, :100]
++im = (ii + jj) % 20 < 10
++
++# Default contour on boolean array
++cs_default = plt.contour(im)
++levels_default = list(cs_default.levels)
++
++# Explicit single level at 0.5
++cs_explicit = plt.contour(im, levels=[0.5])
++levels_explicit = list(cs_explicit.levels)
++
++print("default_levels_count:", len(levels_default))
++print("default_levels_values:", levels_default)
++print("explicit_levels_count:", len(levels_explicit))
++print("explicit_levels_values:", levels_explicit)
+diff --git a/test_status.json b/test_status.json
+new file mode 100644
+index 0000000000..3043a79ed5
+--- /dev/null
++++ b/test_status.json
+@@ -0,0 +1,12 @@
++{
++  "tests": [
++    {
++      "name": "test_reproduction.py::test_contour_boolean_default",
++      "status": "FAILED"
++    },
++    {
++      "name": "test_reproduction.py::test_contour_boolean_explicit",
++      "status": "PASSED"
++    }
++  ]
++}
