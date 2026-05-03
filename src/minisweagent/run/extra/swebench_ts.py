@@ -67,7 +67,7 @@ def _load_reproduction_results(reproductions_dir: Path) -> list[dict]:
         reproduction_results.append(
             {
                 "instance_id": reproduction_patch_file.stem,
-                "reproduction_patch": reproduction_patch_file.read_text(),
+                "reproduction_patch": reproduction_patch_file.read_text(encoding="utf-8"),
             }
         )
 
@@ -173,20 +173,35 @@ def remove_from_preds_file(output_path: Path, instance_id: str):
     """Remove an instance from the predictions file."""
     if not output_path.exists():
         return
+
     with _OUTPUT_FILE_LOCK:
-        output_data = json.loads(output_path.read_text())
+        output_data = json.loads(output_path.read_text(encoding="utf-8"))
+
         if instance_id in output_data:
             del output_data[instance_id]
-            output_path.write_text(json.dumps(output_data, indent=2))
+            output_path.write_text(
+                json.dumps(output_data, indent=2, ensure_ascii=False),
+                encoding="utf-8"
+            )
 
 
-def update_reproductions_file(reproductions_dir: Path, instance_id: str, model_name: str, reproduction_patch: str):
+def update_reproductions_file(
+    reproductions_dir: Path,
+    instance_id: str,
+    model_name: str,
+    reproduction_patch: str
+):
     """Write the reproduction patch for a single instance to <instance_id>.patch."""
     reproduction_file = _reproduction_patch_path(reproductions_dir, instance_id)
     reproduction_file.parent.mkdir(parents=True, exist_ok=True)
-    patch_content = reproduction_patch if reproduction_patch.endswith("\n") else reproduction_patch + "\n"
+
+    patch_content = (
+        reproduction_patch if reproduction_patch.endswith("\n")
+        else reproduction_patch + "\n"
+    )
+
     with _REPRODUCTION_LOCK:
-        reproduction_file.write_text(patch_content)
+        reproduction_file.write_text(patch_content, encoding="utf-8")
 
 
 def remove_from_reproductions_file(reproductions_dir: Path, instance_id: str):
@@ -200,7 +215,7 @@ def get_reproduction_patch_for_instance(reproductions_dir: Path, instance_id: st
     """Return the stored reproduction patch for an instance, or an empty string if not found."""
     reproduction_file = _reproduction_patch_path(reproductions_dir, instance_id)
     if reproduction_file.exists():
-        return reproduction_file.read_text()
+        return reproduction_file.read_text(encoding="utf-8")
     return ""
 
 
