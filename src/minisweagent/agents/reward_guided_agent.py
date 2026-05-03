@@ -711,7 +711,7 @@ EOF
                         return None
                     else:
                         raise Exception(">> Error: Changes still detected after reset and clean.")
-            else:
+            elif new_node.last_action["command"] is not None:
                 commands = parser.parse(new_node.last_action["command"])  # Check if it's a read action and can be parsed
                 # Slightly boost nodes that read files based on relevance
                 def normalize_path(p: str) -> str:

@@ -729,7 +729,9 @@ Given both trajectories, what is the best next action to take from this point?
         #         reverse=True
         #     )
             
-        return self._slice_topk(sorted_leaves, k)
+        top_k = self._slice_topk(sorted_leaves, k)
+        print(f">> Found {len(top_k)} edit paths")
+        return top_k 
     
               
     def _update_iteration(self):
