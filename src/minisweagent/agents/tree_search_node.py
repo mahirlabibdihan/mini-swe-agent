@@ -20,6 +20,7 @@ class TreeSearchNode:
         self.itr = 0
         self.modifies_code = False
         self.modified_files = []
+        self.merged = False
         self.read_files = []
         self.is_terminating = False
         self.is_submission = False
@@ -117,6 +118,7 @@ class TreeSearchNode:
                 "visits": self.visits,
                 "order": self.order,
                 "itr": self.itr,
+                "merged": self.merged,
                 "is_terminating": self.is_terminating,
                 "is_submission": self.is_submission,
                 "epsilon": self.epsilon,

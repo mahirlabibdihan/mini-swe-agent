@@ -656,6 +656,7 @@ Given both trajectories, what is the best next action to take from this point?
                         merged_node = self._merge_nodes(p[0], p[1])
                         p[0].add_child(merged_node)
                         p[1].add_child(merged_node)
+                        merged_node.merged = True
                         merged_nodes.append(merged_node)
         return nodes[:k]
     
