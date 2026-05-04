@@ -653,7 +653,7 @@ EOF
                 potential_termination = is_terminating(new_node.last_action["command"])                       
                 if not potential_termination and is_git_command(new_node.last_action["command"]):
                     instance_logger.debug(">> Warning: git commands are not allowed in non-terminating actions. Skipping this action...")
-                    new_node.observation = "Error: git commands are not allowed."
+                    new_node.observation = "Error: git commands are not allowed." + ("Try 'applypatch' instead of 'git apply' for applying patches." if "git apply" in new_node.last_action["command"] else "")
                     new_node.raw_observation = None
                     new_node.is_system_response = True
                     new_node.last_action["command"] = None
