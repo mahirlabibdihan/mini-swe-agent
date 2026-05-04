@@ -586,35 +586,63 @@ Given both trajectories, what is the best next action to take from this point?
             
         return messages
     
+    
     def _make_pairs(self, bucket):
+        import numpy as np
+        from scipy.optimize import linear_sum_assignment
+        import math
+        
         n = len(bucket)
+
+        # If empty or single node
+        if n <= 1:
+            return [(bucket[0], None)] if n == 1 else []
+
+        # Make even-sized by padding dummy nodes
+        even_n = n if n % 2 == 0 else n + 1
+
+        nodes = bucket + [None] * (even_n - n)
+
+        cost = np.zeros((even_n, even_n))
+
+        INF = 1e9
+
+        for i in range(even_n):
+            for j in range(even_n):
+                if i == j:
+                    cost[i][j] = INF
+                else:
+                    ni = nodes[i]
+                    nj = nodes[j]
+
+                    if ni is None or nj is None:
+                        cost[i][j] = 0  # allow dummy pairing
+                    else:
+                        cost[i][j] = self._get_max_divergence_path_length(ni, nj)
+                        
+        row_ind, col_ind = linear_sum_assignment(cost)
+        
         used = set()
         pairs = []
 
-        for i in range(n):
-            if i in used:
+        for i, j in zip(row_ind, col_ind):
+            if i in used or j in used:
                 continue
 
-            best_j = None
-            best_score = float("inf")
+            used.add(i)
+            used.add(j)
 
-            for j in range(i+1, n):
-                if j in used:
-                    continue
+            ni = nodes[i]
+            nj = nodes[j]
 
-                score = self._get_max_divergence_path_length(bucket[i], bucket[j])
-
-                if score < best_score:
-                    best_score = score
-                    best_j = j
-
-            if best_j is not None:
-                pairs.append((bucket[i], bucket[best_j]))
-                used.add(i)
-                used.add(best_j)
+            if ni is None and nj is None:
+                continue
+            elif ni is None:
+                continue
+            elif nj is None:
+                pairs.append((ni, None))
             else:
-                pairs.append((bucket[i], None))
-                used.add(i)
+                pairs.append((ni, nj))
 
         return pairs
 
@@ -664,6 +692,45 @@ Given both trajectories, what is the best next action to take from this point?
                         # merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node) 
                         merged_node.value = merged_node.merged_value = (0.9 * p[0].merged_value + 0.1 * p[1].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
                         merged_nodes.append(merged_node)
+                        
+        # node_count = 0
+        # NEW: No-chunking
+        # for node in nodes:
+        #     if node.modifies_code: 
+        #         if bucket_count < k:
+        #             buckets[str(uuid.uuid4())] = [node]
+        #             bucket_count += 1
+        #             node_count += 1
+        #     elif not buckets.get(node.parent.commit):
+        #         if bucket_count < k:
+        #             buckets[node.parent.commit] = [node]
+        #             bucket_count += 1
+        #             node_count += 1
+        #     else:
+        #         buckets[node.parent.commit].append(node)
+        #         node_count += 1
+        # merged_nodes = []
+        # for commit, bucket in buckets.items():
+        #     if len(bucket) > 1:
+        #         new_bucket = []
+        #         while len(bucket) > 1:
+        #             pairs = self._make_pairs(bucket)
+        #             for p in pairs:
+        #                 if p[1] is None:
+        #                     new_bucket.append(p[0])
+        #                 else:
+        #                     merged_node = self._merge_nodes(p[0], p[1])
+        #                     p[0].add_child(merged_node)
+        #                     p[1].add_child(merged_node)
+        #                     merged_node.merged = True
+        #                     merged_node.parent = p[0]
+        #                     merged_node.value = merged_node.merged_value = (0.9 * p[0].merged_value + 0.1 * p[1].merged_value)
+        #                     new_bucket.append(merged_node)
+        #             bucket = new_bucket   
+        #             new_bucket = []     
+        #     merged_nodes.append(bucket[0])
+            
+        
                         
         # return nodes[:k] # OLD
         if len(merged_nodes) > k:
