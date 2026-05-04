@@ -666,7 +666,10 @@ Given both trajectories, what is the best next action to take from this point?
                         merged_nodes.append(merged_node)
                         
         # return nodes[:k] # OLD
-        return merged_nodes[:k] # NEW:
+        if len(merged_nodes) > k:
+            raise ValueError(f"More than k nodes after merging: {len(merged_nodes)} > {k}")
+        
+        return merged_nodes # NEW:
     
         
     def _get_topk_edit_paths(self, k=3, to_execute=True):
@@ -807,6 +810,7 @@ Given both trajectories, what is the best next action to take from this point?
             else: # On the last iteration, prioritize nodes with edits regardless of score to encourage exploitation of promising edit paths. If not enough edit paths are found, go for read paths.
                 instance_logger.debug(">> Iteration {} reached. Prioritizing nodes with edits for exploitation.".format(self.itr + 1))
                 sorted_writes = self._get_topk_edit_paths(k=3)
+                top_k = sorted_writes
                 # If not enough edit paths are found, go for read paths.
                 if len(sorted_writes) < 3:
                     sorted_reads = sorted(
@@ -825,9 +829,8 @@ Given both trajectories, what is the best next action to take from this point?
                         ),
                         reverse=True,
                     )
-                    sorted_reads = self._slice_topk(sorted_reads, k=3 - len(sorted_writes))
-                top_k = sorted_writes + sorted_reads
-            
+                    top_k.extend(self._slice_topk(sorted_reads, k=3 - len(sorted_writes)))
+                
             self._update_frontier(top_k) # -> It will sort based on merged_value
 
             # Keep top-k active nodes
