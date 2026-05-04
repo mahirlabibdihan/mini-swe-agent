@@ -56,6 +56,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         self.itr = 1
         # create an empty list of size self.config.itr_limit+1
         self.node_map_itr = [{} for _ in range(self.config.itr_limit+2)] # NEW:
+        self.terminating_nodes = {}
 
     def _reset(self):
         super()._reset()
@@ -954,7 +955,7 @@ Given both trajectories, what is the best next action to take from this point?
     def _update_iteration(self):
         self.node_map_itr[self.itr] = self.node_map # NEW:
         
-        if self.n_submissions >= self.config.sub_thres:
+        if len(self.terminating_nodes) >= self.config.sub_thres:
             # TODO: Should we just terminate or consider terminating actions from here?
             
             # We are done exploring. Now check the tree if there is any terminating action. If multiple, choose the one with highest path value/reward. If none, choose the one with highest path value among all nodes and run sequentially from there until we reach a terminating node.   
@@ -1058,10 +1059,15 @@ Given both trajectories, what is the best next action to take from this point?
         if self.tree_node.is_terminating:
             self._create_pseudo_root()
             
-            
         if self.tree_node.visits == 0:
             tree_nodes = self._generate_new_nodes(self.config.branching_factor)
-            self._update_tree(tree_nodes)
+            tree_nodes = self._update_tree(tree_nodes)
+            
+            for node in tree_nodes:
+                if node.is_terminating:
+                    if self.terminating_nodes.get(node.parent.commit) is None:
+                        self.terminating_nodes[node.parent.commit] = []
+                    self.terminating_nodes[node.parent.commit].append(node)
         
         self.tree_node.visits += 1
         self.tree_node.itr = self.itr
