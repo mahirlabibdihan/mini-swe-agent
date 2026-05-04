@@ -590,6 +590,33 @@ EOF
             return self.tree_root.children[0].commit
         return self.tree_root.commit
     
+    def _get_type(self, node):
+        cmd_type = "read"
+        if node.last_action["command"] is not None:
+            if node.is_terminating or node.invalid_termination:
+                cmd_type = "submit"
+            elif "[EDIT]" in node.last_action["thought"]: #  or node.modifies_code --- testing may have side effects. Can ignore that.
+                cmd_type = "edit"
+            # elif self.is_test_command(node.last_action["command"]):
+            elif "[TEST]" in node.last_action["thought"] or ("[READ]" not in node.last_action["thought"] and self.is_test_command(node)): # TEMP: Since test command detection is not very robust, we can also use a heuristic based on the thought content to identify potential test commands for better reward adjustment.
+                cmd_type = "test"
+            elif node.modifies_code:
+                cmd_type = "edit"
+        else:
+            if "[SUBMIT]" in node.last_action["thought"]:
+                cmd_type = "submit"
+            elif "[EDIT]" in node.last_action["thought"]:
+                cmd_type = "edit"
+            elif "[TEST]" in node.last_action["thought"]:
+                cmd_type = "test"
+        
+        gen_type = 'edit' if '[EDIT]' in node.last_action['thought'] else 'test' if '[TEST]' in node.last_action['thought'] else 'submit' if '[SUBMIT]' in node.last_action['thought'] else 'read'    
+        if gen_type != cmd_type:
+            instance_logger.debug(f">> Warning: Command type mismatch. Thought indicates {gen_type} but detected as {cmd_type}.")
+            
+        return cmd_type
+                
+                
     def _action_to_node(self, response, action, error, current_node):
         # get_observation action to get observation
         potential_termination = False
@@ -664,7 +691,9 @@ EOF
                         self.env.execute("git restore . && git checkout -")
                 observation = self.render_template(self.config.action_observation_template, output=output) 
                 raw_observation = output
-            
+                
+        
+                
             except (TimeoutError, subprocess.TimeoutExpired) as e:
                 output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
                 observation = self.render_template(self.config.timeout_template, action=action, output=output)
@@ -691,7 +720,11 @@ EOF
                         
                 new_node.test_status = self._get_test_status()
                 if new_node.test_status == None:
-                    new_node.test_status = current_node.test_status
+                    instance_logger.debug(">> Warning: Failed to get test status after code modifications. Marking all tests as ERROR for this node.")
+                    new_node.test_status = [
+                        {**test, "status": "ERROR"}
+                        for test in current_node.test_status
+                    ]
                 # Rollback changes
                 # run tests
                 # test_result = self.env.execute("pytest --maxfail=1 --disable-warnings -q")
@@ -759,6 +792,8 @@ EOF
             new_node.raw_observation = raw_observation
             
         new_node.parent = current_node
+        new_node.last_action["type"] = self._get_type(new_node)
+        
         return new_node
       
 
@@ -943,6 +978,8 @@ EOF
         return formatted_trajectory.strip()
     
     def is_test_command(self, node: str) -> bool:
+        if node.last_action["command"] is None:
+            return False
         import re
         TEST_CMD = re.compile(
             r'(^|\s)(pytest|python\s+-m\s+pytest|python\s+-m\s+unittest|unittest|runtests)(\s|$)'
@@ -1067,31 +1104,9 @@ EOF
         
         # track the time taken for reward computation
         start_time = time.time()
-        cmd_type = "read"
-        if node.last_action["command"] is not None:
-            if node.is_terminating or node.invalid_termination:
-                cmd_type = "submit"
-            elif "[EDIT]" in node.last_action["thought"]: #  or node.modifies_code --- testing may have side effects. Can ignore that.
-                cmd_type = "edit"
-            # elif self.is_test_command(node.last_action["command"]):
-            elif "[TEST]" in node.last_action["thought"] or ("[READ]" not in node.last_action["thought"] and self.is_test_command(node.last_action["command"])): # TEMP: Since test command detection is not very robust, we can also use a heuristic based on the thought content to identify potential test commands for better reward adjustment.
-                cmd_type = "test"
-            elif node.modifies_code:
-                cmd_type = "edit"
-        else:
-            if "[SUBMIT]" in node.last_action["thought"]:
-                cmd_type = "submit"
-            elif "[EDIT]" in node.last_action["thought"]:
-                cmd_type = "edit"
-            elif "[TEST]" in node.last_action["thought"]:
-                cmd_type = "test"
-        
-        gen_type = 'edit' if '[EDIT]' in node.last_action['thought'] else 'test' if '[TEST]' in node.last_action['thought'] else 'submit' if '[SUBMIT]' in node.last_action['thought'] else 'read'    
-        if gen_type != cmd_type:
-            instance_logger.debug(f">> Warning: Command type mismatch. Thought indicates {gen_type} but detected as {cmd_type}.")
-            
-        node.last_action['type'] = cmd_type
+        cmd_type = node.last_action['type']
         node.value = self.reward_model.compute_reward(node, self.task, cmd_type=cmd_type)
+        
         if node.last_action["command"] is None:
             # Penalize invalid actions
             penalty = 1
@@ -1110,7 +1125,7 @@ EOF
         elif node.raw_observation is not None and not self.is_test_failure(node, node.raw_observation.get("returncode", 0)) and node.raw_observation.get("returncode", 0) != 0:
             penalty = 1
             curr = node
-            while curr is not None:
+            while curr is not None and curr.last_action is not None:
                 if curr.raw_observation is not None and not self.is_test_failure(curr, curr.raw_observation.get("returncode", 0)) and curr.raw_observation.get("returncode", 0) != 0:
                     penalty *= 0.8
                 else:
