@@ -514,8 +514,8 @@ class TreeSearchAgent(RewardGuidedAgent):
         node_B.commit = node_B.parent.commit
         node_A.executed = node_B.executed = True
         node_A.itr = node_B.itr = self.itr + 1
-        node_A.order = node_B.order = self.n_expanded + 1
-        self.n_expanded += 1
+        node_A.order = node_B.order = self.n_expanded
+        # self.n_expanded += 1
         response, action, error = self._generate_merge_action(node_A, node_B)
         return self._action_to_node(response, action, error, node_A) # A is parent, since it has higher value
             
@@ -803,29 +803,31 @@ Given both trajectories, what is the best next action to take from this point?
                     key=lambda n: self.node_priority(n, gamma=0.85, max_depth=max_depth),
                     reverse=True,
                 )
+                top_k = self._slice_topk(sorted_leaves, k=3) # Keep top 3
             else: # On the last iteration, prioritize nodes with edits regardless of score to encourage exploitation of promising edit paths. If not enough edit paths are found, go for read paths.
                 instance_logger.debug(">> Iteration {} reached. Prioritizing nodes with edits for exploitation.".format(self.itr + 1))
                 sorted_writes = self._get_topk_edit_paths(k=3)
                 # If not enough edit paths are found, go for read paths.
-                sorted_reads = sorted(
-                    (
-                        n for n in self.all_node_map.values()
-                        if not n.executed
-                        and not n.is_terminating
-                        and n.visible
-                        and n.merged_value is not None
-                        and n.level < self.config.depth_limit
-                        and (n.parent.commit == self._get_root_commit() and not n.modifies_code)
-                    ),
-                    key=lambda n: (
-                        n.parent.itr,  # recency bias (higher = newer)
-                        self.node_priority(n, gamma=0.85, max_depth=max_depth)
-                    ),
-                    reverse=True,
-                )
-                sorted_leaves = sorted_writes + sorted_reads  
-                
-            top_k = self._slice_topk(sorted_leaves, k=3) # Keep top 3
+                if len(sorted_writes) < 3:
+                    sorted_reads = sorted(
+                        (
+                            n for n in self.all_node_map.values()
+                            if not n.executed
+                            and not n.is_terminating
+                            and n.visible
+                            and n.merged_value is not None
+                            and n.level < self.config.depth_limit
+                            and (n.parent.commit == self._get_root_commit() and not n.modifies_code)
+                        ),
+                        key=lambda n: (
+                            n.parent.itr,  # recency bias (higher = newer)
+                            self.node_priority(n, gamma=0.85, max_depth=max_depth)
+                        ),
+                        reverse=True,
+                    )
+                    sorted_reads = self._slice_topk(sorted_reads, k=3 - len(sorted_writes))
+                top_k = sorted_writes + sorted_reads
+            
             self._update_frontier(top_k) # -> It will sort based on merged_value
 
             # Keep top-k active nodes
