@@ -783,7 +783,7 @@ Given both trajectories, what is the best next action to take from this point?
                 buckets[node.parent.commit].append(node)
                 node_count += 1
                 
-        merged_nodes = []
+        
         new_buckets = {
             # inititialize empty array for each commit in buckets
             commit: [] for commit in buckets.keys()
@@ -808,7 +808,16 @@ Given both trajectories, what is the best next action to take from this point?
                     new_buckets[commit] = bucket
                     
             buckets = new_buckets
-            new_buckets = {}
+            new_buckets = {
+                # inititialize empty array for each commit in buckets
+                commit: [] for commit in buckets.keys()
+            }
+            
+        merged_nodes = []
+        for commit, bucket in buckets.items():
+            merged_nodes.extend(bucket)
+            
+        return merged_nodes
         
     def _slice_topk(self, nodes: List[TreeSearchNode], k: int) -> List[TreeSearchNode]:
         # Future Work
