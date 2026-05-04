@@ -514,7 +514,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         node_B.commit = node_B.parent.commit
         node_A.executed = node_B.executed = True
         node_A.itr = node_B.itr = self.itr + 1
-        node_A.order = node_B.order = self.n_expanded
+        node_A.order = node_B.order = self.n_expanded + 1
         # self.n_expanded += 1
         response, action, error = self._generate_merge_action(node_A, node_B)
         return self._action_to_node(response, action, error, node_A) # A is parent, since it has higher value
@@ -587,7 +587,39 @@ Given both trajectories, what is the best next action to take from this point?
         return messages
     
     
-    def _make_pairs(self, bucket):
+    def _make_pairs_elite(self, bucket):
+        n = len(bucket)
+        used = set()
+        pairs = []
+
+        for i in range(n):
+            if i in used:
+                continue
+
+            best_j = None
+            best_score = float("inf")
+
+            for j in range(i+1, n):
+                if j in used:
+                    continue
+
+                score = self._get_max_divergence_path_length(bucket[i], bucket[j])
+
+                if score < best_score:
+                    best_score = score
+                    best_j = j
+
+            if best_j is not None:
+                pairs.append((bucket[i], bucket[best_j]))
+                used.add(i)
+                used.add(best_j)
+            else:
+                pairs.append((bucket[i], None))
+                used.add(i)
+
+        return pairs
+    
+    def _make_pairs_hungarian(self, bucket):
         import numpy as np
         from scipy.optimize import linear_sum_assignment
         import math
@@ -647,15 +679,50 @@ Given both trajectories, what is the best next action to take from this point?
         return pairs
 
 
-    def _slice_topk(self, nodes: List[TreeSearchNode], k: int) -> List[TreeSearchNode]:
-        # Future Work
-        # Instead of discarding nodes beyond top-k, we can gather information from them and merge nodes with same commit.
-        # Merging nodes means, let's say 3 nodes in the array have the same commit, then we will give the diverge path trajectory of all of them to agent, and ask it to consider all information and generate next step based on that. This way we can keep more information from the tree and also encourage exploration of different paths while still keeping the search focused on promising trajectories. This can be especially helpful in cases where the reward signal is sparse and we want to gather as much information as possible to guide the search.
-        # Since the array is sorted, we will traverse it from start to end, and keep adding nodes to the top-k array until we have k unique commits.
-        # We don't want to merge more than 2 nodes for now, so let's say there are 3 same commit at the start of an array, we will group the first 2, and treat 3rd as separate commit to encourage exploration of different paths. This is a hyperparameter that can be tuned based on the task and the size of the tree.
-        
+    # Global Greedy
+    def _make_pairs(self, bucket):
+        import heapq
+
+        n = len(bucket)
+
+        if n == 0:
+            return []
+        if n == 1:
+            return [(bucket[0], None)]
+
+        # Precompute all pairwise costs and push into a min-heap
+        heap = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                cost = self._get_max_divergence_path_length(bucket[i], bucket[j])
+                heapq.heappush(heap, (cost, i, j))
+
+        active = set(range(n))
+        pairs = []
+
+        # Greedily pick best available pair
+        while heap and len(active) > 1:
+            cost, i, j = heapq.heappop(heap)
+
+            if i not in active or j not in active:
+                continue
+
+            pairs.append((bucket[i], bucket[j]))
+
+            active.remove(i)
+            active.remove(j)
+
+        # Remaining unmatched nodes
+        for i in active:
+            pairs.append((bucket[i], None))
+
+        return pairs
+
+    def _coalesce_dual_nodes(self, nodes, k):
         buckets = {}
         bucket_count = 0
+        
+        # OLD: Just merge 2 and ignore the rest
         chunk_size = 2
         for node in nodes:
             if node.modifies_code: 
@@ -690,48 +757,69 @@ Given both trajectories, what is the best next action to take from this point?
                         merged_node.merged = True
                         merged_node.parent = p[0]
                         # merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node) 
-                        merged_node.value = merged_node.merged_value = (0.9 * p[0].merged_value + 0.1 * p[1].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
+                        merged_node.value = merged_node.merged_value = (0.8 * p[0].merged_value + 0.2 * p[1].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
                         merged_nodes.append(merged_node)
-                        
-        # node_count = 0
-        # NEW: No-chunking
-        # for node in nodes:
-        #     if node.modifies_code: 
-        #         if bucket_count < k:
-        #             buckets[str(uuid.uuid4())] = [node]
-        #             bucket_count += 1
-        #             node_count += 1
-        #     elif not buckets.get(node.parent.commit):
-        #         if bucket_count < k:
-        #             buckets[node.parent.commit] = [node]
-        #             bucket_count += 1
-        #             node_count += 1
-        #     else:
-        #         buckets[node.parent.commit].append(node)
-        #         node_count += 1
-        # merged_nodes = []
-        # for commit, bucket in buckets.items():
-        #     if len(bucket) > 1:
-        #         new_bucket = []
-        #         while len(bucket) > 1:
-        #             pairs = self._make_pairs(bucket)
-        #             for p in pairs:
-        #                 if p[1] is None:
-        #                     new_bucket.append(p[0])
-        #                 else:
-        #                     merged_node = self._merge_nodes(p[0], p[1])
-        #                     p[0].add_child(merged_node)
-        #                     p[1].add_child(merged_node)
-        #                     merged_node.merged = True
-        #                     merged_node.parent = p[0]
-        #                     merged_node.value = merged_node.merged_value = (0.9 * p[0].merged_value + 0.1 * p[1].merged_value)
-        #                     new_bucket.append(merged_node)
-        #             bucket = new_bucket   
-        #             new_bucket = []     
-        #     merged_nodes.append(bucket[0])
-            
         
-                        
+        return merged_nodes
+    
+    def _coalesce_nodes_aggressively(self, nodes, k):
+        buckets = {}
+        bucket_count = 0
+        
+        # NEW: Merge more aggressively until we have at most k nodes. So, that no path gets just discarded, but gets merged with other paths and we can still gather information from it.
+        node_count = 0
+        for node in nodes:
+            if node.modifies_code: 
+                if bucket_count < k:
+                    buckets[str(uuid.uuid4())] = [node]
+                    bucket_count += 1
+                    node_count += 1
+            elif not buckets.get(node.parent.commit):
+                if bucket_count < k:
+                    buckets[node.parent.commit] = [node]
+                    bucket_count += 1
+                    node_count += 1
+            else:
+                buckets[node.parent.commit].append(node)
+                node_count += 1
+                
+        merged_nodes = []
+        new_buckets = {
+            # inititialize empty array for each commit in buckets
+            commit: [] for commit in buckets.keys()
+        }
+        while node_count > k:
+            for commit, bucket in buckets.items():
+                if len(bucket) > 1:
+                    pairs = self._make_pairs(bucket)
+                    for p in pairs:
+                        if p[1] is None:
+                            new_buckets[commit].append(p[0])
+                        else:
+                            merged_node = self._merge_nodes(p[0], p[1])
+                            p[0].add_child(merged_node)
+                            p[1].add_child(merged_node)
+                            merged_node.merged = True
+                            merged_node.parent = p[0]
+                            merged_node.value = merged_node.merged_value = (0.8 * p[0].merged_value + 0.2 * p[1].merged_value)
+                            node_count -= 1
+                            new_buckets[commit].append(merged_node)
+                else:    
+                    new_buckets[commit] = bucket
+                    
+            buckets = new_buckets
+            new_buckets = {}
+        
+    def _slice_topk(self, nodes: List[TreeSearchNode], k: int) -> List[TreeSearchNode]:
+        # Future Work
+        # Instead of discarding nodes beyond top-k, we can gather information from them and merge nodes with same commit.
+        # Merging nodes means, let's say 3 nodes in the array have the same commit, then we will give the diverge path trajectory of all of them to agent, and ask it to consider all information and generate next step based on that. This way we can keep more information from the tree and also encourage exploration of different paths while still keeping the search focused on promising trajectories. This can be especially helpful in cases where the reward signal is sparse and we want to gather as much information as possible to guide the search.
+        # Since the array is sorted, we will traverse it from start to end, and keep adding nodes to the top-k array until we have k unique commits.
+        # We don't want to merge more than 2 nodes for now, so let's say there are 3 same commit at the start of an array, we will group the first 2, and treat 3rd as separate commit to encourage exploration of different paths. This is a hyperparameter that can be tuned based on the task and the size of the tree.
+        
+        # merged_nodes = self._coalesce_dual_nodes(nodes, k)
+        merged_nodes = self._coalesce_nodes_aggressively(nodes, k)
+                 
         # return nodes[:k] # OLD
         if len(merged_nodes) > k:
             raise ValueError(f"More than k nodes after merging: {len(merged_nodes)} > {k}")
