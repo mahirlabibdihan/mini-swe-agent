@@ -168,7 +168,7 @@ def get_predictions_from_tree_dir(predictions_dir: str, model_name: str = "tree_
 
 
 
-def _collect_terminating_nodes(node: dict, terminating_nodes: list):
+def _collect_terminating_nodes(node: dict, terminating_nodes: list, seen: set | None = None):
     """
     Recursively traverse the tree and collect all nodes with is_terminating=true.
     
@@ -176,13 +176,24 @@ def _collect_terminating_nodes(node: dict, terminating_nodes: list):
         node (dict): Current node in the tree
         terminating_nodes (list): List to accumulate terminating nodes
     """
+    if seen is None:
+        seen = set()
+
+    if node is not None:
+        node_key = node.get("id") if isinstance(node, dict) else None
+        if node_key is None:
+            node_key = id(node)
+        if node_key in seen:
+            return
+        seen.add(node_key)
+
     if node is not None and (node.get("is_terminating", False) or (node.get("observation", "") is not None and node.get("observation", "").startswith("diff --git"))) and node.get("merged_value") is not None:
         terminating_nodes.append(node)
     
     # Recursively traverse children
     if node is not None and "children" in node and node["children"]:
         for child in node["children"]:
-            _collect_terminating_nodes(child, terminating_nodes)
+            _collect_terminating_nodes(child, terminating_nodes, seen)
 
 
 def _extract_patch_from_node(node: dict) -> str:

@@ -690,7 +690,6 @@ Given both trajectories, what is the best next action to take from this point?
         if n == 1:
             return [(bucket[0], None)]
 
-        # Precompute all pairwise costs and push into a min-heap
         heap = []
         for i in range(n):
             for j in range(i + 1, n):
@@ -700,23 +699,37 @@ Given both trajectories, what is the best next action to take from this point?
         active = set(range(n))
         pairs = []
 
-        # Greedily pick best available pair
         while heap and len(active) > 1:
             cost, i, j = heapq.heappop(heap)
+
+            if cost > 5:
+                break
 
             if i not in active or j not in active:
                 continue
 
-            pairs.append((bucket[i], bucket[j]))
+            # store indices along with nodes
+            pairs.append((i, j))
 
             active.remove(i)
             active.remove(j)
 
-        # Remaining unmatched nodes
+        # remaining singles
         for i in active:
-            pairs.append((bucket[i], None))
+            pairs.append((i, None))
 
-        return pairs
+        # 🔑 sort by earliest appearance in bucket
+        pairs.sort(key=lambda x: x[0])
+
+        # convert indices → actual nodes
+        result = []
+        for i, j in pairs:
+            if j is None:
+                result.append((bucket[i], None))
+            else:
+                result.append((bucket[i], bucket[j]))
+
+        return result
 
     def _coalesce_dual_nodes(self, nodes, k):
         buckets = {}
@@ -780,6 +793,7 @@ Given both trajectories, what is the best next action to take from this point?
                     bucket_count += 1
                     node_count += 1
             else:
+            # elif len(buckets[node.parent.commit]) < 2 * k: # NEW
                 buckets[node.parent.commit].append(node)
                 node_count += 1
                 
@@ -789,6 +803,7 @@ Given both trajectories, what is the best next action to take from this point?
             commit: [] for commit in buckets.keys()
         }
         while node_count > k:
+            no_progress = True
             for commit, bucket in buckets.items():
                 if len(bucket) > 1:
                     pairs = self._make_pairs(bucket)
@@ -796,6 +811,7 @@ Given both trajectories, what is the best next action to take from this point?
                         if p[1] is None:
                             new_buckets[commit].append(p[0])
                         else:
+                        # elif node_count > k:
                             merged_node = self._merge_nodes(p[0], p[1])
                             p[0].add_child(merged_node)
                             p[1].add_child(merged_node)
@@ -804,14 +820,22 @@ Given both trajectories, what is the best next action to take from this point?
                             merged_node.value = merged_node.merged_value = (0.8 * p[0].merged_value + 0.2 * p[1].merged_value)
                             node_count -= 1
                             new_buckets[commit].append(merged_node)
+                            no_progress = False
+                        # else: # If we have already merged enough nodes to be within the limit, we can just add the remaining nodes without merging to preserve information and encourage exploration of different paths.
+                        #     new_buckets[commit].append(p[0])
+                        #     new_buckets[commit].append(p[1])
+                            
                 else:    
                     new_buckets[commit] = bucket
-                    
+                          
             buckets = new_buckets
             new_buckets = {
                 # inititialize empty array for each commit in buckets
                 commit: [] for commit in buckets.keys()
             }
+            
+            if no_progress: # If we went through all buckets and couldn't merge any nodes, we should break to avoid infinite loop.
+                break
             
         merged_nodes = []
         for commit, bucket in buckets.items():
@@ -830,36 +854,62 @@ Given both trajectories, what is the best next action to take from this point?
         merged_nodes = self._coalesce_nodes_aggressively(nodes, k)
                  
         # return nodes[:k] # OLD
-        if len(merged_nodes) > k:
-            raise ValueError(f"More than k nodes after merging: {len(merged_nodes)} > {k}")
-        
-        return merged_nodes # NEW:
+        return merged_nodes[:k] # NEW:
     
         
     def _get_topk_edit_paths(self, k=3, to_execute=True):
-        max_depth = max(n.level for n in self.all_node_map.values())
-        sorted_leaves = sorted(
-            (
-                n
-                for n in self.all_node_map.values()
-                if not n.executed
-                and not n.is_terminating
-                and n.visible
-                and n.merged_value is not None
-                and (not to_execute or n.level < self.config.depth_limit)
-                and  (n.parent.commit != self._get_root_commit() or n.modifies_code)
-            ),
-            key=lambda n: (
-                n.parent.itr,  # NEW: recency bias (higher = newer)
-                # n.parent.itr == self.itr,  # OLD: Prioritize nodes generated in the current iteration to encourage exploitation of new promising paths
-                self.node_priority(
-                    n, 
-                    gamma=0.85,
-                    max_depth=max_depth
+        curr_i = self.itr 
+        sorted_leaves = []
+        
+        while len(sorted_leaves) < k and curr_i > 0:
+            max_depth = max(n.level for n in self.node_map_itr[curr_i].values())
+            candidates = sorted(
+                (
+                    n
+                    for n in self.node_map_itr[curr_i].values()
+                    if not n.executed
+                    and not n.is_terminating
+                    and n.visible
+                    and n.merged_value is not None
+                    and (not to_execute or n.level < self.config.depth_limit)
+                    and  (n.parent.commit != self._get_root_commit() or n.modifies_code)
                 ),
-            ),
-            reverse=True
-        )
+                key=lambda n: (
+                    self.node_priority(
+                        n, 
+                        gamma=0.85,
+                        max_depth=max_depth
+                    ),
+                ),
+                reverse=True
+            )
+            sorted_leaves.extend(candidates)
+            curr_i -= 1
+        
+        # OLD2
+        # max_depth = max(n.level for n in self.all_node_map.values())
+        # sorted_leaves = sorted(
+        #     (
+        #         n
+        #         for n in self.all_node_map.values()
+        #         if not n.executed
+        #         and not n.is_terminating
+        #         and n.visible
+        #         and n.merged_value is not None
+        #         and (not to_execute or n.level < self.config.depth_limit)
+        #         and  (n.parent.commit != self._get_root_commit() or n.modifies_code)
+        #     ),
+        #     key=lambda n: (
+        #         n.parent.itr,  # NEW: recency bias (higher = newer)
+        #         # n.parent.itr == self.itr,  # OLD: Prioritize nodes generated in the current iteration to encourage exploitation of new promising paths
+        #         self.node_priority(
+        #             n, 
+        #             gamma=0.85,
+        #             max_depth=max_depth
+        #         ),
+        #     ),
+        #     reverse=True
+        # )
         
         # OLD:
         # candidates = [
@@ -979,7 +1029,8 @@ Given both trajectories, what is the best next action to take from this point?
                 if len(sorted_writes) < 3:
                     sorted_reads = sorted(
                         (
-                            n for n in self.all_node_map.values()
+                            # n for n in self.all_node_map.values() # OLD
+                            n for n in self.node_map.values() 
                             if not n.executed
                             and not n.is_terminating
                             and n.visible
@@ -988,7 +1039,7 @@ Given both trajectories, what is the best next action to take from this point?
                             and (n.parent.commit == self._get_root_commit() and not n.modifies_code)
                         ),
                         key=lambda n: (
-                            n.parent.itr,  # recency bias (higher = newer)
+                            # n.parent.itr,  # OLD: recency bias (higher = newer)
                             self.node_priority(n, gamma=0.85, max_depth=max_depth)
                         ),
                         reverse=True,
