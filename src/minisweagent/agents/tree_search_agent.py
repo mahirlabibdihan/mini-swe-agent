@@ -68,12 +68,12 @@ class TreeSearchAgent(RewardGuidedAgent):
         
     def _backtrack(self, target_node):
         instance_logger.debug(f">> Backtracking from [{self.tree_node.id}] to [{target_node.id}]")
-        
-        if target_node.commit != self.tree_node.commit:
-            instance_logger.debug(f">> Backtracking from [{self.tree_node.commit[:7]}] to [{target_node.commit[:7]}]")
+        n_commit = self._estimate_commit(target_node)
+        if n_commit != self.tree_node.commit:
+            instance_logger.debug(f">> Backtracking from [{self.tree_node.commit[:7]}] to [{n_commit[:7]}]")
 
             # if self._get_branch_head(target_node.branch) != target_node.commit:
-            self.env.execute(f"git checkout {target_node.commit}")
+            self.env.execute(f"git checkout {n_commit}")
             self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.commit}\n```")
             # else:
             #     self.env.execute(f"git checkout {target_node.branch}")
@@ -508,7 +508,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         except FormatError as e:
             return response, None, str(e)
         
-    def _merge_nodes(self, node_A, node_B):
+    def _merge_nodes(self, node_A, node_B):            
         self.SYSTEM_PROMPT = self.candidates[0]["SYSTEM_PROMPT"]
         self.USER_PROMPT = self.candidates[0]["USER_PROMPT"]
         node_A.commit = node_A.parent.commit
@@ -776,6 +776,16 @@ Given both trajectories, what is the best next action to take from this point?
         
         return merged_nodes
     
+    def _estimate_commit(self, node):
+        curr = node
+        while curr is not None:
+            if curr.commit is not None:
+                return curr.commit
+            elif curr.modifies_code: # Scenario: When a merged node modifies code. And we try to merge the merged node with another node.
+                return curr.id
+            curr = curr.parent
+        return None
+        
     def _coalesce_nodes_aggressively(self, nodes, k):
         buckets = {}
         bucket_count = 0
@@ -783,19 +793,15 @@ Given both trajectories, what is the best next action to take from this point?
         # NEW: Merge more aggressively until we have at most k nodes. So, that no path gets just discarded, but gets merged with other paths and we can still gather information from it.
         node_count = 0
         for node in nodes:
-            if node.modifies_code: 
+            n_commit = self._estimate_commit(node)
+            if not buckets.get(n_commit):
                 if bucket_count < k:
-                    buckets[str(uuid.uuid4())] = [node]
-                    bucket_count += 1
-                    node_count += 1
-            elif not buckets.get(node.parent.commit):
-                if bucket_count < k:
-                    buckets[node.parent.commit] = [node]
+                    buckets[n_commit] = [node]
                     bucket_count += 1
                     node_count += 1
             else:
             # elif len(buckets[node.parent.commit]) < 2 * k: # NEW
-                buckets[node.parent.commit].append(node)
+                buckets[n_commit].append(node)
                 node_count += 1
                 
         
@@ -820,7 +826,10 @@ Given both trajectories, what is the best next action to take from this point?
                             merged_node.parent = p[0]
                             merged_node.value = merged_node.merged_value = (0.8 * p[0].merged_value + 0.2 * p[1].merged_value)
                             node_count -= 1
-                            new_buckets[commit].append(merged_node)
+                            if merged_node.modifies_code:
+                                new_buckets[self._estimate_commit(merged_node)] = [merged_node]
+                            else:
+                                new_buckets[commit].append(merged_node)
                             no_progress = False
                         # else: # If we have already merged enough nodes to be within the limit, we can just add the remaining nodes without merging to preserve information and encourage exploration of different paths.
                         #     new_buckets[commit].append(p[0])
@@ -955,7 +964,8 @@ Given both trajectories, what is the best next action to take from this point?
     def _update_iteration(self):
         self.node_map_itr[self.itr] = self.node_map # NEW:
         
-        if len(self.terminating_nodes) >= self.config.sub_thres:
+        if self.n_submissions >= self.config.sub_thres:
+        # if len(self.terminating_nodes) >= self.config.sub_thres: # Too harsh
             # TODO: Should we just terminate or consider terminating actions from here?
             
             # We are done exploring. Now check the tree if there is any terminating action. If multiple, choose the one with highest path value/reward. If none, choose the one with highest path value among all nodes and run sequentially from there until we reach a terminating node.   
