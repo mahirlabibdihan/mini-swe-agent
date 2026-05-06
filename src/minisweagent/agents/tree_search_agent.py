@@ -37,6 +37,8 @@ class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     """Maximum number of nodes to expand per step."""
     sub_thres: int = 3
     """Number of submissions after which to switch to phase 3."""
+    u_sub_thres: int = 1
+    """Number of unique submissions after which to switch to phase 3."""
     itr_limit: int = 4
     
 
@@ -73,8 +75,11 @@ class TreeSearchAgent(RewardGuidedAgent):
             instance_logger.debug(f">> Backtracking from [{self.tree_node.commit[:7]}] to [{n_commit[:7]}]")
 
             # if self._get_branch_head(target_node.branch) != target_node.commit:
-            self.env.execute(f"git checkout {n_commit}")
-            self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.commit}\n```")
+            out = self.env.execute(f"git checkout {n_commit}")
+            if out["returncode"] != 0:
+                instance_logger.error(f"Git checkout failed: {out['stderr']}")
+                raise Exception(f"Git checkout failed: {out['stderr']}")
+            self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {n_commit}\n```")
             # else:
             #     self.env.execute(f"git checkout {target_node.branch}")
             #     self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.\n\n```bash\ngit checkout {target_node.branch}\n```")
@@ -105,7 +110,85 @@ class TreeSearchAgent(RewardGuidedAgent):
             return 0.0
         return total_reward / write_actions
     
+    def _get_solution_patch(self, t_node: TreeSearchNode) -> str:
+        if not t_node.is_terminating:
+            return None
+        
+        if t_node.parent.commit is None:
+            return None
+        
+        out = self.env.execute(f"git diff {t_node.parent.commit} {self._get_root_commit()}")
+        return out["output"].strip(), out
+    
+    def _make_terminating_action(self, curr_node):
+        node = self._action_to_node(None,
+            {
+                "action": f"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached",
+                "content": "THOUGHT: Time to submit final output\nCOMMAND_TYPE: [SUBMIT]\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+                "extra": None,
+            } , None, curr_node)
+        
+        curr_node.add_child(node)
+        node.system_generated = True
+        return node
+    
+    def _generate_terminating_nodes(self) :
+        old_active_node = self.tree_node
+        
+        edit_nodes = self._get_all_unique_edit_paths()
+        for node in edit_nodes:
+            if not node.executed:
+                if not node.modifies_code:
+                    node.commit = self._estimate_commit(node)
+                    if node.commit in self.terminating_nodes:
+                        continue # We already have a terminating node for this commit, so skip
+                    node.executed = True
+                    node.order = self.n_expanded + 1
+                    self._backtrack(node)
+                    self.tree_node = node
+                    term_node = self._make_terminating_action(node)
+                    term_node.merged_value = self._evaluate_node(term_node)
+                    if self.terminating_nodes.get(node.commit) is None:
+                        self.terminating_nodes[node.commit] = []
+                    self.terminating_nodes[node.commit].append(term_node)
+                else:
+                    # Modified action not executed yet, so execute it to get the observation and value
+                    # Need to backtrack to the parent node to execute this node
+                    
+                    self._backtrack(node.parent)
+                    self.execute_action(
+                        {
+                            "action": node.last_action["command"]
+                        }
+                    )
+                    self.tree_node = node
+                    node.commit, _ = self._commit_changes()
+                    node.order = self.n_expanded + 1
+                    instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
+                    node.executed = True
+                    term_node = self._make_terminating_action(node)
+                    term_node.value = term_node.merged_value = self._evaluate_node(term_node)
+                    if self.terminating_nodes.get(node.commit) is None:
+                        self.terminating_nodes[node.commit] = []
+                    self.terminating_nodes[node.commit].append(term_node)
+            else:
+                if node.commit in self.terminating_nodes:
+                    continue # We already have a terminating node for this commit, so skip
+                self._backtrack(node)
+                self.tree_node = node
+                term_node = self._make_terminating_action(node)
+                term_node.value = term_node.merged_value = self._evaluate_node(term_node)
+                if self.terminating_nodes.get(node.commit) is None:
+                    self.terminating_nodes[node.commit] = []
+                self.terminating_nodes[node.commit].append(term_node)
+                
+        self._backtrack(old_active_node)
+        self.tree_node = old_active_node
+        
+                    
     def _get_best_terminating_node(self) -> Optional[TreeSearchNode]:
+        self._generate_terminating_nodes() # Ensure we have generated terminating nodes for all current edit paths
+        
         terminating_nodes = [
             n
             for n in self.all_node_map.values() # OLD
@@ -119,12 +202,25 @@ class TreeSearchAgent(RewardGuidedAgent):
             terminating_nodes,
             key=lambda x: (
                 # x.merged_value, # OLD
-                0.9 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1, # NEW:  Should give priority to early discovered solutions
+                0.8 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
+                # NEW: Give priority to AI generated nodes
                 x.get_path_value(0.85) # NEW: In case of tie
             ),
             default=None
         )
         
+        for commit, t_nodes in self.terminating_nodes.items():
+            sorted_terms = sorted(
+                t_nodes,
+                key=lambda x: (
+                    0.8 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
+                    x.get_path_value(0.85) # NEW: In case of tie
+                ),
+                reverse=True
+            )
+            for t in sorted_terms[1:]:
+                t.visible = False # Hide suboptimal terminating nodes for the same commit to reduce clutter in the tree visualization
+            
         return best_node
     
     
@@ -205,11 +301,11 @@ class TreeSearchAgent(RewardGuidedAgent):
                         node.visits += 1
                         term_node = self._make_terminating_action(node)
                         term_nodes.append(term_node)
-                        print(f">> Adding terminating node [{term_node.id}] under node [{node.id}]")
+                        instance_logger.debug(f">> Adding terminating node [{term_node.id}] under node [{node.id}]")
                         futures.append((term_node, executor.submit(self._evaluate_node, term_node)))
                     if futures:
-                        for term_node, future in tqdm(futures, total=len(futures), desc="Waiting for node scores"):
-                            term_node.merged_value = term_node.value = future.result()
+                        for node, future in tqdm(futures, total=len(futures), desc="Waiting for node scores"):
+                            node.merged_value = node.value = future.result()
                 
                 # Now select the best terminating node among the generated ones
                 best_node = self._get_best_terminating_node()
@@ -518,7 +614,11 @@ class TreeSearchAgent(RewardGuidedAgent):
         node_A.order = node_B.order = self.n_expanded + 1
         # self.n_expanded += 1
         response, action, error = self._generate_merge_action(node_A, node_B)
-        return self._action_to_node(response, action, error, node_A) # A is parent, since it has higher value
+        instance_logger.debug(f">> Merging nodes [{node_A.id}] and [{node_B.id}] with shared path length {self._count_shared_path_length(node_A, node_B)} and max divergence path length {self._get_max_divergence_path_length(node_A, node_B)}")
+        
+        merged_node = self._action_to_node(response, action, error, node_A)
+        
+        return  merged_node # A is parent, since it has higher value
             
     def get_messages_two_nodes(self, node_A, node_B) -> List[dict]:
         if node_A.commit != node_B.commit:
@@ -604,7 +704,11 @@ Given both trajectories, what is the best next action to take from this point?
                 if j in used:
                     continue
 
-                score = self._get_max_divergence_path_length(bucket[i], bucket[j])
+                # bucket items are (node, priority) tuples: extract node objects
+                ni = bucket[i][0]
+                nj = bucket[j][0]
+
+                score = self._get_max_divergence_path_length(ni, nj)
 
                 if score < best_score:
                     best_score = score
@@ -634,6 +738,7 @@ Given both trajectories, what is the best next action to take from this point?
         # Make even-sized by padding dummy nodes
         even_n = n if n % 2 == 0 else n + 1
 
+        # Keep original bucket items (may be tuples). For scoring we extract node objects.
         nodes = bucket + [None] * (even_n - n)
 
         cost = np.zeros((even_n, even_n))
@@ -651,7 +756,9 @@ Given both trajectories, what is the best next action to take from this point?
                     if ni is None or nj is None:
                         cost[i][j] = 0  # allow dummy pairing
                     else:
-                        cost[i][j] = self._get_max_divergence_path_length(ni, nj)
+                        ni_obj = ni[0]
+                        nj_obj = nj[0]
+                        cost[i][j] = self._get_max_divergence_path_length(ni_obj, nj_obj)
                         
         row_ind, col_ind = linear_sum_assignment(cost)
         
@@ -694,8 +801,8 @@ Given both trajectories, what is the best next action to take from this point?
         heap = []
         for i in range(n):
             for j in range(i + 1, n):
-                cost = self._get_max_divergence_path_length(bucket[i], bucket[j])
-                heapq.heappush(heap, (cost, i, j))
+                cost = self._get_max_divergence_path_length(bucket[i][0], bucket[j][0])
+                heapq.heappush(heap, (cost, i, j))  # Store cost, priorities, and indices
 
         active = set(range(n))
         pairs = []
@@ -736,23 +843,33 @@ Given both trajectories, what is the best next action to take from this point?
         buckets = {}
         bucket_count = 0
         
-        # OLD: Just merge 2 and ignore the rest
         chunk_size = 2
+        priority = 1
         for node in nodes:
             if node.modifies_code: 
                 if bucket_count < k:
-                    buckets[str(uuid.uuid4())] = [node]
+                    buckets[str(uuid.uuid4())] = [(node, priority)]
                     bucket_count += 1
+                    priority += 1
             elif not buckets.get(node.parent.commit):
                 if bucket_count < k:
-                    buckets[node.parent.commit] = [node]
+                    buckets[node.parent.commit] = [(node, priority)]
                     bucket_count += 1
-            elif len(buckets[node.parent.commit]) % chunk_size != 0:
-                buckets[node.parent.commit].append(node)
+                    priority += 1
+            # else: # NEW
+            elif len(buckets[node.parent.commit]) % chunk_size != 0: # OLD
+                buckets[node.parent.commit].append((node, priority))
+                priority += 1
+            # OLD
             elif bucket_count < k:
-                buckets[node.parent.commit].append(node)
+                buckets[node.parent.commit].append((node, priority))
                 bucket_count += 1
-                
+                priority += 1
+               
+               
+        old_tree_node = self.tree_node
+
+         
         # Merge
         merged_nodes = []
         for commit, bucket in buckets.items():
@@ -765,16 +882,22 @@ Given both trajectories, what is the best next action to take from this point?
                     if p[1] is None:
                         merged_nodes.append(p[0])
                     else:
-                        merged_node = self._merge_nodes(p[0], p[1])
-                        p[0].add_child(merged_node)
-                        p[1].add_child(merged_node)
+                        self._backtrack(p[0][0])
+                        self.tree_node = p[0][0]
+                        merged_node = self._merge_nodes(p[0][0], p[1][0])
+                        p[0][0].add_child(merged_node)
+                        p[1][0].add_child(merged_node)
                         merged_node.merged = True
-                        merged_node.parent = p[0]
+                        merged_node.parent = p[0][0]
                         # merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node) 
-                        merged_node.value = merged_node.merged_value = (0.8 * p[0].merged_value + 0.2 * p[1].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
-                        merged_nodes.append(merged_node)
+                        merged_node.value = merged_node.merged_value = (0.8 * p[0][0].merged_value + 0.2 * p[1][0].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
+                        merged_nodes.append((merged_node, p[0][1])) # Keep the highest priority among merged nodes
         
-        return merged_nodes
+        self._backtrack(old_tree_node)
+        self.tree_node = old_tree_node
+        
+        # Return only nodes (drop priority) but preserve ordering by priority
+        return [x[0] for x in sorted(merged_nodes, key=lambda x: x[1])]
     
     def _estimate_commit(self, node):
         curr = node
@@ -790,19 +913,21 @@ Given both trajectories, what is the best next action to take from this point?
         buckets = {}
         bucket_count = 0
         
-        # NEW: Merge more aggressively until we have at most k nodes. So, that no path gets just discarded, but gets merged with other paths and we can still gather information from it.
+        # NEW: Merge more aggressively until we have at most k nodes. Preserve a priority for ordering.
         node_count = 0
+        priority = 1
         for node in nodes:
             n_commit = self._estimate_commit(node)
             if not buckets.get(n_commit):
                 if bucket_count < k:
-                    buckets[n_commit] = [node]
+                    buckets[n_commit] = [(node, priority)]
                     bucket_count += 1
                     node_count += 1
+                    priority += 1
             else:
-            # elif len(buckets[node.parent.commit]) < 2 * k: # NEW
-                buckets[n_commit].append(node)
+                buckets[n_commit].append((node, priority))
                 node_count += 1
+                priority += 1
                 
         
         new_buckets = {
@@ -815,21 +940,31 @@ Given both trajectories, what is the best next action to take from this point?
                 if len(bucket) > 1:
                     pairs = self._make_pairs(bucket)
                     for p in pairs:
+                        # p elements are taken from bucket and may be (node, priority) tuples
                         if p[1] is None:
+                            # keep the tuple as-is
                             new_buckets[commit].append(p[0])
                         else:
-                        # elif node_count > k:
-                            merged_node = self._merge_nodes(p[0], p[1])
-                            p[0].add_child(merged_node)
-                            p[1].add_child(merged_node)
+                            a_item = p[0]
+                            b_item = p[1]
+                            # a_item and b_item are (node, priority) tuples
+                            a_node = a_item[0]
+                            b_node = b_item[0]
+                            merged_node = self._merge_nodes(a_node, b_node)
+                            a_node.add_child(merged_node)
+                            b_node.add_child(merged_node)
                             merged_node.merged = True
-                            merged_node.parent = p[0]
-                            merged_node.value = merged_node.merged_value = (0.8 * p[0].merged_value + 0.2 * p[1].merged_value)
+                            merged_node.parent = a_node
+                            merged_node.value = merged_node.merged_value = (0.8 * a_node.merged_value + 0.2 * b_node.merged_value)
                             node_count -= 1
+                            # compute new priority: prefer earlier appearance
+                            a_pr = a_item[1]
+                            b_pr = b_item[1]
+                            new_pr = min(a_pr, b_pr)
                             if merged_node.modifies_code:
-                                new_buckets[self._estimate_commit(merged_node)] = [merged_node]
+                                new_buckets[self._estimate_commit(merged_node)] = [(merged_node, new_pr)]
                             else:
-                                new_buckets[commit].append(merged_node)
+                                new_buckets[commit].append((merged_node, new_pr))
                             no_progress = False
                         # else: # If we have already merged enough nodes to be within the limit, we can just add the remaining nodes without merging to preserve information and encourage exploration of different paths.
                         #     new_buckets[commit].append(p[0])
@@ -850,8 +985,9 @@ Given both trajectories, what is the best next action to take from this point?
         merged_nodes = []
         for commit, bucket in buckets.items():
             merged_nodes.extend(bucket)
-            
-        return merged_nodes
+
+        # merged_nodes are tuples (node, priority); return plain nodes preserving order
+        return [x[0] for x in merged_nodes]
         
     def _slice_topk(self, nodes: List[TreeSearchNode], k: int) -> List[TreeSearchNode]:
         # Future Work
@@ -860,12 +996,39 @@ Given both trajectories, what is the best next action to take from this point?
         # Since the array is sorted, we will traverse it from start to end, and keep adding nodes to the top-k array until we have k unique commits.
         # We don't want to merge more than 2 nodes for now, so let's say there are 3 same commit at the start of an array, we will group the first 2, and treat 3rd as separate commit to encourage exploration of different paths. This is a hyperparameter that can be tuned based on the task and the size of the tree.
         
-        # merged_nodes = self._coalesce_dual_nodes(nodes, k)
-        merged_nodes = self._coalesce_nodes_aggressively(nodes, k)
+        merged_nodes = self._coalesce_dual_nodes(nodes, k)
+        # merged_nodes = self._coalesce_nodes_aggressively(nodes, k)
                  
         # return nodes[:k] # OLD
         return merged_nodes[:k] # NEW:
     
+    def _get_all_unique_edit_paths(self, to_execute=False):
+        # For each commit, find the best node
+        sorted_nodes = sorted(
+            (
+                n
+                for n in self.all_node_map.values()
+                if not n.is_terminating
+                and n.visible
+                and n.merged_value is not None
+                and (not to_execute or n.level < self.config.depth_limit)
+                and (n.parent.commit != self._get_root_commit() or n.modifies_code)
+                # and (n.commit is not None and n.commit not in self.terminating_nodes)
+                # and (n.commit is None and self._estimate_commit(n) not in self.terminating_nodes)
+            ),
+            key=lambda n: n.get_path_value(0.85),
+            reverse=True
+        )
+        
+        # Now pick the best node for each unique commit, and return those nodes as unique edit paths
+        unique_paths = {}
+        for node in sorted_nodes:
+            commit = self._estimate_commit(node)
+            if commit not in unique_paths:
+                unique_paths[commit] = node
+                
+        return list(unique_paths.values())
+        
         
     def _get_topk_edit_paths(self, k=3, to_execute=True):
         curr_i = self.itr 
@@ -957,14 +1120,14 @@ Given both trajectories, what is the best next action to take from this point?
         #     )
             
         top_k = self._slice_topk(sorted_leaves, k)
-        print(f">> Found {len(top_k)} edit paths")
+        instance_logger.debug(f">> Found {len(top_k)} edit paths")
         return top_k 
     
               
     def _update_iteration(self):
         self.node_map_itr[self.itr] = self.node_map # NEW:
         
-        if self.n_submissions >= self.config.sub_thres:
+        if self.n_submissions >= self.config.sub_thres and len(self.terminating_nodes) >= self.config.u_sub_thres:
         # if len(self.terminating_nodes) >= self.config.sub_thres: # Too harsh
             # TODO: Should we just terminate or consider terminating actions from here?
             
@@ -974,9 +1137,8 @@ Given both trajectories, what is the best next action to take from this point?
             self.frontier.clear()
             self.itr += 1
             self.node_map = {best_node.id: best_node}
-          
-            return best_node
-            
+            self._update_frontier([best_node]) # Update frontier with the best node to encourage exploitation of the best solution path
+
         elif self.itr == self.config.itr_limit:
             top_k = self._get_topk_edit_paths(k=1)
             if len(top_k) > 0:
@@ -1007,9 +1169,7 @@ Given both trajectories, what is the best next action to take from this point?
             self.frontier.clear()
             self.itr += 1
             self.node_map = {best_node.id: best_node} # Prune the rest of the tree by keeping only the best node in the node map
-            
-            return best_node
-
+            self._update_frontier([best_node])
         else: 
             
             self.frontier.clear()
@@ -1063,7 +1223,6 @@ Given both trajectories, what is the best next action to take from this point?
             self.node_map = {n.id: n for n in top_k}
             self.itr += 1
             instance_logger.debug(f">> Iteration {self.itr}: Updating frontier with top {len(top_k)} non-terminating leaves based on path value.")
-        return None
 
     def step(self) -> dict:
         if self.tree_node.is_terminating:
@@ -1107,10 +1266,10 @@ Given both trajectories, what is the best next action to take from this point?
                          
                 self._update_frontier(candidates)
                 
-            if self.n_expanded >= self.itr * 10 and self.itr <= self.config.itr_limit:
-                best_node = self._update_iteration()
+            if ((self.itr == 1 and self.n_expanded >= 10) or self.n_expanded >= 10 + (self.itr-1) * 15) and self.itr <= self.config.itr_limit:
+                self._update_iteration()
 
-            if best_node is None:
+            while best_node is None:
                 if not self.frontier.empty():
                     best_node = self._select_action()
                     if best_node.parent != self.tree_node:
@@ -1121,7 +1280,7 @@ Given both trajectories, what is the best next action to take from this point?
                 else:
                     instance_logger.debug(f">> No actions in frontier. Updating iteration to expand more nodes. Current iteration: {self.itr}")
                     # NEW:
-                    best_node = self._update_iteration()
+                    self._update_iteration()
                     
                     # OLD:
                     # max_depth = max(n.level for n in self.node_map.values())
@@ -1166,6 +1325,8 @@ Given both trajectories, what is the best next action to take from this point?
                 }
             )
             observation = self.render_template(self.config.action_observation_template, output=output)
+            
+        instance_logger.debug(f">> Observation: {observation[:200]}...") # Log only the beginning of the observation to avoid cluttering the logs
         
         self.n_expanded += 1
         

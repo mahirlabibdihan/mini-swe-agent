@@ -50,7 +50,8 @@ class RewardGuidedAgent(SingleActionAgent):
         self.reward_model = reward_model
         self.candidates = []
         self.n_modifications = 0 # Number of nodes which have at least one write child
-
+        self.commits = []
+        
         # instance_logger.debug(result)
         image_ref = self.env.config.image
         image_ref = self.env.config.image
@@ -287,7 +288,11 @@ EOF
         self.add_message("user", observation)
         if self._repo_has_changes():
             raise Exception(">> Warning: Changes still detected after commit.")
-        return output["output"].strip(), is_submodule_commit
+        
+        commit = output["output"].strip()
+        self.commits.append(commit)
+
+        return commit, is_submodule_commit
     
     def _get_test_status(self):
         """Apply reproduction patch, run tests, and return parsed test entries from test_status.json."""
@@ -692,8 +697,6 @@ EOF
                 observation = self.render_template(self.config.action_observation_template, output=output) 
                 raw_observation = output
                 
-        
-                
             except (TimeoutError, subprocess.TimeoutExpired) as e:
                 output = e.output.decode("utf-8", errors="replace") if getattr(e, "output", None) else ""
                 observation = self.render_template(self.config.timeout_template, action=action, output=output)
@@ -790,6 +793,11 @@ EOF
         if new_node.observation is None: # Q: When will it not be None here? A: When terminating action detected above
             new_node.observation = observation
             new_node.raw_observation = raw_observation
+            
+        if not new_node.modifies_code:
+            new_node.commit = current_node.commit
+            new_node.test_status = current_node.test_status
+            
             
         new_node.parent = current_node
         new_node.last_action["type"] = self._get_type(new_node)
@@ -1096,6 +1104,10 @@ EOF
         return new_value
     
     def _evaluate_node(self, node):
+        # Current active node should be node.parent
+        if node.parent is None:
+            raise Exception("Can't evaluate nodes without parent")
+        
         if node.value is not None:
             return node.value
         
@@ -1175,7 +1187,7 @@ EOF
                 instance_logger.debug(f">> Excessive-modified-files reward adjustment: {node.value:.4f} -> {new_value:.4f}")
                 node.value = new_value
                 
-            status_delta = self._compare_test_statuses(self.tree_node.test_status, node.test_status)
+            status_delta = self._compare_test_statuses(node.parent.test_status, node.test_status)
             if status_delta < 0:
                 penalty = max(0.9, 1.0 + 0.1 * status_delta)
                 new_value = node.value * penalty

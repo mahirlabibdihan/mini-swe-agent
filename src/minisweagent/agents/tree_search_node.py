@@ -18,6 +18,7 @@ class TreeSearchNode:
         self.level = 0
         self.order = 0
         self.itr = 0
+        self.system_generated = False
         self.modifies_code = False
         self.modified_files = []
         self.merged = False
@@ -119,6 +120,7 @@ class TreeSearchNode:
                 "order": self.order,
                 "itr": self.itr,
                 "merged": self.merged,
+                "system_generated": self.system_generated,
                 "is_terminating": self.is_terminating,
                 "is_submission": self.is_submission,
                 "epsilon": self.epsilon,
@@ -134,7 +136,10 @@ class TreeSearchNode:
                 } if self.last_action else None,
                 "test_status": self.test_status,
                 "history_summary": self.history_summary,
-                "children": [child.to_tree() for child in self.children],
+                "children": [
+                    child.to_tree() if child.parent.id == self.id else {"id": child.id}
+                    for child in self.children
+                ],
                 "observation": self.observation,
             }
         except Exception as e:

@@ -193,7 +193,8 @@ def _collect_terminating_nodes(node: dict, terminating_nodes: list, seen: set | 
     # Recursively traverse children
     if node is not None and "children" in node and node["children"]:
         for child in node["children"]:
-            _collect_terminating_nodes(child, terminating_nodes, seen)
+            if child.get("visible", False):  # Only traverse visible nodes to avoid duplicates
+                _collect_terminating_nodes(child, terminating_nodes, seen)
 
 
 def _extract_patch_from_node(node: dict) -> str:

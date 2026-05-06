@@ -169,14 +169,17 @@ class SingleActionAgent(DefaultAgent):
         node = self._create_node(
             last_action={
                 "command": f"echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached",
-                "thought": "THOUGHT: MAX STEPS REACHED\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
+                "thought": "THOUGHT: Time to submit final output\nCOMMAND_TYPE: [SUBMIT]\n\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached\n```",
                 "extra": None,
                 "type": "submit"
             },
         )
-        node.value = node.merged_value = 0.0
+        # node.value = node.merged_value = 0.0 # OLD: If we set 0.0, we can't evaluate it
         node.is_terminating = True
+        node.test_status = curr_node.test_status
+        node.commit = curr_node.commit
         curr_node.add_child(node)
+        node.system_generated = True
         return node
     
     def _add_actions_to_frontier(self, actions: List[TreeSearchNode]):

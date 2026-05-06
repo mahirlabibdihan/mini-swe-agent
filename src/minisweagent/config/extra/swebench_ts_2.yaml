@@ -257,6 +257,7 @@ agent:
   context_compaction: false
   max_history: 16
   sub_thres: 2
+  u_sub_thres: 1 # Unique submission threshold
   itr_limit: 4
   
 environment:

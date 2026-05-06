@@ -78,7 +78,7 @@ def _build_state_color_map(nodes: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
         "#bcf60c",  # lime
         "#fabebe",  # light pink
     ]
-    states = sorted({_state_key(n) for n in nodes.values() if not _none_commit(n)})
+    states = sorted({_state_key(n) for n in nodes.values() if n.get("executed", False)})
     return {state: palette[i % len(palette)] for i, state in enumerate(states)}
 
 
@@ -109,7 +109,9 @@ def parse_nested_tree(root: Dict[str, Any]) -> Tuple[Dict[str, Dict[str, Any]], 
         if node_id in visited:
             return
         
-        visited.add(node_id)
+        if node.get("value") is not None:
+            visited.add(node_id)
+            
         nodes[node_id] = node
         for child in node.get("children", []) or []:
             if isinstance(child, dict):
@@ -201,7 +203,7 @@ def build_dot(
         order_val = node.get("order")
         is_terminating = bool(node.get("is_terminating", False))
         pass_val = node.get("pass")
-        if _none_commit(node):
+        if not node.get("executed", False):
             color = "#bdbdbd"
         elif color_by == "state":
             color = state_colors[_state_key(node)]
@@ -227,7 +229,7 @@ def build_dot(
         # elif is_terminating and pass_val is False:
         #     term_prefix = "INVALID\\n"
 
-        if order_val != 0:
+        if order_val != 0 and order_val is not None:
             label = _escape_dot_label(f"{term_prefix}#{order_val}\n{score_str}")
         else:
             label = _escape_dot_label(f"{term_prefix}{score_str}")
@@ -258,7 +260,7 @@ def build_dot(
                     lines.append(
                         f'  "{edge.parent}" -> "{edge.child}" [color="#2ca02c" penwidth=2.0 style=dashed];'
                     )
-            elif _none_commit(child_node):
+            elif not child_node.get("executed", False):
                 if real_child:
                     lines.append(
                         f'  "{edge.parent}" -> "{edge.child}" [color="#999999"];'
@@ -304,7 +306,7 @@ def build_cytoscape_html(
         order_val = node.get("order")
         is_terminating = bool(node.get("is_terminating", False))
         pass_val = node.get("pass")
-        if _none_commit(node):
+        if not node.get("executed", False):
             color = "#bdbdbd"
         elif color_by == "state":
             color = state_colors[_state_key(node)]
@@ -367,7 +369,7 @@ def build_cytoscape_html(
             elif child_node.get("is_terminating", False):
                 line_color = "#2ca02c"
                 width = "2.5"
-            elif _none_commit(child_node):
+            elif not child_node.get("executed", False):
                 line_color = "#999999"
                 width = "1"
             else:
