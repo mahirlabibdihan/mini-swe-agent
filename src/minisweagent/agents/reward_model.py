@@ -778,6 +778,96 @@ Your task is specifically to make changes to non-test files in the current direc
         else:
             return self.compute_reward_legacy(node, task, cmd_type)
 
+    def compute_reward_with_components(
+        self,
+        node: TreeSearchNode,
+        task: Optional[str] = None,
+        cmd_type: str = "read"
+    ) -> dict:
+        """Compute reward and return detailed components.
+
+        Returns a dict with keys: 'consistency', 'trajectory', 'specific', 'weighted_sum', 'method'
+        All scores are normalized to [0.0, 1.0].
+        """
+        # Build trajectory and other shared context similar to compute_reward_* methods
+        action = node.last_action['thought']
+        observation = node.observation
+        task_text = f"""
+<pr_description>
+Consider the following PR description:
+{task}
+</pr_description>
+
+You're a software engineer interacting continuously with a computer by submitting commands.
+You'll be helping implement necessary changes to meet requirements in the PR description.
+Your task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.
+        """
+
+        trajectory = []
+        history_summary = None
+        offset = 0
+        curr = node.parent
+        while curr.last_action is not None:
+            if curr.history_summary is not None:
+                history_summary = curr.history_summary
+                offset = curr.level
+                break
+            trajectory.append({
+                "thought": curr.last_action["thought"],
+                "action": curr.last_action["command"],
+                "observation": curr.observation,
+            })
+            curr = curr.parent
+        trajectory.reverse()
+
+        # Dispatch to combined or legacy path but return components
+        if self.use_combined_scoring:
+            # choose prompt based on cmd_type (score_combined will apply formatting)
+            if cmd_type == "edit":
+                prompt = combined_evaluation_prompt_edit
+            elif cmd_type == "test":
+                prompt = combined_evaluation_prompt_test
+            elif cmd_type == "submit":
+                prompt = combined_evaluation_prompt_submit
+            else:
+                prompt = combined_evaluation_prompt_search
+
+            C, T, K = self.score_combined(prompt, task_text, offset, history_summary, trajectory, action, observation)
+            w_c, w_k, w_t = 0.25, 0.40, 0.35
+            R = w_c * C + w_k * K + w_t * T
+            return {
+                "method": "combined",
+                "consistency": C,
+                "trajectory": T,
+                "specific": K,
+                "weighted_sum": R,
+            }
+        else:
+            # Legacy: call three separate scorers
+            if cmd_type == "edit":
+                K_prompt = code_edit_effectiveness_prompt
+            elif cmd_type == "test":
+                K_prompt = test_feedback_gain_prompt
+            elif cmd_type == "submit":
+                K_prompt = termination_readiness_prompt
+            else:
+                K_prompt = knowledge_gain_prompt
+
+            score_args = (task_text, offset, history_summary, trajectory, action, observation)
+            # call score() for each dimension
+            C = self.score(consistency_prompt, *score_args)
+            T = self.score(trajectory_alignment_prompt, *score_args)
+            K = self.score(K_prompt, *score_args)
+            w_c, w_k, w_t = 0.25, 0.40, 0.35
+            R = w_c * C + w_k * K + w_t * T
+            return {
+                "method": "legacy",
+                "consistency": C,
+                "trajectory": T,
+                "specific": K,
+                "weighted_sum": R,
+            }
+
     
         
         

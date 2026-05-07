@@ -35,6 +35,9 @@ class TreeSearchNode:
         self.diff_size = 0
         self.history_summary = None
         self.test_status = []
+        # Detailed breakdown of how the node's score/value was calculated.
+        # Filled by the agent's reward computation for debugging and analysis.
+        self.score_calculation = None
         
     def __lt__(self, other):
         # based on frequency
@@ -141,6 +144,7 @@ class TreeSearchNode:
                     for child in self.children
                 ],
                 "observation": self.observation,
+                "score_calculation": self.score_calculation,
             }
         except Exception as e:
             instance_logger.debug(f">> Failed to convert node {self.id} to tree: {e}")

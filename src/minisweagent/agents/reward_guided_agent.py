@@ -440,11 +440,26 @@ EOF
         # track the time taken for reward computation
         start_time = time.time()
         cmd_type = node.last_action['type']
-        node.value = self.reward_model.compute_reward(node, self.task, cmd_type=cmd_type)
-        
+
+        # Get detailed reward components from the reward model
+        try:
+            components = self.reward_model.compute_reward_with_components(node, self.task, cmd_type=cmd_type)
+        except Exception:
+            # Fallback to scalar compute_reward if detailed method fails
+            base_value = self.reward_model.compute_reward(node, self.task, cmd_type=cmd_type)
+            components = {"method": "fallback", "consistency": None, "trajectory": None, "specific": None, "weighted_sum": base_value}
+
+        base_value = components.get("weighted_sum", 0.0)
+        score_calc = {
+            "base": components,
+            "steps": []
+        }
+
+        current_value = float(base_value)
+
+        # Invalid / malformed actions: multiplicative penalty based on chain of invalids
         if node.last_action["command"] is None:
-            # Penalize invalid actions
-            penalty = 1
+            penalty = 1.0
             curr = node
             while curr is not None and curr.last_action is not None:
                 if curr.last_action["command"] is None:
@@ -452,13 +467,15 @@ EOF
                 else:
                     break
                 curr = curr.parent
-                
-            new_value = penalty * node.value
-            instance_logger.debug(f">> Invalid-action reward adjustment: {node.value:.4f} -> {new_value:.4f}")
-            node.value = new_value
-            
-        elif node.raw_observation is not None and not self.is_test_failure(node, node.raw_observation.get("returncode", 0)) and node.raw_observation.get("returncode", 0) != 0:
-            penalty = 1
+
+            new_value = penalty * current_value
+            score_calc["steps"].append({"name": "invalid_action_penalty", "factor": penalty, "before": current_value, "after": new_value})
+            instance_logger.debug(f">> Invalid-action reward adjustment: {current_value:.4f} -> {new_value:.4f}")
+            current_value = new_value
+
+        # Non-zero return code penalty (excluding test failures)
+        if node.raw_observation is not None and not self.is_test_failure(node, node.raw_observation.get("returncode", 0)) and node.raw_observation.get("returncode", 0) != 0:
+            penalty = 1.0
             curr = node
             while curr is not None and curr.last_action is not None:
                 if curr.raw_observation is not None and not self.is_test_failure(curr, curr.raw_observation.get("returncode", 0)) and curr.raw_observation.get("returncode", 0) != 0:
@@ -466,107 +483,104 @@ EOF
                 else:
                     break
                 curr = curr.parent
-            # Penalize actions with non-zero return code
-            new_value = penalty * node.value
-            instance_logger.debug(f">> Non-zero return-code reward adjustment: {node.value:.4f} -> {new_value:.4f}")
-            node.value = new_value
-        
+            new_value = penalty * current_value
+            score_calc["steps"].append({"name": "nonzero_returncode_penalty", "factor": penalty, "before": current_value, "after": new_value})
+            instance_logger.debug(f">> Non-zero return-code reward adjustment: {current_value:.4f} -> {new_value:.4f}")
+            current_value = new_value
+
+        # Write-action adjustments (relevance, test failures, diff size, excessive files)
         if len(node.modified_files) > 0:
-            # Boost nodes that modify code based on relevance
             max_relevance = 0.0
-            
-            # Option 1: File-level relevance
             for file in node.modified_files:
                 if file in self.relevance_dict:
                     max_relevance = max(max_relevance, self.relevance_dict[file])
-            
-            # Weighted average
-            new_value = (0.7 * node.value + 0.3 * max_relevance)
-            
-            # Option 2: Hierarchical relevance
-            # max_relevance = self._calculate_hierarchical_score(node.changes) 
-            # new_value = (0.9 * new_value + 0.1 * max_relevance)
-            
-            instance_logger.debug(f">> Write-action reward adjustment: {node.value:.4f} -> {new_value:.4f}")
-            node.value = new_value
-            
+
+            new_value = (0.7 * current_value + 0.3 * max_relevance)
+            score_calc["steps"].append({"name": "write_action_relevance_boost", "max_relevance": max_relevance, "before": current_value, "after": new_value})
+            instance_logger.debug(f">> Write-action reward adjustment: {current_value:.4f} -> {new_value:.4f}")
+            current_value = new_value
+
             if node.fails_tests:
-                # Penalize if tests fail
-                new_value = 0.6 * node.value
-                # Red color instance_logger.debug to indicate test failure
-                instance_logger.debug(f">> Test-failure reward adjustment: {node.value:.4f} -> {new_value:.4f}")
-                node.value = new_value
-                
-            
+                new_value = 0.6 * current_value
+                score_calc["steps"].append({"name": "test_failure_penalty", "factor": 0.6, "before": current_value, "after": new_value})
+                instance_logger.debug(f">> Test-failure reward adjustment: {current_value:.4f} -> {new_value:.4f}")
+                current_value = new_value
+
             if node.diff_size is not None and node.diff_size > 50:
                 penalty = math.exp(-(node.diff_size - 50) / 100.0)
-                new_value = node.value * penalty
-                instance_logger.debug(f">> Excessive-diff reward adjustment: {node.value:.4f} -> {new_value:.4f}")
-                node.value = new_value
-            # TODO: Penalize if the number of modified files is excessive (e.g., more than 5 files), as it may indicate unfocused modifications. We can use an exponential penalty based on the number of modified files to avoid hard thresholds.
+                new_value = current_value * penalty
+                score_calc["steps"].append({"name": "excessive_diff_penalty", "factor": penalty, "diff_size": node.diff_size, "before": current_value, "after": new_value})
+                instance_logger.debug(f">> Excessive-diff reward adjustment: {current_value:.4f} -> {new_value:.4f}")
+                current_value = new_value
             elif len(node.modified_files) > 5:
                 penalty = math.exp(-(len(node.modified_files) - 5) / 5.0)
-                new_value = node.value * penalty
-                instance_logger.debug(f">> Excessive-modified-files reward adjustment: {node.value:.4f} -> {new_value:.4f}")
-                node.value = new_value
-                
+                new_value = current_value * penalty
+                score_calc["steps"].append({"name": "excessive_modified_files_penalty", "factor": penalty, "n_files": len(node.modified_files), "before": current_value, "after": new_value})
+                instance_logger.debug(f">> Excessive-modified-files reward adjustment: {current_value:.4f} -> {new_value:.4f}")
+                current_value = new_value
+
             status_delta = self._compare_test_statuses(node.parent.test_status, node.test_status)
             if status_delta < 0:
                 penalty = max(0.9, 1.0 + 0.1 * status_delta)
-                new_value = node.value * penalty
-                instance_logger.debug(
-                    f">> Test-status regression adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
-                )
-                node.value = new_value
+                new_value = current_value * penalty
+                score_calc["steps"].append({"name": "test_status_regression_penalty", "factor": penalty, "delta": status_delta, "before": current_value, "after": new_value})
+                instance_logger.debug(f">> Test-status regression adjustment (delta={status_delta}): {current_value:.4f} -> {new_value:.4f}")
+                current_value = new_value
             elif status_delta > 0:
                 boost = min(1.1, 1.0 + 0.1 * status_delta)
-                new_value = node.value * boost
-                instance_logger.debug(
-                    f">> Test-status improvement adjustment (delta={status_delta}): {node.value:.4f} -> {new_value:.4f}"
-                )
-                node.value = new_value
-        
-        elif node.raw_observation is not None and node.raw_observation.get("output").strip() == "":
-            # Penalize read actions that produce no output
-            new_value = 0.7 * node.value
-            instance_logger.debug(f">> Empty-output reward adjustment: {node.value:.4f} -> {new_value:.4f}")
-            node.value = new_value
-        
-        # OLD:
-        # elif (node.last_action["command"] is None or not self.is_test_command(node)) and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
-        # NEW:
-        elif (node.last_action["command"] is None or node.last_action["type"] != "test") and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
-            # Penalize read actions that produce excessive output
-            penalty = math.exp(-(len(node.raw_observation.get("output").strip()) - 5000) / 3000.0)
-            new_value = max(0.8, penalty) * node.value
-            instance_logger.debug(f">> Excessive-output reward adjustment ({len(node.raw_observation.get("output").strip())} chars): {node.value:.4f} -> {new_value:.4f}")
-            # Excessive-output reward adjustment (5377 chars): 0.6325 -> 0.5060
-            node.value = new_value
+                new_value = current_value * boost
+                score_calc["steps"].append({"name": "test_status_improvement_boost", "factor": boost, "delta": status_delta, "before": current_value, "after": new_value})
+                instance_logger.debug(f">> Test-status improvement adjustment (delta={status_delta}): {current_value:.4f} -> {new_value:.4f}")
+                current_value = new_value
 
-        if len(node.read_files) > 0: 
+        # Read-action empty output penalty
+        elif node.raw_observation is not None and node.raw_observation.get("output").strip() == "":
+            new_value = 0.7 * current_value
+            score_calc["steps"].append({"name": "empty_output_penalty", "factor": 0.7, "before": current_value, "after": new_value})
+            instance_logger.debug(f">> Empty-output reward adjustment: {current_value:.4f} -> {new_value:.4f}")
+            current_value = new_value
+
+        # Excessive output penalty for read actions
+        if (node.last_action["command"] is None or node.last_action["type"] != "test") and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
+            penalty = math.exp(-(len(node.raw_observation.get("output").strip()) - 5000) / 3000.0)
+            new_value = max(0.8, penalty) * current_value
+            score_calc["steps"].append({"name": "excessive_output_penalty", "factor": max(0.8, penalty), "chars": len(node.raw_observation.get("output").strip()), "before": current_value, "after": new_value})
+            instance_logger.debug(f">> Excessive-output reward adjustment ({len(node.raw_observation.get("output").strip())} chars): {current_value:.4f} -> {new_value:.4f}")
+            current_value = new_value
+
+        # Read-action relevance boost
+        if len(node.read_files) > 0:
             max_relevance = 0.0
             for file in node.read_files:
                 if file in self.relevance_dict:
                     print(f">> Found relevance score for read file {file}: {self.relevance_dict[file]:.4f}")
                     max_relevance = max(max_relevance, self.relevance_dict[file])
-            
-            # Weighted average
-            new_value = (0.9 * node.value + 0.1 * max_relevance)
-            instance_logger.debug(f">> Read-action reward adjustment: {node.value:.4f} -> {new_value:.4f}")
-            node.value = new_value
+            new_value = (0.9 * current_value + 0.1 * max_relevance)
+            score_calc["steps"].append({"name": "read_action_relevance", "max_relevance": max_relevance, "before": current_value, "after": new_value})
+            instance_logger.debug(f">> Read-action reward adjustment: {current_value:.4f} -> {new_value:.4f}")
+            current_value = new_value
 
-        # compute relevance score
+        # Similarity / external relevance adjustment
         relevance_score = self._calculate_relevance(node.last_action["command"], node.observation)
-        # Take weighted average of relevance score and current value
-        new_value = (0.7 * node.value + 0.3 * relevance_score)
-        instance_logger.debug(f">> Similarity reward adjustment: {node.value:.4f} -> {new_value:.4f}")
+        new_value = (0.7 * current_value + 0.3 * relevance_score)
+        score_calc["steps"].append({"name": "similarity_adjustment", "relevance_score": relevance_score, "before": current_value, "after": new_value})
+        instance_logger.debug(f">> Similarity reward adjustment: {current_value:.4f} -> {new_value:.4f}")
+        current_value = new_value
 
+        # Terminating adjustment
         if node.is_terminating and not node.invalid_termination:
-            new_value = self._adjust_terminating_reward(node, new_value)
-            
+            before = current_value
+            after = self._adjust_terminating_reward(node, current_value)
+            score_calc["steps"].append({"name": "terminating_adjustment", "before": before, "after": after})
+            current_value = after
+
         end_time = time.time()
-        instance_logger.debug(f"=>> Reward: {new_value:.4f} | Time taken: {end_time - start_time:.2f} seconds")
-        return new_value
+        instance_logger.debug(f"=>> Reward: {current_value:.4f} | Time taken: {end_time - start_time:.2f} seconds")
+
+        # Save detailed calculation on the node for later inspection
+        node.score_calculation = score_calc
+        node.value = current_value
+        return current_value
     
     def _get_commit_hash(self):
         """Get the current commit hash"""
