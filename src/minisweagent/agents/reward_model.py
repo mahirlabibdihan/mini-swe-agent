@@ -14,130 +14,6 @@ import litellm
 
 from minisweagent.utils.log import instance_logger
 
-score_format_prompt = """
-Output format requirement:
-
-You may include explanations or other text if you want.
-However, you MUST include EXACTLY ONE <score>...</score> block.
-
-The <score> block must contain a single INTEGER between 0 and 100 (inclusive).
-
-The final score will be read ONLY from inside the <score> block.
-Anything outside the block will be ignored.
-
-For example:
-<score>INTEGER</score>
-"""
-
-_base_evaluation_prompt = """
->> Instruction
-{task}
-
->> Previous Actions and Observations
-{trajectory}
-
->> Current action
-{action}
-
->> Observation
-{observation}
-
-"""
-
-consistency_prompt = _base_evaluation_prompt + """
-You are evaluating a debugging step.
-
-Question:
-Does the observation logically follow from the intent expressed in the thought? 
-
-Scoring guidelines:
-Assign an integer score from 0 to 100 that reflects how logically consistent the observation is with the intent expressed in the thought. A score of 0 means the observation clearly contradicts the intent expressed in the thought. A score of 100 means the observation fully and unambiguously supports the intent and follows logically from the thought. Use any integer between 0 and 100 to best reflect the degree of consistency.
-
-{score_format_prompt}
-"""
-
-trajectory_alignment_prompt = _base_evaluation_prompt + """
-You are evaluating whether a debugging step aligns with the overall intent.
-
-Question:
-Score how well this step moves toward the trajectory intent.
-
-Scoring guidelines:
-Assign an integer score from 0 to 100 that reflects how well this step moves the trajectory toward its intended goal. A score of 0 means the step clearly moves away from or contradicts the trajectory intent. A score of 100 means the step strongly and directly advances the trajectory intent toward the goal. Use any integer between 0 and 100 to best reflect the degree of alignment.
-
-{score_format_prompt}
-"""
-
-knowledge_gain_prompt = _base_evaluation_prompt + """
-You are evaluating whether a debugging step provided new and useful information.
-
-Question:
-Did this observation provide NEW and USEFUL information for fixing the issue?
-
-Scoring guidelines:
-Assign an integer score from 0 to 100 that reflects how much NEW and USEFUL information the observation provides. A score of 0 means the observation provides no useful new information and is completely redundant or irrelevant. A score of 100 means the observation provides highly valuable new information and reveals critical insights relevant to fixing the issue. Use any integer between 0 and 100 to best reflect the amount of knowledge gained.
-
-{score_format_prompt}
-"""
-
-
-code_edit_effectiveness_prompt = _base_evaluation_prompt + """
-You are evaluating a CODE EDIT debugging step.
-
-Question:
-How effective was this code edit in addressing the underlying issue?
-
-Scoring guidelines:
-Assign an integer score from 0 to 100 that reflects how effective this code edit was. A score of 0 means the code edit is clearly harmful, irrelevant, or moves away from fixing the issue. A score of 100 means the code edit directly and substantially advances the fix or resolves the issue. Use any integer between 0 and 100 to best reflect the degree of effectiveness.
-
-{score_format_prompt}
-"""
-
-test_feedback_gain_prompt = _base_evaluation_prompt + """
-You are evaluating a TESTING debugging step.
-
-Question:
-Did this testing step provide meaningful and informative feedback for fixing the issue?
-
-Scoring guidelines:
-Assign an integer score from 0 to 100 that reflects how valuable the testing feedback is.
-
-A score of 0 means the testing step provides no useful information (e.g., redundant test passes with no new coverage or insight).  
-A score of 100 means the testing step provides highly informative feedback that significantly improves understanding of the issue (e.g., revealing new failures, isolating the bug, or substantially expanding test coverage).  
-Use any integer between 0 and 100 to best reflect the degree of usefulness.
-
-When assigning the score, consider:
-- Whether the test outcome reveals new failures or confirms incorrect behavior.
-- Whether the test outcome rules out hypotheses or narrows down the cause of the issue.
-- Whether the testing scope meaningfully increases coverage (e.g., running an entire suite or directory vs. a single test).
-- Whether passing tests are informative given prior test results (e.g., previously untested code paths vs. already-known passes).
-
-{score_format_prompt}
-"""
-
-termination_readiness_prompt = _base_evaluation_prompt + """
-You are evaluating a TERMINATION / SUBMISSION debugging step.
-
-Question:
-Is it appropriate for the agent to terminate and submit the solution at this point?
-
-Scoring guidelines:
-Assign an integer score from 0 to 100 that reflects how appropriate this termination decision is.
-
-A score of 0 means the agent clearly terminates prematurely (e.g., unresolved errors, failing or unrun tests, unvalidated edits, or missing evidence of correctness).
-A score of 100 means the agent terminates at an appropriate time, with strong evidence that the solution is correct and sufficiently validated.
-Use any integer between 0 and 100 to best reflect the degree of readiness for termination.
-
-When assigning the score, consider:
-- Whether the core issue described in the instruction appears to be resolved.
-- Whether recent code edits were followed by adequate testing or verification.
-- Whether test results (if any) support correctness rather than uncertainty.
-- Whether remaining plausible failure modes were reasonably ruled out.
-- Whether additional debugging, testing, or refinement would still be necessary.
-
-{score_format_prompt}
-"""
-
 
 # Combined prompt for single LLM call
 combined_score_format_prompt = """
@@ -289,6 +165,132 @@ Is it appropriate to terminate and submit the solution at this point?
 """
 
 
+score_format_prompt = """
+Output format requirement:
+
+You may include explanations or other text if you want.
+However, you MUST include EXACTLY ONE <score>...</score> block.
+
+The <score> block must contain a single INTEGER between 0 and 100 (inclusive).
+
+The final score will be read ONLY from inside the <score> block.
+Anything outside the block will be ignored.
+
+For example:
+<score>INTEGER</score>
+"""
+
+_base_evaluation_prompt = """
+>> Instruction
+{task}
+
+>> Previous Actions and Observations
+{trajectory}
+
+>> Current action
+{action}
+
+>> Observation
+{observation}
+
+"""
+
+consistency_prompt = _base_evaluation_prompt + """
+You are evaluating a debugging step.
+
+Question:
+Does the observation logically follow from the intent expressed in the thought? 
+
+Scoring guidelines:
+Assign an integer score from 0 to 100 that reflects how logically consistent the observation is with the intent expressed in the thought. A score of 0 means the observation clearly contradicts the intent expressed in the thought. A score of 100 means the observation fully and unambiguously supports the intent and follows logically from the thought. Use any integer between 0 and 100 to best reflect the degree of consistency.
+
+{score_format_prompt}
+"""
+
+trajectory_alignment_prompt = _base_evaluation_prompt + """
+You are evaluating whether a debugging step aligns with the overall intent.
+
+Question:
+Score how well this step moves toward the trajectory intent.
+
+Scoring guidelines:
+Assign an integer score from 0 to 100 that reflects how well this step moves the trajectory toward its intended goal. A score of 0 means the step clearly moves away from or contradicts the trajectory intent. A score of 100 means the step strongly and directly advances the trajectory intent toward the goal. Use any integer between 0 and 100 to best reflect the degree of alignment.
+
+{score_format_prompt}
+"""
+
+knowledge_gain_prompt = _base_evaluation_prompt + """
+You are evaluating whether a debugging step provided new and useful information.
+
+Question:
+Did this observation provide NEW and USEFUL information for fixing the issue?
+
+Scoring guidelines:
+Assign an integer score from 0 to 100 that reflects how much NEW and USEFUL information the observation provides. A score of 0 means the observation provides no useful new information and is completely redundant or irrelevant. A score of 100 means the observation provides highly valuable new information and reveals critical insights relevant to fixing the issue. Use any integer between 0 and 100 to best reflect the amount of knowledge gained.
+
+{score_format_prompt}
+"""
+
+
+code_edit_effectiveness_prompt = _base_evaluation_prompt + """
+You are evaluating a CODE EDIT debugging step.
+
+Question:
+How effective was this code edit in addressing the underlying issue?
+
+Scoring guidelines:
+Assign an integer score from 0 to 100 that reflects how effective this code edit was. A score of 0 means the code edit is clearly harmful, irrelevant, or moves away from fixing the issue. A score of 100 means the code edit directly and substantially advances the fix or resolves the issue. Use any integer between 0 and 100 to best reflect the degree of effectiveness.
+
+{score_format_prompt}
+"""
+
+test_feedback_gain_prompt = _base_evaluation_prompt + """
+You are evaluating a TESTING debugging step.
+
+Question:
+Did this testing step provide meaningful and informative feedback for fixing the issue?
+
+Scoring guidelines:
+Assign an integer score from 0 to 100 that reflects how valuable the testing feedback is.
+
+A score of 0 means the testing step provides no useful information (e.g., redundant test passes with no new coverage or insight).  
+A score of 100 means the testing step provides highly informative feedback that significantly improves understanding of the issue (e.g., revealing new failures, isolating the bug, or substantially expanding test coverage).  
+Use any integer between 0 and 100 to best reflect the degree of usefulness.
+
+When assigning the score, consider:
+- Whether the test outcome reveals new failures or confirms incorrect behavior.
+- Whether the test outcome rules out hypotheses or narrows down the cause of the issue.
+- Whether the testing scope meaningfully increases coverage (e.g., running an entire suite or directory vs. a single test).
+- Whether passing tests are informative given prior test results (e.g., previously untested code paths vs. already-known passes).
+
+{score_format_prompt}
+"""
+
+termination_readiness_prompt = _base_evaluation_prompt + """
+You are evaluating a TERMINATION / SUBMISSION debugging step.
+
+Question:
+Is it appropriate for the agent to terminate and submit the solution at this point?
+
+Scoring guidelines:
+Assign an integer score from 0 to 100 that reflects how appropriate this termination decision is.
+
+A score of 0 means the agent clearly terminates prematurely (e.g., unresolved errors, failing or unrun tests, unvalidated edits, or missing evidence of correctness).
+A score of 100 means the agent terminates at an appropriate time, with strong evidence that the solution is correct and sufficiently validated.
+Use any integer between 0 and 100 to best reflect the degree of readiness for termination.
+
+When assigning the score, consider:
+- Whether the core issue described in the instruction appears to be resolved.
+- Whether recent code edits were followed by adequate testing or verification.
+- Whether test results (if any) support correctness rather than uncertainty.
+- Whether remaining plausible failure modes were reasonably ruled out.
+- Whether additional debugging, testing, or refinement would still be necessary.
+
+{score_format_prompt}
+"""
+
+
+
 # The observation reveals some new information that might be useful for debugging.
 # <score>65</score>
 
@@ -321,55 +323,7 @@ class RewardModel():
             return val, None
         return None, f"Score {val} out of range [0, 100]."
 
-    def parse_combined_scores(self, text: str) -> tuple:
-        """Parse the three scores from combined evaluation output.
-
-        Returns:
-            (consistency_score, trajectory_score, specific_score, error_message)
-            Scores are None if parsing fails.
-        """
-        consistency_matches = re.findall(r"<consistency_score>\s*(\d{1,3})\s*</consistency_score>", text)
-        trajectory_matches = re.findall(r"<trajectory_score>\s*(\d{1,3})\s*</trajectory_score>", text)
-        specific_matches = re.findall(r"<specific_score>\s*(\d{1,3})\s*</specific_score>", text)
-
-        errors = []
-        if len(consistency_matches) != 1:
-            errors.append(f"Expected 1 consistency_score, found {len(consistency_matches)}")
-            consistency = None
-        else:
-            consistency = int(consistency_matches[0])
-            
-        if len(trajectory_matches) != 1:
-            errors.append(f"Expected 1 trajectory_score, found {len(trajectory_matches)}")
-            trajectory = None
-        else:
-            trajectory = int(trajectory_matches[0])
-            
-        if len(specific_matches) != 1:
-            errors.append(f"Expected 1 specific_score, found {len(specific_matches)}")
-            specific = None
-        else:
-            specific = int(specific_matches[0])
-
-        
-        # Validate ranges
-        if consistency and not (0 <= consistency <= 100):
-            errors.append(f"Consistency score {consistency} out of range")
-            consistency = None
-        
-        if trajectory and not (0 <= trajectory <= 100):
-            errors.append(f"Trajectory score {trajectory} out of range")
-            trajectory = None
-            
-        if specific and not (0 <= specific <= 100):
-            errors.append(f"Specific score {specific} out of range")
-            specific = None
-
-        if errors:
-            return consistency, trajectory, specific, "; ".join(errors)
-
-        return consistency, trajectory, specific, None
-
+    
 
     def format_observation(self, observation: str, max_chars: int = 5000) -> str:
         if not observation.startswith("diff --git"):
@@ -403,7 +357,103 @@ class RewardModel():
                 
         return formatted_trajectory.strip()
 
+    def compute_reward_legacy(
+        self,
+        node: TreeSearchNode,
+        task: Optional[str] = None,
+        cmd_type: str = "read"
+    ) -> float:
+        """Legacy compute reward with 3 separate LLM calls.
+        
+        Args:
+            node: The current tree search node
+            task: Optional task description for context
+            
+        Returns:
+            A float reward value. Higher is better.
+        """
+        # return random.random()  # A random number from 0 to 1 for now; replace with proper evaluation later
+        action = node.last_action['thought']
+        observation = node.observation
+        task = f"""
+<pr_description>
+Consider the following PR description:
+{task}
+</pr_description>
 
+You're a software engineer interacting continuously with a computer by submitting commands.
+You'll be helping implement necessary changes to meet requirements in the PR description.
+Your task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.
+        """
+        # Create plain trajectory text
+        trajectory = []
+        history_summary = None
+        
+        curr = node.parent
+        offset = 0
+        while curr.last_action is not None:
+            if curr.history_summary is not None:
+                history_summary = curr.history_summary
+                offset = curr.level
+                break
+            trajectory.append(
+                {
+                    "thought": curr.last_action["thought"],
+                    "action": curr.last_action["command"],
+                    "observation": curr.observation
+                }
+            )
+            curr = curr.parent
+        trajectory.reverse()
+
+        
+        # Detailed scoring (independent dimensions can run in parallel)
+        K_prompt = None
+        if cmd_type == "edit":
+            K_prompt = code_edit_effectiveness_prompt
+        elif cmd_type == "test":
+            K_prompt = test_feedback_gain_prompt
+        elif cmd_type == "submit":
+            K_prompt = termination_readiness_prompt
+        else:
+            K_prompt = knowledge_gain_prompt
+
+        score_args = (task, offset, history_summary, trajectory, action, observation)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                "consistency": executor.submit(
+                    self.score,
+                    consistency_prompt,
+                    *score_args,
+                    log_file="reward_model_scores_consistency.log",
+                ),
+                "trajectory": executor.submit(
+                    self.score,
+                    trajectory_alignment_prompt,
+                    *score_args,
+                    log_file="reward_model_scores_trajectory.log",
+                ),
+                "specific": executor.submit(
+                    self.score,
+                    K_prompt,
+                    *score_args,
+                    log_file="reward_model_scores_specific.log",
+                ),
+            }
+
+            C = futures["consistency"].result()
+            T = futures["trajectory"].result()
+            K = futures["specific"].result()
+
+        instance_logger.debug(
+            f"[{cmd_type}] Reward scores - Consistency: {C:.2f}, Knowledge Gain: {K:.2f}, Trajectory Alignment: {T:.2f}"
+        )
+        # Weighted sum
+        w_c, w_k, w_t = 0.25, 0.40, 0.35
+        R = w_c * C + w_k * K + w_t * T
+        
+        return R
+            
     def score(
         self,
         prompt: str,
@@ -496,6 +546,58 @@ class RewardModel():
 
         return score / 100.0  # Normalize to [0.0, 1.0]
 
+
+    def parse_combined_scores(self, text: str) -> tuple:
+        """Parse the three scores from combined evaluation output.
+
+        Returns:
+            (consistency_score, trajectory_score, specific_score, error_message)
+            Scores are None if parsing fails.
+        """
+        consistency_matches = re.findall(r"<consistency_score>\s*(\d{1,3})\s*</consistency_score>", text)
+        trajectory_matches = re.findall(r"<trajectory_score>\s*(\d{1,3})\s*</trajectory_score>", text)
+        specific_matches = re.findall(r"<specific_score>\s*(\d{1,3})\s*</specific_score>", text)
+
+        errors = []
+        if len(consistency_matches) != 1:
+            errors.append(f"Expected 1 consistency_score, found {len(consistency_matches)}")
+            consistency = None
+        else:
+            consistency = int(consistency_matches[0])
+            
+        if len(trajectory_matches) != 1:
+            errors.append(f"Expected 1 trajectory_score, found {len(trajectory_matches)}")
+            trajectory = None
+        else:
+            trajectory = int(trajectory_matches[0])
+            
+        if len(specific_matches) != 1:
+            errors.append(f"Expected 1 specific_score, found {len(specific_matches)}")
+            specific = None
+        else:
+            specific = int(specific_matches[0])
+
+        
+        # Validate ranges
+        if consistency and not (0 <= consistency <= 100):
+            errors.append(f"Consistency score {consistency} out of range")
+            consistency = None
+        
+        if trajectory and not (0 <= trajectory <= 100):
+            errors.append(f"Trajectory score {trajectory} out of range")
+            trajectory = None
+            
+        if specific and not (0 <= specific <= 100):
+            errors.append(f"Specific score {specific} out of range")
+            specific = None
+
+        if errors:
+            return consistency, trajectory, specific, "; ".join(errors)
+
+        return consistency, trajectory, specific, None
+
+
+    
     def score_combined(self, prompt: str, task: str, offset: int, history_summary,  trajectory: str, action: str, observation: str) -> tuple:
         """Single LLM call to get all three scores with chain of thought.
 
@@ -676,103 +778,7 @@ Your task is specifically to make changes to non-test files in the current direc
         else:
             return self.compute_reward_legacy(node, task, cmd_type)
 
-    def compute_reward_legacy(
-        self,
-        node: TreeSearchNode,
-        task: Optional[str] = None,
-        cmd_type: str = "read"
-    ) -> float:
-        """Legacy compute reward with 3 separate LLM calls.
-        
-        Args:
-            node: The current tree search node
-            task: Optional task description for context
-            
-        Returns:
-            A float reward value. Higher is better.
-        """
-        # return random.random()  # A random number from 0 to 1 for now; replace with proper evaluation later
-        action = node.last_action['thought']
-        observation = node.observation
-        task = f"""
-<pr_description>
-Consider the following PR description:
-{task}
-</pr_description>
-
-You're a software engineer interacting continuously with a computer by submitting commands.
-You'll be helping implement necessary changes to meet requirements in the PR description.
-Your task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.
-        """
-        # Create plain trajectory text
-        trajectory = []
-        history_summary = None
-        
-        curr = node.parent
-        offset = 0
-        while curr.last_action is not None:
-            if curr.history_summary is not None:
-                history_summary = curr.history_summary
-                offset = curr.level
-                break
-            trajectory.append(
-                {
-                    "thought": curr.last_action["thought"],
-                    "action": curr.last_action["command"],
-                    "observation": curr.observation
-                }
-            )
-            curr = curr.parent
-        trajectory.reverse()
-
-        
-        # Detailed scoring (independent dimensions can run in parallel)
-        K_prompt = None
-        if cmd_type == "edit":
-            K_prompt = code_edit_effectiveness_prompt
-        elif cmd_type == "test":
-            K_prompt = test_feedback_gain_prompt
-        elif cmd_type == "submit":
-            K_prompt = termination_readiness_prompt
-        else:
-            K_prompt = knowledge_gain_prompt
-
-        score_args = (task, offset, history_summary, trajectory, action, observation)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {
-                "consistency": executor.submit(
-                    self.score,
-                    consistency_prompt,
-                    *score_args,
-                    log_file="reward_model_scores_consistency.log",
-                ),
-                "trajectory": executor.submit(
-                    self.score,
-                    trajectory_alignment_prompt,
-                    *score_args,
-                    log_file="reward_model_scores_trajectory.log",
-                ),
-                "specific": executor.submit(
-                    self.score,
-                    K_prompt,
-                    *score_args,
-                    log_file="reward_model_scores_specific.log",
-                ),
-            }
-
-            C = futures["consistency"].result()
-            T = futures["trajectory"].result()
-            K = futures["specific"].result()
-
-        instance_logger.debug(
-            f"[{cmd_type}] Reward scores - Consistency: {C:.2f}, Knowledge Gain: {K:.2f}, Trajectory Alignment: {T:.2f}"
-        )
-        # Weighted sum
-        w_c, w_k, w_t = 0.25, 0.40, 0.35
-        R = w_c * C + w_k * K + w_t * T
-        
-        return R
-            
+    
         
         
         
