@@ -899,6 +899,82 @@ Given both trajectories, what is the best next action to take from this point?
         # Return only nodes (drop priority) but preserve ordering by priority
         return [x[0] for x in sorted(merged_nodes, key=lambda x: x[1])]
     
+    
+    def _coalesce_nodes(self, nodes, k):
+        buckets = {}
+        bucket_count = 0
+        
+        chunk_size = 2
+        priority = 1
+        for node in nodes:
+            if node.modifies_code: 
+                if bucket_count < k:
+                    buckets[self._estimate_commit(node)] = [(node, priority)]
+                    bucket_count += 1
+                    priority += 1
+            elif not buckets.get(node.parent.commit):
+                if bucket_count < k:
+                    buckets[node.parent.commit] = [(node, priority)]
+                    bucket_count += 1
+                    priority += 1
+            elif len(buckets[node.parent.commit]) < chunk_size * k: # NEW
+                buckets[node.parent.commit].append((node, priority))
+                priority += 1
+               
+        old_tree_node = self.tree_node
+
+         
+        # Merge
+        merged_nodes = []
+        new_buckets = {}
+        while len(merged_nodes) < k and len(buckets) > 0:
+            for commit, bucket in buckets.items():
+                if len(bucket) == 1:
+                    merged_nodes.append(bucket[0])
+                elif len(bucket) > 1:
+                    best_j = None
+                    best_score = float("inf")
+
+                    for node in bucket[1:]:
+                        ni = bucket[0][0]
+                        nj = node[0]
+
+                        score = self._get_max_divergence_path_length(ni, nj)
+
+                        if score < best_score and score <= 5:
+                            best_score = score
+                            best_j = node
+
+                    if best_j is not None:
+                        a_node = bucket[0][0]
+                        b_node = best_j[0]
+                        self._backtrack(a_node)
+                        self.tree_node = a_node
+                        merged_node = self._merge_nodes(a_node, b_node)
+                        a_node.add_child(merged_node)
+                        b_node.add_child(merged_node)
+                        merged_node.merged = True
+                        merged_node.parent = a_node
+                        merged_node.value = merged_node.merged_value = (0.8 * a_node.merged_value + 0.2 * b_node.merged_value)
+                        merged_nodes.append((merged_node, bucket[0][1])) # Keep the highest priority among merged nodes
+                        if merged_node.modifies_code:
+                            new_buckets[self._estimate_commit(merged_node)] = [item for item in bucket if item[0] not in [a_node, b_node]] # Add remaining nodes in the bucket to the new bucket based on the commit of the merged node
+                        else:
+                            new_buckets[commit] = [item for item in bucket if item[0] not in [a_node, b_node]] # Add remaining nodes in the bucket to the new bucket based on the original commit since merged node doesn't modify code
+                    else:
+                        merged_nodes.append(bucket[0])
+                        new_buckets[commit] = bucket[1:] # Keep the remaining nodes in the bucket for future merging
+                
+                
+            buckets = new_buckets
+            new_buckets = {}
+            
+        self._backtrack(old_tree_node)
+        self.tree_node = old_tree_node
+        
+        # Return only nodes (drop priority) but preserve ordering by priority
+        return [x[0] for x in sorted(merged_nodes, key=lambda x: x[1])]
+    
     def _estimate_commit(self, node):
         curr = node
         while curr is not None:
@@ -996,7 +1072,7 @@ Given both trajectories, what is the best next action to take from this point?
         # Since the array is sorted, we will traverse it from start to end, and keep adding nodes to the top-k array until we have k unique commits.
         # We don't want to merge more than 2 nodes for now, so let's say there are 3 same commit at the start of an array, we will group the first 2, and treat 3rd as separate commit to encourage exploration of different paths. This is a hyperparameter that can be tuned based on the task and the size of the tree.
         
-        merged_nodes = self._coalesce_dual_nodes(nodes, k)
+        merged_nodes = self._coalesce_nodes(nodes, k) 
         # merged_nodes = self._coalesce_nodes_aggressively(nodes, k)
                  
         # return nodes[:k] # OLD
