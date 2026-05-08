@@ -154,14 +154,13 @@ class TreeSearchAgent(RewardGuidedAgent):
                 else:
                     # Modified action not executed yet, so execute it to get the observation and value
                     # Need to backtrack to the parent node to execute this node
-                    
                     self._backtrack(node.parent)
-                    self.execute_action(
-                        {
-                            "action": node.last_action["command"]
-                        }
-                    )
                     self.tree_node = node
+                    try:
+                        self.env.execute(node.last_action["command"])
+                    except (TimeoutError, subprocess.TimeoutExpired) as e:
+                        instance_logger.warning(f"Execution of node [{node.id}] command timed out during terminating node generation: {e}")
+                                
                     node.commit, _ = self._commit_changes()
                     node.order = self.n_expanded + 1
                     instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
