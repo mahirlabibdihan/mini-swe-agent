@@ -412,7 +412,7 @@ def main(
     # Create dataset-specific reproductions directory
     reproductions_dir = (
         Path("reproductions")
-        / dataset_dir_name
+        / (dataset_dir_name if subset != "verified_mini" else "princeton-nlp__SWE-Bench_Verified")
         / repro_model_config.get('model_name').replace('/', '__')
     )
     

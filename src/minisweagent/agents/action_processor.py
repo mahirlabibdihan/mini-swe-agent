@@ -15,19 +15,7 @@ def merge_nodes(node_list: List[tuple[float, TreeSearchNode]], merge_strategy = 
             node_dict[command] = [node]
         else:
             node_dict[command].append(node)
-            # best_score, merged_score, best_node = node_dict[command]
-            # if best_score >= score:
-            #     node.prune()
-            # else:
-            #     best_node.prune()
-            #     best_node = node
-            #     best_score = score
             
-            # if merge_strategy == "sum":
-            #     new_score = merged_score + score
-
-            # node_dict[command] = (best_score, new_score, best_node)
-
     merged_node_list = list(node_dict.values())
     tree_nodes = []
     for nodes in merged_node_list:

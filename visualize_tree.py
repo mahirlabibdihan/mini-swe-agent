@@ -744,7 +744,7 @@ def build_cytoscape_html(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Visualize search-tree JSON with score labels.")
-    parser.add_argument("json_file", type=Path, help="Path to debug tree JSON file")
+    parser.add_argument("json_file", type=Path, help="Path to debug tree JSON file or directory containing tree JSONs")
     parser.add_argument(
         "--score-field",
         default="merged_value",
@@ -755,7 +755,7 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Output file path for rendered image (png/svg/pdf) or HTML",
+        help="Output file path for rendered image (png/svg/pdf) or HTML (ignored if input is directory)",
     )
     parser.add_argument(
         "--format",
@@ -767,7 +767,7 @@ def parse_args() -> argparse.Namespace:
         "--dot",
         type=Path,
         default=None,
-        help="Optional DOT output path (default: <json_stem>.dot)",
+        help="Optional DOT output path (default: <json_stem>.dot, ignored if input is directory)",
     )
     parser.add_argument(
         "--hide-unseen",
@@ -794,61 +794,124 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    json_path: Path = args.json_file
-    if not json_path.exists():
-        print(f"Input file does not exist: {json_path}", file=sys.stderr)
-        return 1
-
+def _process_single_tree(
+    json_path: Path,
+    score_field: str,
+    format: str,
+    dot_path: Path | None,
+    hide_unseen: bool,
+    include_command: bool,
+    color_by: str,
+    output_path: Path | None = None,
+) -> bool:
+    """Process a single tree JSON file and render to output.
+    
+    Returns True on success, False on failure.
+    """
     try:
         nodes, edges, root_id = load_tree(json_path)
-        hide_unseen = args.hide_unseen and not args.show_unseen
         nodes, edges = filter_visible(nodes, edges, hide_unseen)
         if root_id not in nodes:
-            # If root got filtered out (e.g., invisible root), keep it for consistency.
             nodes_all, _, _ = load_tree(json_path)
             nodes[root_id] = nodes_all[root_id]
 
         # Handle HTML output separately
-        if args.format == "html":
+        if format == "html":
             html_text = build_cytoscape_html(
                 nodes=nodes,
                 edges=edges,
                 root_id=root_id,
-                score_field=args.score_field,
-                color_by=args.color_by,
+                score_field=score_field,
+                color_by=color_by,
             )
-            html_path = args.output or json_path.with_suffix(".html")
+            html_path = output_path or json_path.with_suffix(".html")
             html_path.write_text(html_text, encoding="utf-8")
-            print(f"Interactive HTML written: {html_path}")
-            return 0
+            print(f"  → {html_path}")
+            return True
 
         # Handle traditional DOT/PNG/SVG/PDF output
         dot_text = build_dot(
             nodes=nodes,
             edges=edges,
             root_id=root_id,
-            score_field=args.score_field,
-            include_command=args.include_command,
-            color_by=args.color_by,
+            score_field=score_field,
+            include_command=include_command,
+            color_by=color_by,
         )
     except Exception as exc:
-        print(f"Failed to process JSON: {exc}", file=sys.stderr)
-        return 2
+        print(f"  ✗ Failed to process: {exc}", file=sys.stderr)
+        return False
 
-    dot_path = args.dot or json_path.with_suffix(".dot")
-    dot_path.write_text(dot_text, encoding="utf-8")
-    print(f"DOT written: {dot_path}")
+    dot_out = dot_path or json_path.with_suffix(".dot")
+    dot_out.write_text(dot_text, encoding="utf-8")
 
-    if args.output is not None:
+    if output_path is not None:
         try:
-            maybe_render(dot_path, args.output, args.format)
+            maybe_render(dot_out, output_path, format)
         except subprocess.CalledProcessError as exc:
-            print(f"Graphviz rendering failed: {exc}", file=sys.stderr)
-            return 3
+            print(f"  ✗ Graphviz rendering failed: {exc}", file=sys.stderr)
+            return False
+    else:
+        print(f"  → {dot_out}")
 
-    return 0
+    return True
+
+
+def main() -> int:
+    args = parse_args()
+    input_path: Path = args.json_file
+    
+    if not input_path.exists():
+        print(f"Input path does not exist: {input_path}", file=sys.stderr)
+        return 1
+
+    hide_unseen = args.hide_unseen and not args.show_unseen
+    
+    # Handle directory input: find all *.tree.json files recursively
+    if input_path.is_dir():
+        tree_files = sorted(input_path.rglob("*.tree.json"))
+        if not tree_files:
+            print(f"No .tree.json files found in {input_path}", file=sys.stderr)
+            return 1
+        
+        print(f"Found {len(tree_files)} tree files. Processing...")
+        success_count = 0
+        
+        for tree_file in tree_files:
+            instance_dir = tree_file.parent
+            # Generate output in the same directory as the tree file
+            output_path = instance_dir / f"tree.{args.format}"
+            
+            rel_path = tree_file.relative_to(input_path)
+            print(f"  {rel_path}")
+            if _process_single_tree(
+                json_path=tree_file,
+                score_field=args.score_field,
+                format=args.format,
+                dot_path=None,  # Auto-generate DOT path in same directory
+                hide_unseen=hide_unseen,
+                include_command=args.include_command,
+                color_by=args.color_by,
+                output_path=output_path,  # Always render to this path
+            ):
+                success_count += 1
+        
+        print(f"\nProcessed {success_count}/{len(tree_files)} tree files successfully.")
+        return 0 if success_count > 0 else 1
+    
+    # Handle single file input
+    else:
+        if not _process_single_tree(
+            json_path=input_path,
+            score_field=args.score_field,
+            format=args.format,
+            dot_path=args.dot,
+            hide_unseen=hide_unseen,
+            include_command=args.include_command,
+            color_by=args.color_by,
+            output_path=args.output,
+        ):
+            return 2
 
 
 if __name__ == "__main__":

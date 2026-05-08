@@ -149,6 +149,7 @@ def get_predictions_from_tree_dir(predictions_dir: str, model_name: str = "tree_
                     KEY_PREDICTION: patch,
                     "node_id": node.get("id"),
                     "node_index": node_idx,
+                    "pass": node.get("pass"),
                     "is_submission": bool(node.get("is_submission", False)),
                     "tree_file": str(tree_file),
                     "original_model": model_name,  # Keep original model name for aggregation

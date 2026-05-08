@@ -266,6 +266,14 @@ def _handle_tree_based_predictions(
                     # If the report file is not valid JSON or missing keys, treat as error
                     any_error = True
             else:
+                # If the tree node already has a pass flag, treat it as previously evaluated.
+                if prediction.get("pass") is not None:
+                    if bool(prediction.get("pass")):
+                        any_resolved = True
+                        if prediction.get("is_submission", False):
+                            submission_resolved = True
+                    continue
+
                 # This node's prediction was not run successfully
                 all_completed = False
         

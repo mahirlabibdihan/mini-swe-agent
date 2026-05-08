@@ -3,6 +3,7 @@ from __future__ import annotations
 import docker
 import json
 import platform
+import sys
 import threading
 import traceback
 
@@ -341,6 +342,9 @@ def run_instance_candidates(
     rewrite_reports: bool = False,
     clean_start: bool = False,
     redo: bool = False,
+    instance_pbar: tqdm | None = None,
+    worker_stats: dict | None = None,
+    pbar_lock: threading.Lock | None = None,
 ) -> dict:
     """
     Run all candidate predictions for one instance and mark resolved if any passes.
@@ -351,6 +355,29 @@ def run_instance_candidates(
     pass_by_node_id: dict[str, bool] = {}
 
     for pred in preds:
+        pred_pass = pred.get("pass")
+        if pred_pass is not None and not redo:
+            pred_resolved = bool(pred_pass)
+            node_id = pred.get("node_id")
+            if node_id:
+                pass_by_node_id[node_id] = pred_resolved
+
+            any_completed = True
+            any_resolved = any_resolved or pred_resolved
+
+            if instance_pbar:
+                if worker_stats and pbar_lock:
+                    with pbar_lock:
+                        if pred_resolved:
+                            worker_stats["✓"] += 1
+                        else:
+                            worker_stats["✖"] += 1
+                        instance_pbar.set_postfix_str(
+                            f"✓={worker_stats['✓']}, ✖={worker_stats['✖']}, error={worker_stats['error']}"
+                        )
+                instance_pbar.update()
+            continue
+
         result = run_instance(
             test_spec,
             pred,
@@ -369,6 +396,21 @@ def run_instance_candidates(
 
         any_completed = any_completed or result["completed"]
         any_resolved = any_resolved or result["resolved"]
+        
+        if instance_pbar:
+            if worker_stats and pbar_lock:
+                with pbar_lock:
+                    if result["completed"]:
+                        if result["resolved"]:
+                            worker_stats["✓"] += 1
+                        else:
+                            worker_stats["✖"] += 1
+                    else:
+                        worker_stats["error"] += 1
+                    instance_pbar.set_postfix_str(
+                        f"✓={worker_stats['✓']}, ✖={worker_stats['✖']}, error={worker_stats['error']}"
+                    )
+            instance_pbar.update()
 
     _update_tree_nodes_passes(preds, pass_by_node_id)
 
@@ -462,11 +504,67 @@ def run_instances(
     # run instances in parallel
     print(f"Running {len(instances)} instances...")
     stats = {"✓": 0, "✖": 0, "error": 0}
-    pbar = tqdm(total=len(payloads), desc="Evaluation", postfix=stats)
+    overall_pbar = tqdm(
+        total=len(instances),
+        desc="Evaluation",
+        position=0,
+        bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}{postfix}",
+    )
+    overall_pbar.set_postfix_str("✓=0, ✖=0, error=0")
+    skipped_instances = max(len(instances) - len(payloads), 0)
+    if skipped_instances:
+        overall_pbar.update(skipped_instances)
+    worker_bars: dict[int, tqdm] = {}
+    worker_bar_positions: dict[int, int] = {}
+    worker_stats_per_thread: dict[int, dict] = {}
+    next_bar_position = 1
     lock = threading.Lock()
 
     def run_evaluation_with_progress(*args):
-        result = run_instance_candidates(*args)
+        nonlocal next_bar_position
+        test_spec = args[0]
+        preds = args[1]
+        instance_id = test_spec.instance_id
+        thread_id = threading.get_ident()
+        
+        # Assign or reuse a worker bar
+        with lock:
+            if thread_id not in worker_bars:
+                if next_bar_position <= max_workers:
+                    pos = next_bar_position
+                    next_bar_position += 1
+                else:
+                    # Reuse position if we've hit max_workers
+                    pos = (len(worker_bars) % max_workers) + 1
+                
+                worker_stats_per_thread[thread_id] = {"✓": 0, "✖": 0, "error": 0}
+                worker_bar = tqdm(
+                    total=len(preds),
+                    desc=f"{instance_id[:30]}",
+                    position=pos,
+                    leave=False,
+                    bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}{postfix}",
+                )
+                worker_bar.set_postfix_str("✓=0, ✖=0, error=0")
+                worker_bars[thread_id] = worker_bar
+                worker_bar_positions[thread_id] = pos
+            else:
+                # Reuse existing bar for this worker
+                worker_bar = worker_bars[thread_id]
+                worker_stats_per_thread[thread_id] = {"✓": 0, "✖": 0, "error": 0}
+                worker_bar.reset(total=len(preds))
+                worker_bar.set_description(f"{instance_id[:30]}")
+                worker_bar.set_postfix_str("✓=0, ✖=0, error=0")
+        
+        # Run with instance progress bar and worker stats
+        result = run_instance_candidates(
+            *args,
+            instance_pbar=worker_bar,
+            worker_stats=worker_stats_per_thread[thread_id],
+            pbar_lock=lock,
+        )
+        
+        # Update overall progress
         with lock:
             if result["completed"]:
                 if result["resolved"]:
@@ -475,11 +573,21 @@ def run_instances(
                     stats["✖"] += 1
             else:
                 stats["error"] += 1
-            pbar.set_postfix(stats)
-            pbar.update()
+            overall_pbar.set_postfix_str(
+                f"✓={stats['✓']}, ✖={stats['✖']}, error={stats['error']}"
+            )
+            overall_pbar.update()
+        
         return result
 
     run_threadpool(run_evaluation_with_progress, payloads, max_workers)
+
+    with lock:
+        overall_pbar.close()
+        for worker_bar in worker_bars.values():
+            worker_bar.close()
+    
+    sys.stdout.flush()
     print("All instances run.")
 
 
@@ -639,6 +747,8 @@ def main(
     else:
         predictions_list = get_predictions_from_tree_dir(predictions_dir)
 
+    report_predictions_list = predictions_list
+
     # Build instance -> list[prediction]
     predictions_by_instance = {}
     for pred in predictions_list:
@@ -655,7 +765,7 @@ def main(
 
     # For reporting aggregation in tree mode, preserve all predictions with unique keys.
     predictions_for_report = {}
-    for idx, pred in enumerate(predictions_list):
+    for idx, pred in enumerate(report_predictions_list):
         predictions_for_report[f"{pred[KEY_INSTANCE_ID]}::{idx}"] = pred
 
     # get dataset from predictions
