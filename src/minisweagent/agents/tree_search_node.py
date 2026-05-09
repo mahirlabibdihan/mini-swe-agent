@@ -47,7 +47,7 @@ class TreeSearchNode:
             return False
         return self.visits < other.visits
         
-    def get_path_value(self, discount_factor=1.0, max_steps=5):
+    def get_path_value(self, discount_factor=1.0, max_steps=None):
         score = 0.0
         current = self
         f = 1.0
@@ -57,7 +57,7 @@ class TreeSearchNode:
         while (
             current is not None
             and current.value is not None
-            # and steps < max_steps # NEW: Limit the number of steps, so that deep nodes don't get too much advantage
+            and (max_steps is None or steps < max_steps) # NEW: Limit the number of steps, so that deep nodes don't get too much advantage
         ):
             score += f * current.merged_value
             norm += f
@@ -139,12 +139,12 @@ class TreeSearchNode:
                 } if self.last_action else None,
                 "test_status": self.test_status,
                 "history_summary": self.history_summary,
+                "score_calculation": self.score_calculation,
                 "children": [
                     child.to_tree() if child.parent.id == self.id else {"id": child.id}
                     for child in self.children
                 ],
                 "observation": self.observation,
-                "score_calculation": self.score_calculation,
             }
         except Exception as e:
             instance_logger.debug(f">> Failed to convert node {self.id} to tree: {e}")

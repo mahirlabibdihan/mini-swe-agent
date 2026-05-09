@@ -184,7 +184,9 @@ class SingleActionAgent(DefaultAgent):
     
     def _add_actions_to_frontier(self, actions: List[TreeSearchNode]):
         for new_node in actions:
-            self.frontier.push(-new_node.merged_value, new_node)
+            # self.frontier.push((-new_node.merged_value, new_node.parent.order), new_node) 
+            self.frontier.push(-new_node.get_path_value(0.3, max_steps=4), new_node)
+            # In case score ties, prioritize nodes discovered earlier in the search.
             
     def _select_action(self):
         # 1. Handle max-step pruning
@@ -224,7 +226,8 @@ class SingleActionAgent(DefaultAgent):
         for i in range(n_actions):
             # Execute action to get observation
             try:
-                response = self.query()
+                messages = self.get_messages(self.tree_node)
+                response = self.query(messages)
                 action = self.parse_action(response)
                 instance_logger.debug(f"Generated action #{i+1}: {action['action']}")
                 # Convert action to node
@@ -499,12 +502,11 @@ class SingleActionAgent(DefaultAgent):
             })
         return messages
     
-    def query(self) -> dict:
+    def query(self, messages: List[dict]) -> dict:
         """Query the model and return the response."""
         if 0 < self.config.cost_limit <= self.model.cost:
             raise LimitsExceeded()
         
-        messages = self.get_messages(self.tree_node)
         # save to file for debugging
         with open("debug_messages.json", "w", encoding="utf-8") as f:
             json.dump(messages, f, indent=4, ensure_ascii=False)

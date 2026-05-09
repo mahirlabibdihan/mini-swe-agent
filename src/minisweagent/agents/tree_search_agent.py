@@ -40,6 +40,7 @@ class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     u_sub_thres: int = 1
     """Number of unique submissions after which to switch to phase 3."""
     itr_limit: int = 4
+    top_k_tree_pruning: int = 4
     
 
 import json
@@ -132,10 +133,17 @@ class TreeSearchAgent(RewardGuidedAgent):
         node.system_generated = True
         return node
     
-    def _generate_terminating_nodes(self) :
+    def _generate_terminating_nodes(self):
+        # if self.n_submissions >= self.config.sub_thres and self.n_unique_submissions >= self.config.u_sub_thres:
+        #     return # NEW: 
+        
         old_active_node = self.tree_node
         
         edit_nodes = self._get_all_unique_edit_paths()
+        if len(edit_nodes) > 0:
+            instance_logger.debug(f">> Generating terminating nodes for {len(edit_nodes)} unique edit paths.")
+            
+        count = 0
         for node in edit_nodes:
             if not node.executed:
                 if not node.modifies_code:
@@ -180,6 +188,10 @@ class TreeSearchAgent(RewardGuidedAgent):
                 if self.terminating_nodes.get(node.commit) is None:
                     self.terminating_nodes[node.commit] = []
                 self.terminating_nodes[node.commit].append(term_node)
+            
+            count += 1
+            # if count >= self.config.top_k_tree_pruning:
+            #     break # Only generate terminating nodes for top-k unique edit paths to limit combinatorial explosion
                 
         self._backtrack(old_active_node)
         self.tree_node = old_active_node
@@ -212,6 +224,7 @@ class TreeSearchAgent(RewardGuidedAgent):
             sorted_terms = sorted(
                 t_nodes,
                 key=lambda x: (
+                    # OLD: merged_value
                     0.8 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
                     x.get_path_value(0.85) # NEW: In case of tie
                 ),
@@ -288,7 +301,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         best_node = self._get_best_terminating_node()
         
         if best_node is None:
-            candidates = self._get_topk_edit_paths(k=3, to_execute=False) # <----
+            candidates = self._get_topk_edit_paths(k=self.config.top_k_tree_pruning, to_execute=False) # <----
                     
             # NEW: We can generate a terminating node under all the paths with at least one edit action, evaluate those terminating nodes, and pick the best one among them.
             if len(candidates) > 0:
@@ -344,9 +357,6 @@ class TreeSearchAgent(RewardGuidedAgent):
             self.tree_node = self.tree_root.children[0] # Fallback to first child of root
             instance_logger.debug(">> No expandable nodes found, reverting to root.")
             
-            
-    
-        
     def _go_to_best_executable_node(self, k: int = 1) -> List[TreeSearchNode]:
         # TODO: Find best on a subtree basis. Root should be provided.
 
@@ -513,6 +523,7 @@ class TreeSearchAgent(RewardGuidedAgent):
 
     def node_priority(self, n, gamma=0.9, max_depth=50):
         path_value = n.get_path_value(gamma)
+        return path_value # NEW
         depth_score = math.log1p(n.level) / math.log1p(max_depth)
         alpha = self.compute_alpha(progress=self.n_expanded / self.config.step_limit)
         return alpha * path_value + (1 - alpha) * depth_score
@@ -875,7 +886,8 @@ Given both trajectories, what is the best next action to take from this point?
             if len(bucket) == 1:
                 merged_nodes.append(bucket[0])
             else:
-                pairs = self._make_pairs(bucket)
+                # pairs = self._make_pairs(bucket) # NEW
+                pairs = self._make_pairs_elite(bucket) # OLD
                 # TODO: We need to make pair of nodes, so that size of prefix is maximized and suffix is minimized.
                 for p in pairs:
                     if p[1] is None:
@@ -916,7 +928,7 @@ Given both trajectories, what is the best next action to take from this point?
                     buckets[node.parent.commit] = [(node, priority)]
                     bucket_count += 1
                     priority += 1
-            elif len(buckets[node.parent.commit]) < chunk_size * k: # NEW
+            elif len(buckets[node.parent.commit]) < chunk_size * k: # NEW --- we are discarding bad nodes. So, we may not find pairs for some commits, but that's ok. We will just keep the good nodes and discard the bad ones.
                 buckets[node.parent.commit].append((node, priority))
                 priority += 1
                
@@ -1071,7 +1083,7 @@ Given both trajectories, what is the best next action to take from this point?
         # Since the array is sorted, we will traverse it from start to end, and keep adding nodes to the top-k array until we have k unique commits.
         # We don't want to merge more than 2 nodes for now, so let's say there are 3 same commit at the start of an array, we will group the first 2, and treat 3rd as separate commit to encourage exploration of different paths. This is a hyperparameter that can be tuned based on the task and the size of the tree.
         
-        merged_nodes = self._coalesce_nodes(nodes, k) 
+        merged_nodes = self._coalesce_dual_nodes(nodes, k) 
         # merged_nodes = self._coalesce_nodes_aggressively(nodes, k)
                  
         # return nodes[:k] # OLD
@@ -1104,8 +1116,18 @@ Given both trajectories, what is the best next action to take from this point?
                 
         return list(unique_paths.values())
         
+    def _prune_priority(self, node, max_depth):
+        # Early explored nodes should get some advantage
+        return self.node_priority(
+                        node, 
+                        gamma=0.85,
+                        max_depth=max_depth
+                    ) * 0.95 + (1 - (node.parent.order / self.config.step_limit)) * 0.05,
         
-    def _get_topk_edit_paths(self, k=3, to_execute=True):
+                    
+    def _get_topk_edit_paths(self, k=None, to_execute=True):
+        if k is None:
+            k = self.config.top_k_tree_pruning
         curr_i = self.itr 
         sorted_leaves = []
         
@@ -1122,13 +1144,7 @@ Given both trajectories, what is the best next action to take from this point?
                     and (not to_execute or n.level < self.config.depth_limit)
                     and  (n.parent.commit != self._get_root_commit() or n.modifies_code)
                 ),
-                key=lambda n: (
-                    self.node_priority(
-                        n, 
-                        gamma=0.85,
-                        max_depth=max_depth
-                    ),
-                ),
+                key=lambda n: self._prune_priority(n, max_depth=max_depth),
                 reverse=True
             )
             sorted_leaves.extend(candidates)
@@ -1230,7 +1246,7 @@ Given both trajectories, what is the best next action to take from this point?
                         and not n.executed
                         and n.level < self.config.depth_limit
                     ),
-                    key=lambda x: self.node_priority(x, gamma=0.85, max_depth=max_depth),
+                    key=lambda n: self._prune_priority(n, max_depth=max_depth),
                     default=None
                 )
                 
@@ -1263,16 +1279,17 @@ Given both trajectories, what is the best next action to take from this point?
                         and n.merged_value is not None
                         and n.level < self.config.depth_limit
                     ),
-                    key=lambda n: self.node_priority(n, gamma=0.85, max_depth=max_depth),
+                    key=lambda n: self._prune_priority(n, max_depth=max_depth),
                     reverse=True,
                 )
-                top_k = self._slice_topk(sorted_leaves, k=3) # Keep top 3
+                top_k = self._slice_topk(sorted_leaves, k=self.config.top_k_tree_pruning) # Keep top-k
             else: # On the last iteration, prioritize nodes with edits regardless of score to encourage exploitation of promising edit paths. If not enough edit paths are found, go for read paths.
                 instance_logger.debug(">> Iteration {} reached. Prioritizing nodes with edits for exploitation.".format(self.itr + 1))
-                sorted_writes = self._get_topk_edit_paths(k=3)
+                sorted_writes = self._get_topk_edit_paths(k=self.config.top_k_tree_pruning)
                 top_k = sorted_writes
                 # If not enough edit paths are found, go for read paths.
-                if len(sorted_writes) < 3:
+                # TODO: If len(sorted_writes) > 0, we shouldn't gather reads. Just keep the edit paths even if they are less than k, since we want to encourage exploitation of promising edit paths when we are close to iteration limit. We can experiment with different values of k for edit paths and read paths to find the best balance between exploitation and exploration.
+                if len(sorted_writes) < self.config.top_k_tree_pruning:
                     sorted_reads = sorted(
                         (
                             # n for n in self.all_node_map.values() # OLD
@@ -1284,16 +1301,19 @@ Given both trajectories, what is the best next action to take from this point?
                             and n.level < self.config.depth_limit
                             and (n.parent.commit == self._get_root_commit() and not n.modifies_code)
                         ),
-                        key=lambda n: (
-                            # n.parent.itr,  # OLD: recency bias (higher = newer)
-                            self.node_priority(n, gamma=0.85, max_depth=max_depth)
-                        ),
+                        key=lambda n: self._prune_priority(n, max_depth=max_depth),
                         reverse=True,
                     )
-                    top_k.extend(self._slice_topk(sorted_reads, k=3 - len(sorted_writes)))
+                    top_k.extend(self._slice_topk(sorted_reads, k=self.config.top_k_tree_pruning - len(sorted_writes)))
                 
-            self._update_frontier(top_k) # -> It will sort based on merged_value
-
+            # Don't put terminating nodes in frontier.
+            self._update_frontier([
+                n for n in top_k if not n.is_terminating
+            ]) # -> It will sort based on merged_value
+            for n in top_k:
+                if n.is_terminating:
+                    self.n_submissions += 1
+                    
             # Keep top-k active nodes
             self.node_map = {n.id: n for n in top_k}
             self.itr += 1
@@ -1336,12 +1356,13 @@ Given both trajectories, what is the best next action to take from this point?
                 if self.itr > self.config.itr_limit:
                     self.frontier.clear() # Clear frontier when iteration limit is reached to focus on exploitation of promising node
                     if len(candidates) == 0: # Only terminating actions are left
+                        # TODO: Expand other write paths if n_submissions < config.sub_thres. Since we have some budget left.
                         self.node_map_itr[self.itr] = self.node_map # NEW:
                         candidates = [self._get_best_terminating_node()] # Get the best terminating node among all nodes in the current iteration. Generating new nodes won't help at this point, so we directly go for the best terminating node if there are no non-terminating nodes left to execute.
                          
                 self._update_frontier(candidates)
                 
-            if ((self.itr == 1 and self.n_expanded >= 10) or self.n_expanded >= 10 + (self.itr-1) * 15) and self.itr <= self.config.itr_limit:
+            if ((self.itr == 1 and self.n_expanded >= 10) or self.n_expanded >= 10 + (self.itr-1) * 10) and self.itr <= self.config.itr_limit:
                 self._update_iteration()
 
             while best_node is None:
