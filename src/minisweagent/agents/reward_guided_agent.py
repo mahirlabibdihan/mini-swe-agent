@@ -51,7 +51,7 @@ class RewardGuidedAgent(SingleActionAgent):
         self.candidates = []
         self.n_modifications = 0 # Number of nodes which have at least one write child
         self.commits = []
-        
+        self.mode = "evaluation"  # or "simulation"
         # instance_logger.debug(result)
         image_ref = self.env.config.image
         image_ref = self.env.config.image
@@ -658,19 +658,23 @@ EOF
     
     def _reset(self):
         super()._reset()
-        # checkout to ts-main branch (new)
-        # self.tree_root.branch = "ts-main"
-        # self.env.execute("git checkout -b ts-main")
-        self.tree_root.commit = self._get_commit_hash()
-        self._create_pseudo_root()
-        self.tree_node.test_status = self._get_test_status()
-        if self.tree_node.test_status == None:
-            self.tree_node.test_status = []        
+        
+        if self.env.config.checkpoint:
+            with open(self.env.config.checkpoint, "r", encoding="utf-8") as f:
+                tree_json = json.load(f)
+            self.tree_root.from_tree(tree_json)
+            self.mode = "simulation"
+            self.tree_node = self.tree_root.children[0]
+        else:
+            self.tree_root.commit = self._get_commit_hash()
+            self._create_pseudo_root()
+            self.tree_node.test_status = self._get_test_status()
+            if self.tree_node.test_status == None:
+                self.tree_node.test_status = []        
     
         issue_tokens = self.task.split()
         scores = self.bm25.get_scores(issue_tokens)
         scores = (scores - scores.min()) / (scores.max() - scores.min())
-        
         self.relevance_dict = dict(zip(self.file_ids, scores))
         
         # Print top 10 relevant files

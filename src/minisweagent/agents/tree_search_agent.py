@@ -134,7 +134,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         return node
     
     def _generate_terminating_nodes(self):
-        # if self.n_submissions >= self.config.sub_thres and self.n_unique_submissions >= self.config.u_sub_thres:
+        # if self.n_submissions >= self.config.sub_thres and len(self.terminating_nodes) >= self.config.u_sub_thres:
         #     return # NEW: 
         
         old_active_node = self.tree_node
@@ -155,7 +155,7 @@ class TreeSearchAgent(RewardGuidedAgent):
                     self._backtrack(node)
                     self.tree_node = node
                     term_node = self._make_terminating_action(node)
-                    term_node.merged_value = self._evaluate_node(term_node)
+                    term_node.value = term_node.merged_value = self._evaluate_node(term_node)
                     if self.terminating_nodes.get(node.commit) is None:
                         self.terminating_nodes[node.commit] = []
                     self.terminating_nodes[node.commit].append(term_node)
@@ -900,8 +900,10 @@ Given both trajectories, what is the best next action to take from this point?
                         p[1][0].add_child(merged_node)
                         merged_node.merged = True
                         merged_node.parent = p[0][0]
-                        # merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node) 
-                        merged_node.value = merged_node.merged_value = (0.8 * p[0][0].merged_value + 0.2 * p[1][0].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
+                        if merged_node.is_terminating:
+                            merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node)
+                        else:
+                            merged_node.value = merged_node.merged_value = (0.8 * p[0][0].merged_value + 0.2 * p[1][0].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
                         merged_nodes.append((merged_node, p[0][1])) # Keep the highest priority among merged nodes
         
         self._backtrack(old_tree_node)
@@ -966,7 +968,10 @@ Given both trajectories, what is the best next action to take from this point?
                         b_node.add_child(merged_node)
                         merged_node.merged = True
                         merged_node.parent = a_node
-                        merged_node.value = merged_node.merged_value = (0.8 * a_node.merged_value + 0.2 * b_node.merged_value)
+                        if merged_node.is_terminating:
+                            merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node)
+                        else:
+                            merged_node.value = merged_node.merged_value = (0.8 * a_node.merged_value + 0.2 * b_node.merged_value)
                         merged_nodes.append((merged_node, bucket[0][1])) # Keep the highest priority among merged nodes
                         if merged_node.modifies_code:
                             new_buckets[self._estimate_commit(merged_node)] = [item for item in bucket if item[0] not in [a_node, b_node]] # Add remaining nodes in the bucket to the new bucket based on the commit of the merged node
@@ -1042,7 +1047,10 @@ Given both trajectories, what is the best next action to take from this point?
                             b_node.add_child(merged_node)
                             merged_node.merged = True
                             merged_node.parent = a_node
-                            merged_node.value = merged_node.merged_value = (0.8 * a_node.merged_value + 0.2 * b_node.merged_value)
+                            if merged_node.is_terminating:
+                                merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node)
+                            else:
+                                merged_node.value = merged_node.merged_value = (0.8 * a_node.merged_value + 0.2 * b_node.merged_value)
                             node_count -= 1
                             # compute new priority: prefer earlier appearance
                             a_pr = a_item[1]
@@ -1096,6 +1104,7 @@ Given both trajectories, what is the best next action to take from this point?
                 n
                 for n in self.all_node_map.values()
                 if not n.is_terminating
+                # and not n.executed # NEW
                 and n.visible
                 and n.merged_value is not None
                 and (not to_execute or n.level < self.config.depth_limit)
@@ -1313,30 +1322,27 @@ Given both trajectories, what is the best next action to take from this point?
             for n in top_k:
                 if n.is_terminating:
                     self.n_submissions += 1
+                    self.terminating_nodes[n.parent.commit] = self.terminating_nodes.get(n.parent.commit, []) + [n]
                     
             # Keep top-k active nodes
             self.node_map = {n.id: n for n in top_k}
             self.itr += 1
             instance_logger.debug(f">> Iteration {self.itr}: Updating frontier with top {len(top_k)} non-terminating leaves based on path value.")
-
-    def step(self) -> dict:
-        if self.tree_node.is_terminating:
-            self._create_pseudo_root()
-            
+    
+    def _expand(self):
+        if self.mode == "simulation":
+            return 
+        
         if self.tree_node.visits == 0:
             tree_nodes = self._generate_new_nodes(self.config.branching_factor)
             tree_nodes = self._update_tree(tree_nodes)
-            
             for node in tree_nodes:
                 if node.is_terminating:
                     if self.terminating_nodes.get(node.parent.commit) is None:
                         self.terminating_nodes[node.parent.commit] = []
                     self.terminating_nodes[node.parent.commit].append(node)
-        
-        self.tree_node.visits += 1
-        self.tree_node.itr = self.itr
-        self.tree_node.order = self.n_expanded
-        
+                    
+    def _select(self):
         best_node = None 
         while best_node is None:
             if self.tree_node.visits == 1:
@@ -1344,7 +1350,6 @@ Given both trajectories, what is the best next action to take from this point?
                 candidates = []
                 # if self.itr > self.config.itr_limit:
                 #     # prioritize terminating nodes when iteration limit is reached to encourage exploitation and avoid over-exploration which can lead to noise and long backtracking
- 
                 candidates = [
                     c for c in self.tree_node.children 
                     if not c.executed 
@@ -1398,9 +1403,10 @@ Given both trajectories, what is the best next action to take from this point?
                     # # Keep top-k active nodes
                     # self.node_map = {n.id: n for n in top_k}
                     # self.itr += 1
+                    
+        return best_node
         
-        self.tree_node = best_node
-                
+    def _observe(self):
         if self.tree_node.is_terminating:
             self._stage_to_main_branch()
             self.tree_node.is_submission = True
@@ -1423,7 +1429,22 @@ Given both trajectories, what is the best next action to take from this point?
             observation = self.render_template(self.config.action_observation_template, output=output)
             
         instance_logger.debug(f">> Observation: {observation[:200]}...") # Log only the beginning of the observation to avoid cluttering the logs
+        return observation 
+                
+    def step(self) -> dict:
+        if self.tree_node.is_terminating:
+            self._create_pseudo_root()
+            
+        self._expand()
         
+        if self.mode == "evaluation":
+            self.tree_node.visits += 1
+            self.tree_node.itr = self.itr
+            self.tree_node.order = self.n_expanded
+
+        self.tree_node = self._select()
+        # self._act()
+        observation = self._observe()
         self.n_expanded += 1
         
         self.add_message("user", observation)

@@ -125,6 +125,8 @@ def get_swebench_docker_image_name(instance: dict) -> str:
 def get_sb_environment(config: dict, instance: dict) -> Environment:
     env_config = config.setdefault("environment", {})
     env_config["environment_class"] = env_config.get("environment_class", "docker")
+    if env_config.get("checkpoint") is not None:
+        env_config["checkpoint"] = env_config["checkpoint"] + f"{instance['instance_id']}/{instance['instance_id']}.tree.json"
     image_name = get_swebench_docker_image_name(instance)
     if env_config["environment_class"] == "docker":
         env_config["image"] = image_name
@@ -321,6 +323,7 @@ def process_instance(
             (instance_dir / "experiment.log").unlink()
         set_instance_file_handler(instance_dir / "experiment.log")
         env = get_sb_environment(config, instance)
+        # if dummy environment is used, we pass the previous .tree.json file to the agent to use it as checkpoint. Agent will just simulate the tree search without actually executing any command or calculating reward.
         agent_config = {**config.get("agent", {}), "reproduction_patch": reproduction_patch}
         agent = ProgressTrackingAgent(
             model,
@@ -351,7 +354,7 @@ def process_instance(
             with (instance_dir / f"{instance_id}.tree.json").open("w", encoding="utf-8") as f:
                 json.dump(agent.tree_root.to_tree(), f, indent=2, ensure_ascii=False)
 
-    return exit_status
+    return exit_status, result
 
 
 def filter_instances(
@@ -389,7 +392,7 @@ def main(
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     redo_existing_repro: bool = typer.Option(False, "--redo-existing-repro", help="Redo existing reproduction instances", rich_help_panel="Data selection"),
     reproduce_only: bool = typer.Option(False, "--reproduce-only", help="Only run reproduction stage, skip fixing", rich_help_panel="Reproduction"),
-    config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_ts_2.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
+    config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_ts_3.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
     repro_config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_repro.yaml", "--repro-config", help="Path to reproduction config file", rich_help_panel="Reproduction"),
 ) -> None:
@@ -536,15 +539,49 @@ def main(
                 )
 
             if do_fix:
-                final_exit_status = process_instance(
+                final_exit_status, patch = process_instance(
                     instance,
                     output_path,
                     config,
                     progress_manager,
                     get_reproduction_patch_for_instance(reproductions_dir, instance_id),
                 )
+            
+            # Evaluate the result if fix was run
+            resolved = False
+            # if do_fix and 'patch' in locals():
+            #     from swebench.harness.run_evaluation import run_instance
+            #     from swebench.harness.test_spec.test_spec import make_test_spec
+            #     from swebench.harness.constants import KEY_MODEL, KEY_PREDICTION, KEY_INSTANCE_ID
+            #     import docker
 
-            progress_manager.on_instance_end(instance_id, final_exit_status)
+            #     client = docker.from_env()
+            #     test_spec = make_test_spec(instance)
+
+            #     prediction = {
+            #         KEY_INSTANCE_ID: instance["instance_id"],
+            #         KEY_MODEL: model if model is not None else config.get("model", {}).get("model_name", "unknown_model"),
+            #         KEY_PREDICTION: patch,
+            #     }
+
+            #     result = run_instance(
+            #         test_spec=test_spec,
+            #         pred=prediction,
+            #         rm_image=False,
+            #         force_rebuild=False,
+            #         client=client,
+            #         run_id=output_path.name,
+            #         timeout=400,
+            #         clean_start=False,
+            #     )
+
+            #     if result["completed"]:
+            #         resolved = result["resolved"]
+            #         logger.info(f"Evaluation completed. Resolved: {resolved}")
+            #     else:
+            #         logger.error("Evaluation failed")
+                
+            progress_manager.on_instance_end(instance_id, final_exit_status, resolved)
 
 if __name__ == "__main__":
     app()

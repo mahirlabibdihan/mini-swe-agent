@@ -108,6 +108,40 @@ class TreeSearchNode:
             "children": [child.id for child in self.children],
         }, *[node for child in self.children for node in child.to_json()]]
     
+    def from_tree(self, tree_data):
+        self.id = tree_data["id"]
+        self.value = tree_data["value"]
+        self.merged_value = tree_data["merged_value"]
+        self.level = tree_data["level"]
+        self.commit = tree_data["commit"]
+        self.branch = tree_data["branch"]
+        self.executed = tree_data["executed"]
+        self.visible = tree_data["visible"]
+        self.itr = tree_data["itr"]
+        self.merged = tree_data["merged"]
+        self.system_generated = tree_data["system_generated"]
+        self.is_terminating = tree_data["is_terminating"]
+        self.is_submission = tree_data["is_submission"]
+        self.visits = tree_data["visits"]
+        self.epsilon = tree_data.get("epsilon", None)
+        self.modified_files = tree_data.get("modified_files", [])
+        self.modifies_code = tree_data.get("modifies_code", False)
+        self.diff_size = tree_data.get("diff_size", 0)
+        self.read_files = tree_data.get("read_files", [])
+        self.last_action = tree_data.get("last_action", None)
+        self.test_status = tree_data.get("test_status", [])
+        self.observation = tree_data.get("observation", None)
+        self.history_summary = tree_data.get("history_summary", None)
+        self.score_calculation = tree_data.get("score_calculation", None)
+        
+        # Children will be linked in a separate step after all nodes are created.
+        for child_data in tree_data.get("children", []):
+            child_node = TreeSearchNode(last_action=child_data.get("last_action", None))
+            child_node.from_tree(child_data)
+            self.add_child(child_node)
+            
+        
+        
     def to_tree(self):
         try:
             response = {
