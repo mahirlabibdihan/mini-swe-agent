@@ -1326,6 +1326,33 @@ Given both trajectories, what is the best next action to take from this point?
 
     def _expand(self):
         if self.mode == "simulation":
+            tree_nodes = [
+                n for n in self.tree_node.children if not n.system_generated
+            ]
+            instance_logger.debug(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
+            reward_data = []
+            for new_node in tree_nodes:
+                reward_data.append(
+                    [
+                        (
+                            (new_node.last_action["command"][:100] + "...")
+                            if new_node.last_action["command"] is not None and len(new_node.last_action["command"]) > 100
+                            else new_node.last_action["command"]
+                        ),
+                        f"{new_node.value:.6f}",
+                        f"{new_node.merged_value:.6f}",
+                    ]
+                )
+            
+            if len(reward_data) > 0:
+                instance_logger.debug(
+                    tabulate(
+                        reward_data,
+                        headers=["Action", "Reward", "Merged"],
+                        tablefmt="grid",
+                        colalign=("left", "center", "center"),
+                    )
+                )
             return 
         
         if self.tree_node.visits == 0:
