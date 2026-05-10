@@ -11,7 +11,7 @@ class DummyEnvironmentConfig(BaseModel):
     env: dict[str, str] = {}
     timeout: int = 30
     checkpoint: str = None # Path to the checkpoint file that the agent can use to simulate the tree search without actually executing any command or calculating reward. This is useful for testing and debugging the agent without consuming resources or affecting the local environment. The checkpoint file should be a .tree.json file that contains the tree structure and values from a previous run of the agent on the same instance. The agent can use this file to look up the values of nodes in the tree and simulate the merging process without actually executing any commands or calculating rewards. This allows us to test and debug the agent's logic and behavior without consuming resources or affecting the local environment.
-
+    image: str = None # Optional image name for the dummy environment, for testing purposes. This can be used to simulate different environments or configurations without actually running a container. The agent can use this information to adjust its behavior or logic based on the specified image, allowing us to test how the agent would perform in different environments without needing to set up those environments.
 
 class DummyEnvironment:
     def __init__(self, *, config_class: type = DummyEnvironmentConfig, **kwargs):
