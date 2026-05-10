@@ -1327,7 +1327,7 @@ Given both trajectories, what is the best next action to take from this point?
     def _expand(self):
         if self.mode == "simulation":
             tree_nodes = [
-                n for n in self.tree_node.children if not n.system_generated
+                n for n in self.tree_node.children if not n.system_generated and n.merged_value is not None
             ]
             instance_logger.debug(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
             reward_data = []
