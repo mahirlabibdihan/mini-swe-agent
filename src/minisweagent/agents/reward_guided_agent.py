@@ -1167,20 +1167,22 @@ EOF
         return False
             
     def _stage_to_main_branch(self):
-        # self._repo_has_changes_with_main()
-        response = self.env.execute(f"git checkout {self._get_root_commit()} && git restore --source {self.tree_node.parent.commit} .")
-        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self._get_root_commit()} && git restore --source {self.tree_node.parent.commit} .\n```")
+        if self.mode == "evaluation":
+            # self._repo_has_changes_with_main()
+            response = self.env.execute(f"git checkout {self._get_root_commit()} && git restore --source {self.tree_node.parent.commit} .")
+                    
+            if response.get("returncode", 0) != 0:
+                instance_logger.debug(">> Warning: Failed to stage changes to main branch before submission.")
+                instance_logger.debug(f"Error details: {response}")
+                
+            # output = self.env.execute(f"git fsck --unreachable")
+            # instance_logger.debug(f">> Unreachable commits:\n{output.get('output', '')}")
+                
+            # Check for repo changes
+            if not self._repo_has_changes():
+                instance_logger.error(">> No changes detected to stage to main branch before submission.")
         
-        if response.get("returncode", 0) != 0:
-            instance_logger.debug(">> Warning: Failed to stage changes to main branch before submission.")
-            instance_logger.debug(f"Error details: {response}")
-            
-        # output = self.env.execute(f"git fsck --unreachable")
-        # instance_logger.debug(f">> Unreachable commits:\n{output.get('output', '')}")
-            
-        # Check for repo changes
-        if not self._repo_has_changes():
-            instance_logger.error(">> No changes detected to stage to main branch before submission.")
+        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self._get_root_commit()} && git restore --source {self.tree_node.parent.commit} .\n```")
                      
     def step(self) -> dict:
         
@@ -1224,12 +1226,14 @@ EOF
         self.tree_node.observation = observation
         self.tree_node.executed = True
         # self.tree_node.branch = self.tree_node.parent.branch
-        if self.tree_node.modifies_code:
-            self.tree_node.commit, _ = self._commit_changes()
-            instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
-        else:
-            self.tree_node.commit = self._get_commit_hash() #  Can't we just keep the same commit if code isn't modified?
-            instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
+
+        if self.mode == "evaluation":
+            if self.tree_node.modifies_code:
+                self.tree_node.commit, _ = self._commit_changes()
+                instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
+            else:
+                self.tree_node.commit = self._get_commit_hash() #  Can't we just keep the same commit if code isn't modified?
+                instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
 
         if self.tree_node.level == self.config.depth_limit:
             instance_logger.debug(f">> Reached max depth limit at node with action: {self.tree_node.last_action['command']}. Marking as leaf node.")
