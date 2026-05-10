@@ -123,10 +123,19 @@ def get_swebench_docker_image_name(instance: dict) -> str:
 
 
 def get_sb_environment(config: dict, instance: dict) -> Environment:
-    env_config = config.setdefault("environment", {})
+    # Make a copy to avoid mutating the original config across iterations
+    import copy
+    env_config = copy.deepcopy(config.get("environment", {}))
     env_config["environment_class"] = env_config.get("environment_class", "docker")
+    
+    # Build checkpoint path fresh for this instance
     if env_config.get("checkpoint") is not None:
-        env_config["checkpoint"] = env_config["checkpoint"] + f"{instance['instance_id']}/{instance['instance_id']}.tree.json"
+        base_checkpoint = env_config["checkpoint"]
+        # Ensure base path ends with / for proper concatenation
+        if not base_checkpoint.endswith("/"):
+            base_checkpoint += "/"
+        env_config["checkpoint"] = base_checkpoint + f"{instance['instance_id']}/{instance['instance_id']}.tree.json"
+    
     image_name = get_swebench_docker_image_name(instance)
     if env_config["environment_class"] == "docker" or env_config["environment_class"] == "dummy":
         env_config["image"] = image_name

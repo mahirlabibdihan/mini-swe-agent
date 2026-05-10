@@ -35,6 +35,7 @@ class TreeSearchNode:
         self.diff_size = 0
         self.history_summary = None
         self.test_status = []
+        self.raw_value = None
         # Detailed breakdown of how the node's score/value was calculated.
         # Filled by the agent's reward computation for debugging and analysis.
         self.score_calculation = None
@@ -87,6 +88,7 @@ class TreeSearchNode:
     def to_json(self):
         return [{
             "id": self.id,
+            "raw_value": self.raw_value,
             "value": self.value,
             "merged_value": self.merged_value,
             "level": self.level,
@@ -113,6 +115,7 @@ class TreeSearchNode:
         self.id = tree_data["id"]
         self.value = tree_data["value"]
         self.merged_value = tree_data["merged_value"]
+        self.raw_value = tree_data.get("raw_value", None)
         self.level = tree_data["level"]
         self.commit = tree_data["commit"]
         self.branch = tree_data["branch"]
@@ -153,6 +156,7 @@ class TreeSearchNode:
         try:
             response = {
                 "id": self.id,
+                "raw_value": self.raw_value,
                 "value": self.value,
                 "merged_value": self.merged_value,
                 "level": self.level,

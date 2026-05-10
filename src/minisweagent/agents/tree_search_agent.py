@@ -1375,7 +1375,7 @@ Given both trajectories, what is the best next action to take from this point?
 
         max_order = _find_max_order(self.tree_root)
         # print(f">> Max order in the tree: {max_order}, Current expanded nodes: {self.n_expanded}")
-        return self.n_expanded == max_order
+        return self.n_expanded == max_order or self.n_expanded == max_order - 1 # TODO: max_order varies. Needs to fix.
 
     def _get_best_terminating_node_from_checkpoint(self):
         terminating_nodes = []

@@ -447,8 +447,11 @@ EOF
         # track the time taken for reward computation
         start_time = time.time()
         cmd_type = node.last_action['type']
-        node.value = self.reward_model.compute_reward(node, self.task, cmd_type=cmd_type)
-        
+        if not node.raw_value:
+            node.raw_value = node.value = self.reward_model.compute_reward(node, self.task, cmd_type=cmd_type)
+        else:
+            node.value = node.raw_value
+            
         if node.last_action["command"] is None:
             # Penalize invalid actions
             penalty = 1
@@ -665,6 +668,7 @@ EOF
             self.tree_root.from_tree(tree_json)
             self.mode = "simulation"
             self.tree_node = self.tree_root.children[0]
+            instance_logger.info(f">> Loaded tree from checkpoint {self.env.config.checkpoint}. Starting in simulation mode.")
         else:
             self.tree_root.commit = self._get_commit_hash()
             self._create_pseudo_root()
