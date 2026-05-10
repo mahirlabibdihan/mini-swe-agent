@@ -38,6 +38,7 @@ class TreeSearchNode:
         # Detailed breakdown of how the node's score/value was calculated.
         # Filled by the agent's reward computation for debugging and analysis.
         self.score_calculation = None
+        self._pass = None
         
     def __lt__(self, other):
         # based on frequency
@@ -133,15 +134,20 @@ class TreeSearchNode:
         self.observation = tree_data.get("observation", None)
         self.history_summary = tree_data.get("history_summary", None)
         self.score_calculation = tree_data.get("score_calculation", None)
-        
+        self._pass = tree_data.get("_pass", None)
         # Children will be linked in a separate step after all nodes are created.
         for child_data in tree_data.get("children", []):
-            child_node = TreeSearchNode(last_action=child_data.get("last_action", None))
-            child_node.from_tree(child_data)
+            if child_data.get("executed") is None:
+                child_node = TreeSearchNode(last_action=None)
+                child_node.id = child_data.get("id")
+            else:
+                child_node = TreeSearchNode(last_action=child_data.get("last_action", None))
+                child_node.from_tree(child_data)
             self.add_child(child_node)
+            if child_data.get("executed") is None:
+                child_node.parent = None
+                child_node.merged = True
             
-        
-        
     def to_tree(self):
         try:
             response = {
@@ -175,11 +181,13 @@ class TreeSearchNode:
                 "history_summary": self.history_summary,
                 "score_calculation": self.score_calculation,
                 "children": [
-                    child.to_tree() if child.parent.id == self.id else {"id": child.id}
+                    child.to_tree() if not child.merged or (child.parent and child.parent.id == self.id) else {"id": child.id}
                     for child in self.children
                 ],
                 "observation": self.observation,
             }
+            if self.is_terminating:
+                response["pass"] = self._pass
         except Exception as e:
             instance_logger.debug(f">> Failed to convert node {self.id} to tree: {e}")
             response = None

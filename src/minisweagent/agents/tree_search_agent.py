@@ -1230,105 +1230,100 @@ Given both trajectories, what is the best next action to take from this point?
         if self.n_submissions >= self.config.sub_thres and len(self.terminating_nodes) >= self.config.u_sub_thres:
         # if len(self.terminating_nodes) >= self.config.sub_thres: # Too harsh
             # TODO: Should we just terminate or consider terminating actions from here?
-            
             # We are done exploring. Now check the tree if there is any terminating action. If multiple, choose the one with highest path value/reward. If none, choose the one with highest path value among all nodes and run sequentially from there until we reach a terminating node.   
             best_node = self._get_best_terminating_node()
             instance_logger.debug(">> Discovered enough solutions. Best terminating node: [{}] with merged value {}".format(best_node.id, best_node.merged_value))
             self.frontier.clear()
-            self.itr += 1
             self.node_map = {best_node.id: best_node}
             self._update_frontier([best_node]) # Update frontier with the best node to encourage exploitation of the best solution path
-
         elif self.itr == self.config.itr_limit:
-            top_k = self._get_topk_edit_paths(k=1)
-            if len(top_k) > 0:
-                best_node = top_k[0]
-            else:
-                # If no nodes with edits are found, fallback to any promising node regardless of edits to at least have some path to follow.
-                max_depth = max(n.level for n in self.node_map.values())
-                best_node = max(
-                    (
-                        n for n in self.node_map.values() 
-                        if n.merged_value is not None 
-                        and not n.is_terminating
-                        and n.visible 
-                        and not n.executed
-                        and n.level < self.config.depth_limit
-                    ),
-                    key=lambda n: self._prune_priority(n, max_depth=max_depth),
-                    default=None
-                )
-                
-                if best_node is None: # --- All available nodes are terminating
-                    best_node = self._get_best_terminating_node()
-                    instance_logger.debug(">> No non-terminating actions available for execution. Best terminating node: [{}] with merged value {}".format(best_node.id, best_node.merged_value if best_node else "N/A"))
-                    
-                else: 
-                    instance_logger.debug(">> Iteration limit reached. Selecting best node based on merged value: [{}] with merged value {}".format(best_node.id, best_node.merged_value if best_node else "N/A"))
-
-            self.frontier.clear()
-            self.itr += 1
-            self.node_map = {best_node.id: best_node} # Prune the rest of the tree by keeping only the best node in the node map
-            self._update_frontier([best_node])
-        else: 
-            
-            self.frontier.clear()
-            # Update frontier with top-k non-terminating leaves [EXPLOITATION]
-            # Find max depth among all nodes
-            max_depth = max(n.level for n in self.node_map.values())
-            
-            if self.itr + 1 < self.config.itr_limit:
-                sorted_leaves = sorted(
-                    (
-                        n
-                        for n in self.node_map.values()
-                        if not n.executed
-                        and not n.is_terminating
-                        and n.visible
-                        and n.merged_value is not None
-                        and n.level < self.config.depth_limit
-                    ),
-                    key=lambda n: self._prune_priority(n, max_depth=max_depth),
-                    reverse=True,
-                )
-                top_k = self._slice_topk(sorted_leaves, k=self.config.top_k_tree_pruning) # Keep top-k
-            else: # On the last iteration, prioritize nodes with edits regardless of score to encourage exploitation of promising edit paths. If not enough edit paths are found, go for read paths.
-                instance_logger.debug(">> Iteration {} reached. Prioritizing nodes with edits for exploitation.".format(self.itr + 1))
-                sorted_writes = self._get_topk_edit_paths(k=self.config.top_k_tree_pruning)
-                top_k = sorted_writes
-                # If not enough edit paths are found, go for read paths.
-                # TODO: If len(sorted_writes) > 0, we shouldn't gather reads. Just keep the edit paths even if they are less than k, since we want to encourage exploitation of promising edit paths when we are close to iteration limit. We can experiment with different values of k for edit paths and read paths to find the best balance between exploitation and exploration.
-                if len(sorted_writes) < self.config.top_k_tree_pruning:
-                    sorted_reads = sorted(
+            if self.mode == "evaluation":
+                top_k = self._get_topk_edit_paths(k=1)
+                if len(top_k) > 0:
+                    best_node = top_k[0]
+                else:
+                    # If no nodes with edits are found, fallback to any promising node regardless of edits to at least have some path to follow.
+                    max_depth = max(n.level for n in self.node_map.values())
+                    best_node = max(
                         (
-                            # n for n in self.all_node_map.values() # OLD
                             n for n in self.node_map.values() 
+                            if n.merged_value is not None 
+                            and not n.is_terminating
+                            and n.visible 
+                            and not n.executed
+                            and n.level < self.config.depth_limit
+                        ),
+                        key=lambda n: self._prune_priority(n, max_depth=max_depth),
+                        default=None
+                    )
+                    
+                    if best_node is None: # --- All available nodes are terminating
+                        best_node = self._get_best_terminating_node()
+                        instance_logger.debug(">> No non-terminating actions available for execution. Best terminating node: [{}] with merged value {}".format(best_node.id, best_node.merged_value if best_node else "N/A"))
+                        
+                    else: 
+                        instance_logger.debug(">> Iteration limit reached. Selecting best node based on merged value: [{}] with merged value {}".format(best_node.id, best_node.merged_value if best_node else "N/A"))
+                self.frontier.clear()
+                self.node_map = {best_node.id: best_node} # Prune the rest of the tree by keeping only the best node in the node map
+                self._update_frontier([best_node])
+        else: 
+            if self.mode == "evaluation":
+                self.frontier.clear()
+                # Update frontier with top-k non-terminating leaves [EXPLOITATION]
+                # Find max depth among all nodes
+                max_depth = max(n.level for n in self.node_map.values())
+                if self.itr + 1 < self.config.itr_limit:
+                    sorted_leaves = sorted(
+                        (
+                            n
+                            for n in self.node_map.values()
                             if not n.executed
                             and not n.is_terminating
                             and n.visible
                             and n.merged_value is not None
                             and n.level < self.config.depth_limit
-                            and (n.parent.commit == self._get_root_commit() and not n.modifies_code)
                         ),
                         key=lambda n: self._prune_priority(n, max_depth=max_depth),
                         reverse=True,
                     )
-                    top_k.extend(self._slice_topk(sorted_reads, k=self.config.top_k_tree_pruning - len(sorted_writes)))
-                
-            # Don't put terminating nodes in frontier.
-            self._update_frontier([
-                n for n in top_k if not n.is_terminating
-            ]) # -> It will sort based on merged_value
-            for n in top_k:
-                if n.is_terminating:
-                    self.n_submissions += 1
-                    self.terminating_nodes[n.parent.commit] = self.terminating_nodes.get(n.parent.commit, []) + [n]
+                    top_k = self._slice_topk(sorted_leaves, k=self.config.top_k_tree_pruning) # Keep top-k
+                else: # On the last iteration, prioritize nodes with edits regardless of score to encourage exploitation of promising edit paths. If not enough edit paths are found, go for read paths.
+                    instance_logger.debug(">> Iteration {} reached. Prioritizing nodes with edits for exploitation.".format(self.itr + 1))
+                    sorted_writes = self._get_topk_edit_paths(k=self.config.top_k_tree_pruning)
+                    top_k = sorted_writes
+                    # If not enough edit paths are found, go for read paths.
+                    # TODO: If len(sorted_writes) > 0, we shouldn't gather reads. Just keep the edit paths even if they are less than k, since we want to encourage exploitation of promising edit paths when we are close to iteration limit. We can experiment with different values of k for edit paths and read paths to find the best balance between exploitation and exploration.
+                    if len(sorted_writes) < self.config.top_k_tree_pruning:
+                        sorted_reads = sorted(
+                            (
+                                # n for n in self.all_node_map.values() # OLD
+                                n for n in self.node_map.values() 
+                                if not n.executed
+                                and not n.is_terminating
+                                and n.visible
+                                and n.merged_value is not None
+                                and n.level < self.config.depth_limit
+                                and (n.parent.commit == self._get_root_commit() and not n.modifies_code)
+                            ),
+                            key=lambda n: self._prune_priority(n, max_depth=max_depth),
+                            reverse=True,
+                        )
+                        top_k.extend(self._slice_topk(sorted_reads, k=self.config.top_k_tree_pruning - len(sorted_writes)))
                     
-            # Keep top-k active nodes
-            self.node_map = {n.id: n for n in top_k}
-            self.itr += 1
-            instance_logger.debug(f">> Iteration {self.itr}: Updating frontier with top {len(top_k)} non-terminating leaves based on path value.")
-    
+                # Don't put terminating nodes in frontier.
+                self._update_frontier([
+                    n for n in top_k if not n.is_terminating
+                ]) # -> It will sort based on merged_value
+                for n in top_k:
+                    if n.is_terminating:
+                        self.n_submissions += 1
+                        self.terminating_nodes[n.parent.commit] = self.terminating_nodes.get(n.parent.commit, []) + [n]
+                        
+                # Keep top-k active nodes
+                self.node_map = {n.id: n for n in top_k}
+                instance_logger.debug(f">> Iteration {self.itr}: Updating frontier with top {len(top_k)} non-terminating leaves based on path value.")
+        self.itr += 1
+
     def _expand(self):
         if self.mode == "simulation":
             return 
@@ -1342,10 +1337,80 @@ Given both trajectories, what is the best next action to take from this point?
                         self.terminating_nodes[node.parent.commit] = []
                     self.terminating_nodes[node.parent.commit].append(node)
                     
+    def _has_reached_finish_line(self):
+        # Find the max node.order among all nodes in the tree (from self.tree_root). If self.n_expanded has reached that, then we have reached the finish line.
+
+        def _find_max_order(node):
+            max_order = node.order
+            for child in node.children:
+                max_order = max(max_order, _find_max_order(child))
+            return max_order
+
+        max_order = _find_max_order(self.tree_root)
+        return self.n_expanded == max_order - 1
+
+    def _get_best_terminating_node_from_checkpoint(self):
+        terminating_nodes = []
+        def _collect_terminating_nodes(node):
+            if node.is_terminating and node.visible:
+                terminating_nodes.append(node)
+            for child in node.children:
+                _collect_terminating_nodes(child)
+            return terminating_nodes
+        
+        terminating_nodes = _collect_terminating_nodes(self.tree_root)
+        if len(terminating_nodes) == 0:
+            return None
+        
+        for n in terminating_nodes:
+            # TEMP: Re-evaluate terminating nodes to fix value bug. We can remove this once the bug is fixed.
+            n.value = n.merged_value = self._evaluate_node(n)
+
+        best_node = max(
+            terminating_nodes,
+            key=lambda x: (
+                # x.merged_value, # OLD
+                0.8 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
+                # NEW: Give priority to AI generated nodes
+                x.get_path_value(0.85) # NEW: In case of tie
+            ),
+            default=None
+        )
+
+        return best_node
+        
+
+        
+    def _get_best_node_from_checkpoint(self, merged = False):
+        # traverse the tree from self.tree_root and find the node with node.order == self.n_expanded + 1
+        
+        def _search_best(node):
+            if node.merged == merged and node.itr == self.itr and node.order == self.n_expanded + 1:
+                return node
+            
+            elif not node.children:
+                return None
+            
+            for child in node.children:
+                # TEMP
+                if child.value is None and child.merged_value is not None:
+                    child.value = child.merged_value
+                    instance_logger.debug(">> Fixing Value BUG")
+
+                best_node = _search_best(child)
+                if best_node is not None:
+                    return best_node
+            return None
+        
+        best_node = _search_best(self.tree_root)
+        if best_node is None:
+            raise Exception("Can't find next best node")
+        return best_node
+        
     def _select(self):
         best_node = None 
         while best_node is None:
-            if self.tree_node.visits == 1:
+            if self.mode == "evaluation" and self.tree_node.visits == 1:
                 # Only update frontier when node first expanded.
                 candidates = []
                 # if self.itr > self.config.itr_limit:
@@ -1370,7 +1435,13 @@ Given both trajectories, what is the best next action to take from this point?
             if ((self.itr == 1 and self.n_expanded >= 10) or self.n_expanded >= 10 + (self.itr-1) * 10) and self.itr <= self.config.itr_limit:
                 self._update_iteration()
 
+            
             while best_node is None:
+                if self.mode == "simulation":
+                    best_node = self._get_best_node_from_checkpoint()
+                    if best_node:
+                        break
+
                 if not self.frontier.empty():
                     best_node = self._select_action()
                     if best_node.parent != self.tree_node:
@@ -1378,6 +1449,9 @@ Given both trajectories, what is the best next action to take from this point?
                         best_node.parent.visits += 1
                         self.n_backtracks += 1   
                         instance_logger.debug(">> Backtrack needed to execute the highest-rewarded action.")
+                elif self.mode == "simulation" and self._has_reached_finish_line():
+                    # Find best terminating node
+                    best_node = self._get_best_terminating_node_from_checkpoint()
                 else:
                     instance_logger.debug(f">> No actions in frontier. Updating iteration to expand more nodes. Current iteration: {self.itr}")
                     # NEW:
@@ -1405,8 +1479,8 @@ Given both trajectories, what is the best next action to take from this point?
                     # self.itr += 1
                     
         return best_node
-        
-    def _observe(self):
+    
+    def _act(self):
         if self.tree_node.is_terminating:
             self._stage_to_main_branch()
             self.tree_node.is_submission = True
@@ -1416,8 +1490,10 @@ Given both trajectories, what is the best next action to take from this point?
             self.add_message("assistant", **{"content": self.tree_node.last_action["thought"], "extra": self.tree_node.last_action.get("extra", {})})
         else: # Action generated by System
             self.add_message("system", self.tree_node.last_action["thought"])
-            
         instance_logger.debug(f">> Executing selected action #{self.n_expanded + 1}: {self.tree_node.last_action['command']}")
+        self.tree_node.executed = True
+
+    def _observe(self):
         if self.tree_node.last_action["command"] is None or (not self.tree_node.is_terminating and not self.tree_node.modifies_code): # For read-only action, no need to re-execute
             observation = self.tree_node.observation
         else: # For write action, need to change the environment and get new (which will be basically same as before) observation
@@ -1429,7 +1505,16 @@ Given both trajectories, what is the best next action to take from this point?
             observation = self.render_template(self.config.action_observation_template, output=output)
             
         instance_logger.debug(f">> Observation: {observation[:200]}...") # Log only the beginning of the observation to avoid cluttering the logs
-        return observation 
+        self.add_message("user", observation)
+        self.tree_node.observation = observation
+
+        if self.tree_node.modifies_code:            
+            self.tree_node.commit, _ = self._commit_changes()
+            instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
+            
+        else:
+            self.tree_node.commit = self._get_commit_hash()
+            instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
                 
     def step(self) -> dict:
         if self.tree_node.is_terminating:
@@ -1441,24 +1526,12 @@ Given both trajectories, what is the best next action to take from this point?
             self.tree_node.visits += 1
             self.tree_node.itr = self.itr
             self.tree_node.order = self.n_expanded
-
+            
         self.tree_node = self._select()
-        # self._act()
-        observation = self._observe()
+        self._act()
+        self._observe()
         self.n_expanded += 1
         
-        self.add_message("user", observation)
-        self.tree_node.observation = observation
-        self.tree_node.executed = True
-        
-        if self.tree_node.modifies_code:            
-            self.tree_node.commit, _ = self._commit_changes()
-            instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
-            
-        else:
-            self.tree_node.commit = self._get_commit_hash()
-            instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
-            
         with open("debug_tree.json", "w", encoding="utf-8") as f:
             json.dump(self.tree_root.to_tree(), f, indent=4, ensure_ascii=False)
 
