@@ -64,10 +64,10 @@ class TreeSearchAgent(RewardGuidedAgent):
     def _reset(self):
         super()._reset()
         self.curr_epsilon = self.config.epsilon
-        issue_tokens = self.task.split()
-        scores = self.bm25.get_scores(issue_tokens)
-        scores = (scores - scores.min()) / (scores.max() - scores.min())
-        self.relevance_dict = dict(zip(self.file_ids, scores))
+        # issue_tokens = self.task.split()
+        # scores = self.bm25.get_scores(issue_tokens)
+        # scores = (scores - scores.min()) / (scores.max() - scores.min())
+        # self.relevance_dict = dict(zip(self.file_ids, scores))
         
     def _backtrack(self, target_node):
         instance_logger.debug(f">> Backtracking from [{self.tree_node.id}] to [{target_node.id}]")
@@ -1374,7 +1374,8 @@ Given both trajectories, what is the best next action to take from this point?
             return max_order
 
         max_order = _find_max_order(self.tree_root)
-        return self.n_expanded == max_order - 1
+        # print(f">> Max order in the tree: {max_order}, Current expanded nodes: {self.n_expanded}")
+        return self.n_expanded == max_order
 
     def _get_best_terminating_node_from_checkpoint(self):
         terminating_nodes = []
@@ -1391,7 +1392,18 @@ Given both trajectories, what is the best next action to take from this point?
         
         for n in terminating_nodes:
             # TEMP: Re-evaluate terminating nodes to fix value bug. We can remove this once the bug is fixed.
-            n.value = n.merged_value = self._evaluate_node(n)
+            # If n has a sibling terminating node, evaluate both and merge
+            if n.merged_value > n.value:
+                # Find sibling terminating nodes
+                sibling_terminating_nodes = [
+                    s for s in n.parent.children 
+                    if s.is_terminating
+                ]
+                for s in sibling_terminating_nodes:
+                    s.value = self._evaluate_node(s)
+                action_processor.merge_nodes(sibling_terminating_nodes)  
+            else:
+                n.value = n.merged_value = self._evaluate_node(n)
             n.is_submission = False
 
         best_node = max(
@@ -1409,11 +1421,11 @@ Given both trajectories, what is the best next action to take from this point?
         
 
         
-    def _get_best_node_from_checkpoint(self, merged = False):
+    def _get_best_node_from_checkpoint(self):
         # traverse the tree from self.tree_root and find the node with node.order == self.n_expanded + 1
-        
+        # instance_logger.debug(f">> Finding best node with order {self.n_expanded + 1} in the tree for iteration {self.itr}")
         def _search_best(node):
-            if node.merged == merged and node.itr == self.itr and node.order == self.n_expanded + 1:
+            if node.itr == self.itr and node.order == self.n_expanded + 1:
                 return node
             
             elif not node.children:
@@ -1426,13 +1438,11 @@ Given both trajectories, what is the best next action to take from this point?
                     instance_logger.debug(">> Fixing Value BUG")
 
                 best_node = _search_best(child)
-                if best_node is not None:
+                if best_node:
                     return best_node
             return None
         
         best_node = _search_best(self.tree_root)
-        if best_node is None:
-            raise Exception("Can't find next best node")
         return best_node
         
     def _select(self):
@@ -1479,6 +1489,7 @@ Given both trajectories, what is the best next action to take from this point?
                         instance_logger.debug(">> Backtrack needed to execute the highest-rewarded action.")
                 elif self.mode == "simulation" and self._has_reached_finish_line():
                     # Find best terminating node
+                    instance_logger.debug(">> Finish line reached. Searching for best terminating node in the tree.")
                     best_node = self._get_best_terminating_node_from_checkpoint()
                 else:
                     instance_logger.debug(f">> No actions in frontier. Updating iteration to expand more nodes. Current iteration: {self.itr}")
@@ -1524,6 +1535,8 @@ Given both trajectories, what is the best next action to take from this point?
     def _observe(self):
         if self.mode == "simulation" or self.tree_node.last_action["command"] is None or (not self.tree_node.is_terminating and not self.tree_node.modifies_code): # For read-only action, no need to re-execute
             observation = self.tree_node.observation
+            if self.tree_node.is_terminating:
+                raise Submitted("".join(self.tree_node.observation))
         else: # For write action, need to change the environment and get new (which will be basically same as before) observation
             output = self.get_observation(
                 {

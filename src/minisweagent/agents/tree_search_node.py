@@ -119,6 +119,7 @@ class TreeSearchNode:
         self.executed = tree_data["executed"]
         self.visible = tree_data["visible"]
         self.itr = tree_data["itr"]
+        self.order = tree_data["order"]
         self.merged = tree_data["merged"]
         self.system_generated = tree_data["system_generated"]
         self.is_terminating = tree_data["is_terminating"]
@@ -134,7 +135,7 @@ class TreeSearchNode:
         self.observation = tree_data.get("observation", None)
         self.history_summary = tree_data.get("history_summary", None)
         self.score_calculation = tree_data.get("score_calculation", None)
-        self._pass = tree_data.get("_pass", None)
+        self._pass = tree_data.get("pass", None)
         # Children will be linked in a separate step after all nodes are created.
         for child_data in tree_data.get("children", []):
             if child_data.get("executed") is None:
