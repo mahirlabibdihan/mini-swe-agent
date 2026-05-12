@@ -900,10 +900,10 @@ Given both trajectories, what is the best next action to take from this point?
                         p[1][0].add_child(merged_node)
                         merged_node.merged = True
                         merged_node.parent = p[0][0]
-                        if merged_node.is_terminating:
-                            merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node)
-                        else:
-                            merged_node.value = merged_node.merged_value = (0.8 * p[0][0].merged_value + 0.2 * p[1][0].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
+                        # if merged_node.is_terminating: # NEW
+                        merged_node.value = merged_node.merged_value = self._evaluate_node(merged_node)
+                        # else:
+                            # merged_node.value = merged_node.merged_value = (0.8 * p[0][0].merged_value + 0.2 * p[1][0].merged_value) # We can also experiment with other ways of aggregating values, like max or min, or even giving more weight to the node with higher value. This is a hyperparameter that can be tuned based on the task and the size of the tree.
                         merged_nodes.append((merged_node, p[0][1])) # Keep the highest priority among merged nodes
         
         self._backtrack(old_tree_node)
