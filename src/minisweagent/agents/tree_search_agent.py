@@ -629,29 +629,149 @@ class TreeSearchAgent(RewardGuidedAgent):
         merged_node = self._action_to_node(response, action, error, node_A)
         
         return  merged_node # A is parent, since it has higher value
-            
+
+    def linearize_path(self, path):
+        messages = []
+        for node in path:
+            if node.last_action is None:
+                continue
+            messages.append({"role": "user", "content": node.observation})
+            messages.append({"role": "assistant", "content": node.last_action["thought"]})
+        return messages
+    
+    def format_suffix(self, path):
+        lines = []
+        for node in path:
+            if node.last_action is None:
+                continue
+            lines.append("Action: " + node.last_action["thought"])
+            lines.append("Observation: " + node.observation + "\n")
+        return "\n".join(lines)
+    
+    def _summarize_solution(self, node):
+        return
+    
+    def _get_voting_messages(self, node_A, node_B):
+        solution_A = self._summarize_solution(node_A)
+        solution_B = self._summarize_solution(node_B)
+
+        messages = []
+
+        messages.append({
+        "role": "system",
+        "content": """
+You are an expert software engineer evaluating candidate fixes for a SWE-bench task.
+
+Your task is to determine which proposed solution is MORE LIKELY to correctly solve the issue described in the PR/task description.
+
+Evaluation criteria:
+- Correctness
+- Completeness
+- Edge case handling
+- Regression risk
+- Alignment with the intended fix
+- Whether the patch addresses the root cause
+
+You must choose exactly ONE solution:
+- 1
+- 2
+"""
+    })
+
+        messages.append({
+            "role": "user",
+            "content": f"""
+<pr_description>
+{self.task}
+</pr_description>
+
+<solution_1>
+{solution_A}
+</solution_1>
+
+<solution_2>
+{solution_B}
+</solution_2>
+
+Analyze both solutions carefully and explain your reasoning.
+
+At the very end of your response, output the verdict in EXACTLY this format:
+
+```json
+{{
+    "verdict": 1
+}}
+```
+
+or
+
+```json
+{{
+    "verdict": 2
+}}
+```
+
+Rules:
+- The final line must contain ONLY the JSON object
+- verdict must be either 1 or 2
+- Do not use markdown fences
+"""
+        })
+
+        return messages
+    
+    def _parse_voting_response(self, response):
+        """
+        Extract JSON block from triple backticks and parse verdict.
+        Expected format:
+
+        ```json
+        {
+            "verdict": 1
+        }
+        ```
+        """
+        import json
+        import re
+
+        # Extract last fenced code block
+        matches = re.findall(
+            r"```(?:json)?\s*(.*?)\s*```",
+            response,
+            re.DOTALL,
+        )
+    
+        if not matches:
+            raise ValueError(
+                f"No fenced JSON block found in response:\n{response}"
+            )
+
+        json_block = matches[-1]
+
+        try:
+            data = json.loads(json_block)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Invalid JSON in fenced block: {e}\n\n{json_block}"
+            )
+
+        verdict = data.get("verdict")
+
+        if verdict not in [1, 2]:
+            raise ValueError(f"Invalid verdict: {verdict}")
+
+        return verdict
+
+    def _get_best_solution_by_voting(self, node_A: tuple, node_B: tuple) -> tuple:
+        messages = self._get_voting_messages(node_A[0], node_B[0])
+        response = self.model.query(messages)
+        verdict = self._parse_voting_response(response["content"])
+        return node_A if verdict == 1 else node_B
+
     def get_messages_two_nodes(self, node_A, node_B) -> List[dict]:
         if node_A.commit != node_B.commit:
             raise ValueError("Nodes must be on the same commit to merge their paths for messaging.")
 
-        def linearize_path(path):
-            messages = []
-            for node in path:
-                if node.last_action is None:
-                    continue
-                messages.append({"role": "user", "content": node.observation})
-                messages.append({"role": "assistant", "content": node.last_action["thought"]})
-            return messages
-        
-        def format_suffix(path):
-            lines = []
-            for node in path:
-                if node.last_action is None:
-                    continue
-                lines.append("Action: " + node.last_action["thought"])
-                lines.append("Observation: " + node.observation + "\n")
-            return "\n".join(lines)
-    
         path_a = self._get_path(node_A)
         path_b = self._get_path(node_B)
         
@@ -676,7 +796,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         })
         
         # shared prefix (unchanged)
-        messages.extend(linearize_path(common))
+        messages.extend(self.linearize_path(common))
 
         # divergence marker (VERY important)
         messages.append({
@@ -686,10 +806,10 @@ From this point, two alternative action sequences were explored.
 Your task is to reason across both and decide the best next action.
 
 === Path A ===
-{format_suffix(suffix_b)}
+{self.format_suffix(suffix_b)}
 
 === Path B ===
-{format_suffix(suffix_a)}
+{self.format_suffix(suffix_a)}
 
 Given both trajectories, what is the best next action to take from this point?
 """   
@@ -1376,6 +1496,44 @@ Given both trajectories, what is the best next action to take from this point?
         max_order = _find_max_order(self.tree_root)
         return self.n_expanded == max_order - 1
 
+    def _recursive_tournament_voting(self, terminating_nodes):
+        if len(terminating_nodes) == 0:
+            return None
+        
+        sorted_nodes = sorted(
+            terminating_nodes,
+            key=lambda x: (
+                # x.merged_value, # OLD
+                0.8 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
+                # NEW: Give priority to AI generated nodes
+                x.get_path_value(0.85) # NEW: In case of tie
+            ),
+            reverse=True
+        )
+        candidates = sorted_nodes[:2*self.config.top_k_tree_pruning].reverse() # Keep top 2k terminating nodes as candidates for voting, and reverse to have the best node at the end.
+
+        candidates = [(n, i) for i, n in enumerate(candidates)]
+
+        # recursive tournament voting
+        new_candidates = []
+        round = 1
+        while len(candidates) > 1:
+            pairs = self._make_pairs_elite(candidates)
+            for p in pairs:
+                if p[1] is None:
+                    new_candidates.append(p[0])
+                else:
+                    best = self._get_best_solution_by_voting(p[0], p[1])
+                    new_candidates.append(best)
+            
+            # sort by index to preserve original order as much as possible
+            instance_logger.debug(f">> Tournament Round {round}: {len(candidates)} candidates, {len(new_candidates)} winners")
+            new_candidates.sort(key=lambda x: x[1])
+            candidates = new_candidates
+            new_candidates = []
+                
+        return candidates[0][0] if len(candidates) > 0 else None
+    
     def _get_best_terminating_node_from_checkpoint(self):
         terminating_nodes = []
         def _collect_terminating_nodes(node):
