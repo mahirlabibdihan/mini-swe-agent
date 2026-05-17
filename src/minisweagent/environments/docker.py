@@ -36,6 +36,7 @@ class DockerEnvironmentConfig(BaseModel):
     """Max duration to keep container running. Uses the same format as the sleep command."""
     pull_timeout: int = 60
     """Timeout in seconds for pulling images."""
+    checkpoint: str | None = None
 
 
 class DockerEnvironment:

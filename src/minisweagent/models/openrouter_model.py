@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from typing import Any, Literal
-
+import threading
 import requests
 from pydantic import BaseModel
 from tenacity import (
@@ -47,6 +47,8 @@ class OpenRouterRateLimitError(Exception):
 
 
 class OpenRouterModel:
+    _api_call_lock = threading.RLock()
+    
     def __init__(self, **kwargs):
         self.config = OpenRouterModelConfig(**kwargs)
         self.cost = 0.0
@@ -82,7 +84,8 @@ class OpenRouterModel:
         }
 
         try:
-            response = requests.post(self._api_url, headers=headers, data=json.dumps(payload), timeout=100)
+            with self._api_call_lock:
+                response = requests.post(self._api_url, headers=headers, data=json.dumps(payload), timeout=100)
             response.raise_for_status()
             response_json = response.json()
             choices = response_json.get("choices")

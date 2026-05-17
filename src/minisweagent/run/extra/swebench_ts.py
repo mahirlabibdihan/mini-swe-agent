@@ -362,6 +362,8 @@ def process_instance(
         if agent is not None:
             with (instance_dir / f"{instance_id}.tree.json").open("w", encoding="utf-8") as f:
                 json.dump(agent.tree_root.to_tree(), f, indent=2, ensure_ascii=False)
+            with (instance_dir / f"{instance_id}.rtv.json").open("w", encoding="utf-8") as f:
+                json.dump(agent.rtv, f, indent=2, ensure_ascii=False)
 
     return exit_status, result
 

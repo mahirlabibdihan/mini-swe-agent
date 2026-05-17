@@ -4,7 +4,7 @@ import requests
 import traceback
 from importlib import resources
 import swebench.resources
-
+from minisweagent.agents.tree_search_node import TreeSearchNode
 from argparse import ArgumentTypeError
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datasets import Dataset, load_dataset, load_from_disk
@@ -127,17 +127,40 @@ def get_predictions_from_tree_dir(predictions_dir: str, model_name: str = "tree_
             with open(tree_file, 'r') as f:
                 tree = json.load(f)
             
+            tree_root = TreeSearchNode(last_action=None)
+            tree_root.from_tree(tree)
+            
             # Traverse the tree and extract patches from terminating nodes
             terminating_nodes = []
-            _collect_terminating_nodes(tree, terminating_nodes)
+            _collect_terminating_nodes(tree_root, terminating_nodes)
             
             if not terminating_nodes:
                 print(f"Warning: No terminating nodes found in {tree_file}")
                 continue
             
+            # Take top 4
+            # best_node = sorted(
+            #     terminating_nodes,
+            #     key=lambda x: (
+            #         # x.merged_value, # OLD
+            #         0.8 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
+            #         # NEW: Give priority to AI generated nodes
+            #         x.get_path_value(0.85) # NEW: In case of tie
+            #     ),
+            #     reverse=True
+            # )[:4]
+            terminating_nodes = sorted(
+                terminating_nodes,
+                key=lambda x: (
+                    0.8 * x.merged_value + (1 - (x.parent.order / 50)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
+                    x.get_path_value(0.85)
+                ),
+                reverse=True,
+            )
+            
             # Create predictions for each terminating node
             for node_idx, node in enumerate(terminating_nodes):
-                patch = _extract_patch_from_node(node)
+                patch = node.observation
                 
                 # Create a unique model name that includes the node index for aggregation
                 # Format: model_name_node_0, model_name_node_1, etc.
@@ -147,10 +170,10 @@ def get_predictions_from_tree_dir(predictions_dir: str, model_name: str = "tree_
                     KEY_INSTANCE_ID: instance_id,
                     KEY_MODEL: node_model_name,
                     KEY_PREDICTION: patch,
-                    "node_id": node.get("id"),
+                    "node_id": node.id,
                     "node_index": node_idx,
-                    "pass": node.get("pass"),
-                    "is_submission": bool(node.get("is_submission", False)),
+                    "pass": node._pass,
+                    "is_submission": node.is_submission,
                     "tree_file": str(tree_file),
                     "original_model": model_name,  # Keep original model name for aggregation
                 }
@@ -169,34 +192,52 @@ def get_predictions_from_tree_dir(predictions_dir: str, model_name: str = "tree_
 
 
 
-def _collect_terminating_nodes(node: dict, terminating_nodes: list, seen: set | None = None):
+# def _collect_terminating_nodes(node: dict, terminating_nodes: list, seen: set | None = None):
+#     """
+#     Recursively traverse the tree and collect all nodes with is_terminating=true.
+    
+#     Args:
+#         node (dict): Current node in the tree
+#         terminating_nodes (list): List to accumulate terminating nodes
+#     """
+#     if seen is None:
+#         seen = set()
+
+#     if node is not None:
+#         node_key = node.get("id") if isinstance(node, dict) else None
+#         if node_key is None:
+#             node_key = id(node)
+#         if node_key in seen:
+#             return
+#         seen.add(node_key)
+
+#     if node is not None and (node.get("is_terminating", False) or (node.get("observation", "") is not None and node.get("observation", "").startswith("diff --git"))) and node.get("merged_value") is not None:
+#         terminating_nodes.append(node)
+    
+#     # Recursively traverse children
+#     if node is not None and "children" in node and node["children"]:
+#         for child in node["children"]:
+#             if child.get("visible", False):  # Only traverse visible nodes to avoid duplicates
+#                 _collect_terminating_nodes(child, terminating_nodes, seen)
+
+def _collect_terminating_nodes(node: TreeSearchNode, terminating_nodes: list[TreeSearchNode]):
     """
     Recursively traverse the tree and collect all nodes with is_terminating=true.
     
     Args:
-        node (dict): Current node in the tree
+        node (TreeSearchNode): Current node in the tree
         terminating_nodes (list): List to accumulate terminating nodes
     """
-    if seen is None:
-        seen = set()
+    if node is None:
+        return
 
-    if node is not None:
-        node_key = node.get("id") if isinstance(node, dict) else None
-        if node_key is None:
-            node_key = id(node)
-        if node_key in seen:
-            return
-        seen.add(node_key)
-
-    if node is not None and (node.get("is_terminating", False) or (node.get("observation", "") is not None and node.get("observation", "").startswith("diff --git"))) and node.get("merged_value") is not None:
+    if (node.is_terminating or (node.observation and node.observation.startswith("diff --git"))) and node.merged_value is not None:
         terminating_nodes.append(node)
     
     # Recursively traverse children
-    if node is not None and "children" in node and node["children"]:
-        for child in node["children"]:
-            if child.get("visible", False):  # Only traverse visible nodes to avoid duplicates
-                _collect_terminating_nodes(child, terminating_nodes, seen)
-
+    for child in node.children:
+        if child.visible:  # Only traverse visible nodes to avoid duplicates
+            _collect_terminating_nodes(child, terminating_nodes)
 
 def _extract_patch_from_node(node: dict) -> str:
     """

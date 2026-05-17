@@ -1,7 +1,7 @@
 import heapq
 
 class Frontier:
-    def __init__(self, budget):
+    def __init__(self, budget=None):
         self.initial_budget = budget
         self.budget = budget
         self.queue = []

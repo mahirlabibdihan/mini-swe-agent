@@ -72,7 +72,7 @@ GIT_APPLY_CMDS = [
 
 def _set_node_pass_flag(node: dict, node_id: str, passed: bool) -> bool:
     """Recursively find a node by id and set its pass flag."""
-    if node.get("id") == node_id:
+    if node.get("id") == node_id and node.get("is_terminating", False):
         node["pass"] = bool(passed)
         return True
 
@@ -108,9 +108,11 @@ def _update_tree_nodes_passes(preds: list[dict], pass_by_node_id: dict[str, bool
                     modified = True
             if modified:
                 tree_path.write_text(json.dumps(tree, indent=4))
-        except Exception:
+        except Exception as e:
             # Tree update failure should not interrupt evaluation.
-            pass
+            raise Exception(f"Warning: Failed to update tree file {tree_file} with pass flags. Error: {str(e)}")
+            # logger
+            # pass
 
 
 def run_instance(
@@ -162,7 +164,7 @@ def run_instance(
             "completed": True,
             "resolved": report[instance_id]["resolved"],
         }
-    if report_path.exists() and not redo:
+    if report_path.exists() and not redo and pred.get("pass") is not None:
         report = json.loads(report_path.read_text())
         return {
             "completed": True,
@@ -412,6 +414,8 @@ def run_instance_candidates(
                     )
             instance_pbar.update()
 
+    # print(f"Updating tree nodes with pass/fail flags for instance {test_spec.instance_id}...")
+    # print(f"Pass by node ID: {pass_by_node_id}")
     _update_tree_nodes_passes(preds, pass_by_node_id)
 
     if any_completed:
@@ -598,7 +602,7 @@ def get_dataset_from_preds(
     predictions: dict,
     run_id: str,
     rewrite_reports: bool,
-    exclude_completed: bool = True,
+    exclude_completed: bool = False,
 ):
     """
     Return only instances that have predictions and are in the dataset.
@@ -619,6 +623,7 @@ def get_dataset_from_preds(
 
     # keep only prediction IDs that are present in the dataset
     prediction_ids = set(predictions.keys())
+   
   
     extra_prediction_ids = prediction_ids - dataset_ids
     if extra_prediction_ids:
@@ -629,7 +634,7 @@ def get_dataset_from_preds(
         prediction_ids -= extra_prediction_ids
     if instance_ids:
         dataset = [i for i in dataset if i[KEY_INSTANCE_ID] in instance_ids]
-
+        
     if rewrite_reports:
         # we only return instances that have existing test outputs
         test_output_ids = set()
@@ -659,6 +664,7 @@ def get_dataset_from_preds(
     for instance in dataset:
         if instance[KEY_INSTANCE_ID] not in prediction_ids:
             # skip instances without predictions
+            
             continue
         prediction = predictions[instance[KEY_INSTANCE_ID]]
         report_file = (
@@ -681,6 +687,7 @@ def get_dataset_from_preds(
         for k, v in predictions.items()
         if v[KEY_PREDICTION] == "" or v[KEY_PREDICTION] is None
     }
+    
 
     # filter dataset to only instances with predictions
     dataset = [
@@ -689,6 +696,7 @@ def get_dataset_from_preds(
         if i[KEY_INSTANCE_ID] in prediction_ids
         and i[KEY_INSTANCE_ID] not in empty_patch_ids
     ]
+
     return dataset
 
 
@@ -756,12 +764,21 @@ def main(
         predictions_by_instance.setdefault(instance_id, []).append(pred)
 
     # For dataset filtering/build flow, keep one representative prediction per instance.
+    # Prefer a non-empty prediction so one empty submission does not exclude an instance
+    # that still has valid candidates.
     predictions_for_dataset = {}
     for pred in predictions_list:
         instance_id = pred[KEY_INSTANCE_ID]
-        if instance_id in predictions_for_dataset:
+        current_pred = predictions_for_dataset.get(instance_id)
+        current_patch = (current_pred or {}).get(KEY_PREDICTION)
+        next_patch = pred.get(KEY_PREDICTION)
+
+        if current_pred is None:
+            predictions_for_dataset[instance_id] = pred
             continue
-        predictions_for_dataset[instance_id] = pred
+
+        if (not current_patch) and next_patch:
+            predictions_for_dataset[instance_id] = pred
 
     # For reporting aggregation in tree mode, preserve all predictions with unique keys.
     predictions_for_report = {}
@@ -777,9 +794,9 @@ def main(
         run_id,
         rewrite_reports,
         exclude_completed=False,
-    )[:50]
-    
-    full_dataset = load_swebench_dataset(dataset_name, split, instance_ids)[:50]
+    )
+
+    full_dataset = load_swebench_dataset(dataset_name, split, instance_ids)
 
 
     if modal:

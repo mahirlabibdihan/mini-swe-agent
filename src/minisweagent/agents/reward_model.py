@@ -210,21 +210,23 @@ class RewardModel():
         return None, f"Score {val} out of range [0, 100]."
 
     
-
+    def format_patch(self, patch: str, max_chars: int = 5000) -> str:
+        if len(patch) <= max_chars:
+            return patch
+        
+        half = max_chars // 2
+        elided = len(patch) - max_chars
+        return (
+            f"{patch[:half]}\n"
+            f"....({elided} characters elided)....\n"
+            f"{patch[-half:]}"
+        )
+        
     def format_observation(self, observation: str, max_chars: int = 5000) -> str:
         if not observation.startswith("diff --git"):
             return observation
             
-        if len(observation) <= max_chars:
-            return observation
-        
-        half = max_chars // 2
-        elided = len(observation) - max_chars
-        return (
-            f"{observation[:half]}\n"
-            f"....({elided} characters elided)....\n"
-            f"{observation[-half:]}"
-        )
+        return self.format_patch(observation, max_chars=max_chars)
 
 
     def format_trajectory(self, trajectory: list[Dict[str, Any]], offset: int = 0, history_summary: str = None, n_steps: int = 5) -> str:

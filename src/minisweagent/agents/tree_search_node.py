@@ -34,8 +34,15 @@ class TreeSearchNode:
         self.changes = []
         self.diff_size = 0
         self.history_summary = None
+        self.solution_summary = None
         self.test_status = []
         self.raw_value = None
+        self.is_terminating = False
+        self.is_timeout = False
+        self.retries = 0
+        self.is_repeat = False
+        self.cache_hit = None
+        self.state_hash = None
         # Detailed breakdown of how the node's score/value was calculated.
         # Filled by the agent's reward computation for debugging and analysis.
         self.score_calculation = None
@@ -137,8 +144,14 @@ class TreeSearchNode:
         self.test_status = tree_data.get("test_status", [])
         self.observation = tree_data.get("observation", None)
         self.history_summary = tree_data.get("history_summary", None)
+        self.solution_summary = tree_data.get("solution_summary", None)
         self.score_calculation = tree_data.get("score_calculation", None)
         self._pass = tree_data.get("pass", None)
+        self.is_timeout = tree_data.get("is_timeout", False)
+        self.is_repeat = tree_data.get("is_repeat", False)
+        self.cache_hit = tree_data.get("cache_hit", None)
+        self.state_hash = tree_data.get("state_hash", None)
+        self.changes = tree_data.get("changes", [])
         # Children will be linked in a separate step after all nodes are created.
         for child_data in tree_data.get("children", []):
             if child_data.get("executed") is None:
@@ -184,7 +197,13 @@ class TreeSearchNode:
                 } if self.last_action else None,
                 "test_status": self.test_status,
                 "history_summary": self.history_summary,
+                "solution_summary": self.solution_summary,
                 "score_calculation": self.score_calculation,
+                "is_timeout": self.is_timeout,
+                "cache_hit": self.cache_hit,
+                "is_repeat": self.is_repeat,
+                "state_hash": self.state_hash,
+                "changes": self.changes,
                 "children": [
                     child.to_tree() if not child.merged or (child.parent and child.parent.id == self.id) else {"id": child.id}
                     for child in self.children
