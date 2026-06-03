@@ -424,6 +424,8 @@ def make_run_report(
     print(f"Instances unresolved: {len(unresolved_ids)}")
     print(f"Instances with empty patches: {len(empty_patch_ids)}")
     print(f"Instances with errors: {len(error_ids)}")
+    if error_ids:
+        print(f"Error instances: {error_ids}")
     if client:
         print(f"Unstopped containers: {len(unstopped_containers)}")
         print(f"Unremoved images: {len(unremoved_images)}")

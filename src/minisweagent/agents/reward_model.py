@@ -83,8 +83,6 @@ Assign an integer score from 0 to 100 that reflects how much NEW and USEFUL info
 read_information_gain_prompt = _base_evaluation_prompt + """
 You are evaluating a FILE READ or DIRECTORY INSPECTION step.
 
-Context: The observation may be (A) the full contents of a file, (B) a truncated file diff or excerpt, or (C) a directory listing / file metadata (for example, the output of `ls`, `stat`, or `git ls-files`). Score the usefulness of the observation for debugging and fixing the issue accordingly.
-
 Question:
 Did this file read or directory inspection provide NEW and USEFUL information for fixing the issue?
 

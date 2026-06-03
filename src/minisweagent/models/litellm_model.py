@@ -118,10 +118,9 @@ class LitellmModel:
     )
     def _query(self, messages: list[dict[str, str]], **kwargs):
         try:
-            with self._api_call_lock:
-                return litellm.completion(
-                    model=self.config.model_name, messages=messages, **(self.config.model_kwargs | kwargs)
-                )
+            return litellm.completion(
+                model=self.config.model_name, messages=messages, **(self.config.model_kwargs | kwargs)
+            )
         except litellm.exceptions.AuthenticationError as e:
             e.message += " You can permanently set your API key with `mini-extra config set KEY VALUE`."
             self._log_query_exception(e, messages=messages, kwargs=kwargs)
@@ -131,42 +130,44 @@ class LitellmModel:
             raise
 
     def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
-        if self.config.set_cache_control:
-            messages = set_cache_control(messages, mode=self.config.set_cache_control)
-        response = self._query([{"role": msg["role"], "content": msg["content"]} for msg in messages], **kwargs)
-        try:
-            cost = litellm.cost_calculator.completion_cost(response, model=self.config.model_name)
-            if cost <= 0.0:
-                raise ValueError(f"Cost must be > 0.0, got {cost}")
-        except Exception as e:
-            cost = 0.0
-            if self.config.cost_tracking != "ignore_errors":
-                msg = (
-                    f"Error calculating cost for model {self.config.model_name}: {e}, perhaps it's not registered? "
-                    "You can ignore this issue from your config file with cost_tracking: 'ignore_errors' or "
-                    "globally with export MSWEA_COST_TRACKING='ignore_errors'. "
-                    "Alternatively check the 'Cost tracking' section in the documentation at "
-                    "https://klieret.short.gy/mini-local-models. "
-                    " Still stuck? Please open a github issue at https://github.com/SWE-agent/mini-swe-agent/issues/new/choose!"
-                )
-                logger.critical(msg)
-                raise RuntimeError(msg) from e
-        self.n_calls += 1
-        self.cost += cost
-        usage = getattr(response, "usage", None)
-        if usage is not None:
-            if isinstance(usage, dict):
-                prompt_tokens = usage.get("prompt_tokens", 0)
-                completion_tokens = usage.get("completion_tokens", 0)
-            else:
-                prompt_tokens = getattr(usage, "prompt_tokens", 0)
-                completion_tokens = getattr(usage, "completion_tokens", 0)
+        with self._api_call_lock:
+            if self.config.set_cache_control:
+                messages = set_cache_control(messages, mode=self.config.set_cache_control)
+                
+            response = self._query([{"role": msg["role"], "content": msg["content"]} for msg in messages], **kwargs)
+            try:
+                cost = litellm.cost_calculator.completion_cost(response, model=self.config.model_name)
+                if cost <= 0.0:
+                    raise ValueError(f"Cost must be > 0.0, got {cost}")
+            except Exception as e:
+                cost = 0.0
+                if self.config.cost_tracking != "ignore_errors":
+                    msg = (
+                        f"Error calculating cost for model {self.config.model_name}: {e}, perhaps it's not registered? "
+                        "You can ignore this issue from your config file with cost_tracking: 'ignore_errors' or "
+                        "globally with export MSWEA_COST_TRACKING='ignore_errors'. "
+                        "Alternatively check the 'Cost tracking' section in the documentation at "
+                        "https://klieret.short.gy/mini-local-models. "
+                        " Still stuck? Please open a github issue at https://github.com/SWE-agent/mini-swe-agent/issues/new/choose!"
+                    )
+                    logger.critical(msg)
+                    raise RuntimeError(msg) from e
+            self.n_calls += 1
+            self.cost += cost
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                if isinstance(usage, dict):
+                    prompt_tokens = usage.get("prompt_tokens", 0)
+                    completion_tokens = usage.get("completion_tokens", 0)
+                else:
+                    prompt_tokens = getattr(usage, "prompt_tokens", 0)
+                    completion_tokens = getattr(usage, "completion_tokens", 0)
 
-            if isinstance(prompt_tokens, int | float):
-                self.input_tokens += int(prompt_tokens)
-            if isinstance(completion_tokens, int | float):
-                self.output_tokens += int(completion_tokens)
-        GLOBAL_MODEL_STATS.add(cost)
+                if isinstance(prompt_tokens, int | float):
+                    self.input_tokens += int(prompt_tokens)
+                if isinstance(completion_tokens, int | float):
+                    self.output_tokens += int(completion_tokens)
+            GLOBAL_MODEL_STATS.add(cost)
         return {
             "content": response.choices[0].message.content or "",  # type: ignore
             "extra": {

@@ -27,6 +27,7 @@ import re
 import math
 import tempfile
 import threading
+import litellm
 
 class RewardGuidedAgentConfig(SingleActionAgentConfig):
     retrieval_template: str
@@ -34,7 +35,7 @@ class RewardGuidedAgentConfig(SingleActionAgentConfig):
     """Patch that adds/updates reproduction artifacts (typically run_test.sh) for test status checks."""
     branching_factor: int = 3
     """The maximum number of branches to explore at each node."""
-    
+    shape_reward: bool = True
 
         
 parser = BashParser()
@@ -328,10 +329,6 @@ EOF
         return score
     
     def is_test_failure(self, node: TreeSearchNode, returncode: int) -> bool:
-        # OLD:
-        # if self.is_test_command(node) and returncode == 1:
-        #     return True
-        # NEW:
         if node.last_action["type"] == "test" and returncode == 1:
             return True
         return False
@@ -459,18 +456,25 @@ EOF
         else:
             node.value = node.raw_value
         
-        if node.last_action["command"] is None:
+        if not self.config.shape_reward:
+            new_value = node.value
+            end_time = time.time()
+            instance_logger.debug(f"=>> Reward: {new_value:.4f} | Time taken: {end_time - start_time:.2f} seconds")
+            return new_value
+        
+        if node.last_action["command"] is None or node.invalid_termination:
             # Penalize invalid actions
             penalty = 1
             curr = node
             while curr is not None and curr.last_action is not None:
-                if curr.last_action["command"] is None:
+                if curr.last_action["command"] is None or node.invalid_termination:
                     penalty *= 0.9
                 else:
                     break
                 curr = curr.parent
                 
             new_value = 0.9 * node.value
+            # new_value = penalty * node.value
             instance_logger.debug(f">> Invalid-action reward adjustment: {node.value:.4f} -> {new_value:.4f}")
             node.value = new_value
             
@@ -486,6 +490,7 @@ EOF
                 curr = curr.parent
             # Penalize actions with non-zero return code
             new_value = 0.95 * node.value
+            # new_value = penalty * node.value
             instance_logger.debug(f">> Non-zero return-code reward adjustment: {node.value:.4f} -> {new_value:.4f}")
             node.value = new_value
         elif node.is_timeout:
@@ -555,10 +560,7 @@ EOF
             new_value = 0.7 * node.value
             instance_logger.debug(f">> Empty-output reward adjustment: {node.value:.4f} -> {new_value:.4f}")
             node.value = new_value
-        
-        # OLD:
-        # elif (node.last_action["command"] is None or not self.is_test_command(node)) and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
-        # NEW:
+
         elif (node.last_action["command"] is None or node.last_action["type"] != "test") and node.raw_observation is not None and len(node.raw_observation.get("output").strip()) > 5000:
             # Penalize read actions that produce excessive output
             penalty = math.exp(-(len(node.raw_observation.get("output").strip()) - 5000) / 3000.0)
@@ -743,7 +745,7 @@ EOF
         
         instance_logger.debug(">> Parsing git diff output...")
         instance_logger.debug(f"Number of lines in git diff: {len(lines)}")
-        instance_logger.debug(lines[:10])  # Print the first 10 lines of the diff for debugging
+        instance_logger.debug("\n".join(lines[:10]))  # Print the first 10 lines of the diff for debugging
 
         file_name = None
         change_type = "modified"
@@ -796,11 +798,24 @@ EOF
         while curr is not None and curr.last_action is not None:
             if curr.modifies_code:
                 break
-            if curr.last_action["command"] == node.last_action["command"]:
+            if curr.last_action["command"] and curr.last_action["command"] == node.last_action["command"]:
                 return True
             curr = curr.parent
         return False
         
+    def _query_safely(self, messages):
+        remove_steps = 0
+        while True:
+            try:
+                response = self.query(messages)
+                return response
+            except (litellm.exceptions.ContextWindowExceededError, litellm.exceptions.BadRequestError) as e:
+                remove_steps += 1
+                messages = messages[:2] + messages[2+2*remove_steps:]
+                if len(messages) <= 2:
+                    raise Exception(">> Error: Context window too small to fit any messages.")
+                instance_logger.debug(f">> Context window exceeded. Removing the oldest {remove_steps} steps and retrying...")
+            
     def _generate_action(self):
         """
         Generate an action from the model and parse it
@@ -823,7 +838,7 @@ EOF
             return False
                 
         for i in range(max_retries):  # Retry mechanism in case of parsing errors
-            response = self.query(messages)
+            response = self._query_safely(messages)
             try:
                 action = self.parse_action(response)
                 potential_termination = is_terminating(action["action"])             
@@ -875,7 +890,6 @@ EOF
                 cmd_type = "edit"
             elif "[SEARCH]" in node.last_action["thought"]:
                 cmd_type = "search"
-            # elif self.is_test_command(node.last_action["command"]):
             elif "[TEST]" in node.last_action["thought"] or ("[READ]" not in node.last_action["thought"] and self.is_test_command(node)): # TEMP: Since test command detection is not very robust, we can also use a heuristic based on the thought content to identify potential test commands for better reward adjustment.
                 cmd_type = "test"
             elif node.modifies_code:
@@ -958,11 +972,11 @@ EOF
         new_node.retries = retries
         new_node.parent = current_node
         
-        cache_node = self._find_node_from_cache(current_node.commit, new_node.last_action["command"])
+        cache_node = self._find_node_from_cache(current_node.state_hash, new_node.last_action["command"])
         
         if cache_node:
-            instance_logger.debug(">> Cache hit for action: " + new_node.last_action["command"] + " at parent commit: " + current_node.commit)
-            cache_node = self._find_node_from_cache(current_node.commit, new_node.last_action["command"])
+        # if False:
+            instance_logger.debug(">> Cache hit for action: " + new_node.last_action["command"] + " at parent state: " + current_node.state_hash)
             new_node.observation = cache_node.observation
             new_node.raw_observation = cache_node.raw_observation
             new_node.modifies_code = cache_node.modifies_code
@@ -974,7 +988,10 @@ EOF
             new_node.is_terminating = cache_node.is_terminating
             new_node.invalid_termination = cache_node.invalid_termination
             new_node.is_timeout = cache_node.is_timeout
-            new_node.commit = cache_node.commit
+            if cache_node.modifies_code:
+                new_node.commit = cache_node.commit
+            else:
+                new_node.commit = current_node.commit
             new_node.read_files = cache_node.read_files
             new_node.is_system_response = cache_node.is_system_response
             new_node.cache_hit = cache_node.id
@@ -1003,12 +1020,14 @@ EOF
                         patch = "".join(lines[1:])
                         if current_node.commit == self._get_root_commit() or not patch.strip(): # After some modifications, final patch may still be empty. May be agent reverted the changes.
                             instance_logger.debug(">> Warning: Terminating action detected without any modifications.")
-                            new_node.observation = "Error: Submission detected without any modifications."
+                            new_node.observation = "Error: Submission detected without any modifications. Make sure to modify the code before submission."
                             new_node.raw_observation = output
                             new_node.is_system_response = True
                             new_node.is_terminating = False
                             new_node.invalid_termination = True
-                            new_node.last_action["command"] = None
+                            new_node.last_action["thought"] = new_node.last_action["thought"].replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
+                            new_node.last_action["command"] = new_node.last_action["command"].replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
+                            # new_node.last_action["command"] = None
                         else:    
                             new_node.observation = patch # 
                             new_node.raw_observation = output
@@ -1073,13 +1092,7 @@ EOF
                             {**test, "status": "ERROR"}
                             for test in current_node.test_status
                         ]
-                    # Rollback changes
-                    # run tests
-                    # test_result = self.env.execute("pytest --maxfail=1 --disable-warnings -q")
-                    # if test_result.get("returncode", 0) != 0:
-                    #     new_node.fails_tests = True
-                    #     print(">> pytest --maxfail=1 --disable-warnings -q")
-                    #     print(test_result.get("output", ""))
+
                     self.env.execute(f"git checkout {current_node.commit}") # Move back to previous commit after evaluation to avoid affecting other branches
                     
                 elif new_node.last_action["command"] is not None:
@@ -1104,6 +1117,8 @@ EOF
                 
                 if not new_node.invalid_termination and new_node.is_terminating != potential_termination:
                     instance_logger.debug(">> Warning: Invalid terminating action detected. Skipping this action...")
+                    instance_logger.debug(f"Action: {new_node.last_action['command']}")
+                    instance_logger.debug(f"Observation: {observation[:200]}{'...' if len(observation) > 200 else ''}")
                     time.sleep(2)  # To avoid rate limiting
                     return None     
             else:
@@ -1120,6 +1135,9 @@ EOF
                 new_node.test_status = current_node.test_status
                 new_node.state_hash = current_node.state_hash
 
+            if new_node.last_action["command"] is not None:
+                self.action_cache[f"{new_node.state_hash}_{new_node.last_action['command']}"] = new_node.id
+                    
         if self._is_repeat_action(new_node):
             instance_logger.debug(">> Warning: Repeat action detected.")
             # new_node.observation = "<warning>Repeat action detected. This action-observation already exists in the context. No information gain expected from this action.</warning>\n" + new_node.observation # TODO: Issue with caching
@@ -1136,7 +1154,7 @@ EOF
         self.USER_PROMPT = self.candidates[i % len(self.candidates)]["USER_PROMPT"]
         response, action, error, retries = self._generate_action()
         if error is None:
-            instance_logger.debug(f"Generated action #{i+1}: {action['action']}")
+            instance_logger.debug(f"Generated action #{i+1}: {action['action'][:200]}{'...' if len(action['action']) > 200 else ''}")
         else:
             instance_logger.debug(f"Generated action #{i+1}: <<Invalid Action>>")
         return self._action_to_node(response, action, error, self.tree_node, retries)
@@ -1163,10 +1181,11 @@ EOF
                     continue
 
                 nodes.append(new_node)
-                if not new_node.cache_hit:
-                    self.action_cache[f"{self.tree_node.state_hash}_{new_node.last_action['command']}"] = new_node.id
+                # if not new_node.cache_hit and new_node.last_action["command"] is not None:
+                #     self.action_cache[f"{self.tree_node.state_hash}_{new_node.last_action['command']}"] = new_node.id
+                    
                 futures.append((new_node, executor.submit(self._evaluate_node, new_node)))
-                time.sleep(2)
+                # time.sleep(1)
 
             if futures:
                 for new_node, future in tqdm(futures, total=len(futures), desc="Waiting for node scores"):
@@ -1177,21 +1196,6 @@ EOF
             self.n_modifications += 1
             
         return nodes
-    
-    def _repo_has_changes_with_main(self):
-        if self.tree_node.parent.commit == self._get_root_commit():
-            return False
-        output = self.env.execute(f"git diff {self._get_root_commit()}..{self.tree_node.parent.commit}")
-
-        diff_text = output.get("output", "").strip()
-
-        if not diff_text:
-            instance_logger.debug(f"No change between {self._get_root_commit()} and {self.tree_node.parent.commit}.")
-            raise Exception(">> No changes detected to stage to main branch.")
-        else:
-            # instance_logger.debug(">> Staging changes to main branch before submission...")
-            # instance_logger.debug(diff_text)
-            return True
 
     def _repo_has_new_commit(self):
         output = self.env.execute("git rev-parse HEAD")
@@ -1203,21 +1207,17 @@ EOF
  
     def _stage_to_main_branch(self):
         if self.mode == "evaluation":
-            # self._repo_has_changes_with_main()
-            response = self.env.execute(f"git checkout {self._get_root_commit()} && git restore --source {self.tree_node.parent.commit} .")
+            response = self.env.execute(f"git checkout {self._get_root_commit()} && git restore --source {self.tree_node.commit} .")
                     
             if response.get("returncode", 0) != 0:
                 instance_logger.debug(">> Warning: Failed to stage changes to main branch before submission.")
                 instance_logger.debug(f"Error details: {response}")
-                
-            # output = self.env.execute(f"git fsck --unreachable")
-            # instance_logger.debug(f">> Unreachable commits:\n{output.get('output', '')}")
-                
+
             # Check for repo changes
             if not self._repo_has_changes():
                 instance_logger.error(">> No changes detected to stage to main branch before submission.")
         
-        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self._get_root_commit()} && git restore --source {self.tree_node.parent.commit} .\n```")
+        self.add_message("system", f"THOUGHT: Preparing final output before submission.\n\n```bash\ngit checkout {self._get_root_commit()} && git restore --source {self.tree_node.commit} .\n```")
                      
     def step(self) -> dict:
         
@@ -1237,7 +1237,6 @@ EOF
         if self.tree_node.is_terminating:
             self._stage_to_main_branch()
             self.tree_node.is_submission = True
-            # self.tree_node.branch = self.tree_node.parent.branch
             self.tree_node.commit = self.tree_node.parent.commit
 
         if self.tree_node.last_action["extra"]:
@@ -1260,15 +1259,6 @@ EOF
         self.add_message("user", observation)
         self.tree_node.observation = observation
         self.tree_node.executed = True
-        # self.tree_node.branch = self.tree_node.parent.branch
-
-        # if self.mode == "evaluation":
-        #     if self.tree_node.modifies_code:
-        #         self.tree_node.commit, _ = self._commit_changes()
-        #         instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
-        #     else:
-        #         self.tree_node.commit = self._get_commit_hash() #  Can't we just keep the same commit if code isn't modified?
-        #         instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
 
         if self.tree_node.level == self.config.depth_limit:
             instance_logger.debug(f">> Reached max depth limit at node with action: {self.tree_node.last_action['command']}. Marking as leaf node.")
@@ -1312,24 +1302,10 @@ EOF
             r'(^|\s)(pytest|python\s+-m\s+pytest|python\s+-m\s+unittest|unittest|runtests)(\s|$)'
         )
         return bool(TEST_CMD.search(node.last_action["command"]))
-    
-    
-        
-    def _evaluate_nodes(self, node_list):
-        for new_node in tqdm(node_list, desc="Evaluating nodes"):
-            new_node.value = self._evaluate_node(new_node)
-                            
-    def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
-        self.n_actions += len(self.tree_node.children)
-        instance_logger.debug(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
-        for node in tree_nodes:
-            instance_logger.debug(f"- {node.last_action['command']}")
             
-        # self._evaluate_nodes(tree_nodes)
-        tree_nodes = action_processor.merge_nodes(tree_nodes)
-
+    def _print_candidates(self, nodes):
         reward_data = []
-        for new_node in tree_nodes:
+        for new_node in nodes:
             self.n_explored += 1
             if new_node.is_terminating:
                 self.n_submissions += 1
@@ -1354,6 +1330,15 @@ EOF
                     colalign=("left", "center", "center"),
                 )
             )
+                         
+    def _process_nodes(self, tree_nodes: List[str]) -> List[TreeSearchNode]:
+        self.n_actions += len(self.tree_node.children)
+        instance_logger.debug(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
+        for node in tree_nodes:
+            instance_logger.debug(f"- {node.last_action['command']}")
+            
+        tree_nodes = action_processor.merge_nodes(tree_nodes)
+        self._print_candidates(tree_nodes)
             
         return tree_nodes
     

@@ -1,33 +1,15 @@
-from pathlib import Path
-from platform import node
-import uuid
-
-from matplotlib.hatch import get_path
-from minisweagent.agents.default import AgentConfig, DefaultAgent, LimitsExceeded, NonTerminatingException, FormatError, TerminatingException, Submitted, ExecutionTimeoutError
+from minisweagent.agents.default import FormatError, Submitted
 from minisweagent.agents.tree_search_node import TreeSearchNode   
 from minisweagent.agents.reward_guided_agent import RewardGuidedAgentConfig, RewardGuidedAgent
-from minisweagent.agents.single_action_agent import NoActionFound
 import minisweagent.agents.action_processor as action_processor
 from minisweagent.agents.frontier import Frontier
-from minisweagent.agents.action_analyzer import is_terminating
-from minisweagent.agents.reward_model import RewardModel
 from typing import List, Any, Optional
-from tabulate import tabulate
-import time
-import subprocess
-import datetime
 import json
-import heapq
-import math
-from rank_bm25 import BM25Okapi
-import pickle
-import os
-import numpy as np
 from minisweagent.utils.log import instance_logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import litellm
-
+import json
 class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     """Maximum number of nodes to expand per step."""
     sub_thres: int = 3
@@ -36,10 +18,15 @@ class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     """Number of unique submissions after which to terminate."""
     itr_limit: int = 4
     top_k_tree_pruning: int = 4
+    reconcile: bool = True
+    augment_solutions: bool = True
+    defer_termination: bool = True
+    force_convergence: bool = True
+    summarize_system_template: str = ""
+    summarize_user_template: str = ""
+    voting_system_template: str = ""
+    voting_user_template: str = ""
     
-
-import json
-
 class TreeSearchAgent(RewardGuidedAgent):
     def __init__(self, 
                  *args,  
@@ -56,7 +43,7 @@ class TreeSearchAgent(RewardGuidedAgent):
 
         
     def _backtrack(self, target_node):
-        n_commit = self._estimate_commit(target_node)
+        n_commit = target_node.commit
         if n_commit != self.tree_node.commit:
             _type = "Backtracking" if self.tree_node.id != target_node.parent.id else "Forwarding"
             instance_logger.debug(f">> {_type} from [{self.tree_node.id}] to [{target_node.id}]")
@@ -82,84 +69,45 @@ class TreeSearchAgent(RewardGuidedAgent):
         
         curr_node.add_child(node)
         node.system_generated = True
+        # if not node.cache_hit:
+        #     self.action_cache[f"{curr_node.state_hash}_{node.last_action['command']}"] = node.id
         return node
     
     def _generate_terminating_nodes(self):
-        # if self.n_submissions >= self.config.sub_thres and len(self.terminating_nodes) >= self.config.u_sub_thres:
-        #     return # NEW: 
-        
+        if not self.config.augment_solutions:
+            return
         old_active_node = self.tree_node
         
-        edit_nodes = self._get_all_unique_edit_paths() # TODO: Should consider top 16 unique edit paths to limit combinatorial explosion. We can also experiment with different ways of selecting which paths to consider, like giving priority to paths with higher value or more recent paths. This is a hyperparameter that can be tuned based on the task and the size of the tree.
+        edit_nodes = self._get_all_unique_edit_paths() # [:4*self.config.top_k_tree_pruning] # TODO: Should consider top 16 unique edit paths to limit combinatorial explosion. We can also experiment with different ways of selecting which paths to consider, like giving priority to paths with higher value or more recent paths. This is a hyperparameter that can be tuned based on the task and the size of the tree.
         if len(edit_nodes) > 0:
             instance_logger.debug(f">> Generating terminating nodes for {len(edit_nodes)} unique edit paths.")
             
-        count = 0
         unevaluated_terms = []
         for node in edit_nodes:
-            if not node.executed:
-                if not node.modifies_code:
-                    if node.commit in self.terminating_nodes:
-                        continue # We already have a terminating node for this commit, so skip
-                    node.executed = True
-                    node.order = self.n_expanded + 1
-                    self._backtrack(node)
-                    self.tree_node = node
-                    term_node = self._make_terminating_action(node)
-                    if term_node.invalid_termination:
-                        instance_logger.debug(f">> Invalid terminating node [{term_node.id}] under node [{node.id}], skipping.")
-                        continue
-                    # term_node.value = term_node.merged_value = self._evaluate_node(term_node)
-                    unevaluated_terms.append(term_node)
-                    if self.terminating_nodes.get(node.commit) is None:
-                        self.terminating_nodes[node.commit] = []
-                    self.terminating_nodes[node.commit].append(term_node)
-                else:
-                    # Modified action not executed yet, so execute it to get the observation and value
-                    # Need to backtrack to the parent node to execute this node
-                    if node.commit in self.terminating_nodes:
-                        continue
-                    node.executed = True
-                    node.order = self.n_expanded + 1
-                    self._backtrack(node)
-                    self.tree_node = node
-                    
-                    # try:
-                    #     self.env.execute(node.last_action["command"])
-                    # except (TimeoutError, subprocess.TimeoutExpired) as e:
-                    #     instance_logger.warning(f"Execution of node [{node.id}] command timed out during terminating node generation: {e}") 
-                    # node.commit, _ = self._commit_changes()
-                    
-                    # instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
-                    
-                    term_node = self._make_terminating_action(node)
-                    if term_node.invalid_termination:
-                        instance_logger.debug(f">> Invalid terminating node [{term_node.id}] under node [{node.id}], skipping.")
-                        continue
-                    # term_node.value = term_node.merged_value = self._evaluate_node(term_node)
-                    unevaluated_terms.append(term_node)
-                    if self.terminating_nodes.get(node.commit) is None:
-                        self.terminating_nodes[node.commit] = []
-                    self.terminating_nodes[node.commit].append(term_node)
-            else:
-                if node.commit in self.terminating_nodes:
-                    continue # We already have a terminating node for this commit, so skip
-                self._backtrack(node)
-                self.tree_node = node
-                term_node = self._make_terminating_action(node)
-                if term_node.invalid_termination:
-                    instance_logger.debug(f">> Invalid terminating node [{term_node.id}] under node [{node.id}], skipping.")
-                    continue
-                # term_node.value = term_node.merged_value = self._evaluate_node(term_node)
-                unevaluated_terms.append(term_node)
-                if self.terminating_nodes.get(node.commit) is None:
-                    self.terminating_nodes[node.commit] = []
-                self.terminating_nodes[node.commit].append(term_node)
+            if self._get_term_key(node) in self.terminating_nodes:
+                continue # We already have a terminating node for this commit, so skip
+               
+            self._backtrack(node)
+            self.tree_node = node
+            term_node = self._make_terminating_action(node)
+            if term_node.invalid_termination:
+                instance_logger.debug(f">> Invalid terminating node [{term_node.id}] under node [{node.id}], skipping.")
+                continue
             
-            count += 1
-            # if count >= self.config.top_k_tree_pruning:
-            #     break # Only generate terminating nodes for top-k unique edit paths to limit combinatorial explosion
-                
+            if self.terminating_nodes.get(self._get_term_key(term_node)) is None:
+                self.terminating_nodes[self._get_term_key(term_node)] = []
+            
+            if not node.executed and len(unevaluated_terms) < 4*self.config.top_k_tree_pruning:
+                unevaluated_terms.append(term_node)
+            else:
+                term_node.value = term_node.merged_value = 0.0
+
+            if not node.executed:
+                node.executed = True
+                node.order = self.n_expanded + 1
+
+            self.terminating_nodes[self._get_term_key(term_node)].append(term_node)
+            
         # Evaluate all terminating nodes in parallel
         if len(unevaluated_terms) > 0:
             instance_logger.debug(f">> Evaluating {len(unevaluated_terms)} terminating nodes in parallel...")
@@ -177,11 +125,17 @@ class TreeSearchAgent(RewardGuidedAgent):
         self._backtrack(old_active_node)
         self.tree_node = old_active_node
         
-                    
+    def _get_state_key(self, node):
+        return node.commit
+        # return node.state_hash
+        
+    def _get_term_key(self, node):
+        return node.state_hash
+        
     def _get_best_terminating_node(self) -> Optional[TreeSearchNode]:
         self._generate_terminating_nodes() # Ensure we have generated terminating nodes for all current edit paths
     
-        for commit, t_nodes in self.terminating_nodes.items():
+        for state_hash, t_nodes in self.terminating_nodes.items():
             sorted_terms = sorted(
                 t_nodes,
                 key=lambda x: (
@@ -197,7 +151,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         terminating_nodes = [
             n
             for n in self.all_node_map.values() # OLD
-            if n.is_terminating and n.merged_value is not None and n.visible
+            if n.is_terminating and n.raw_value is not None and n.merged_value is not None and n.visible
         ]
         
         if not terminating_nodes:
@@ -207,54 +161,7 @@ class TreeSearchAgent(RewardGuidedAgent):
     
     # NEW:
     def _handle_max_steps(self):
-        # instance_logger.debug(f">> Checking for max steps... {self.n_expanded} / {self.config.step_limit}")
-        # if self.n_expanded + 1 < self.config.step_limit: # OLD
         return None
-        
-        self.node_map_itr[self.itr] = self.node_map
-        
-        instance_logger.debug(">> Max steps reached, selecting best terminating action...")
-        
-        best_node = self._get_best_terminating_node()
-        
-        if best_node is None:
-            candidates = self._get_topk_edit_paths(k=self.config.top_k_tree_pruning, to_execute=False) # <----
-                    
-            # NEW: We can generate a terminating node under all the paths with at least one edit action, evaluate those terminating nodes, and pick the best one among them.
-            if len(candidates) > 0:
-                futures = []
-                max_workers = 4
-                term_nodes = []
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    for node in tqdm(candidates, desc="Generating nodes"):
-                        node.visits += 1
-                        term_node = self._make_terminating_action(node)
-                        term_nodes.append(term_node)
-                        instance_logger.debug(f">> Adding terminating node [{term_node.id}] under node [{node.id}]")
-                        futures.append((term_node, executor.submit(self._evaluate_node, term_node)))
-                    if futures:
-                        for node, future in tqdm(futures, total=len(futures), desc="Waiting for node scores"):
-                            node.merged_value = node.value = future.result()
-                
-                # Now select the best terminating node among the generated ones
-                best_node = self._get_best_terminating_node()
-                best_node = best_node.parent # We want to execute the parent node which is the original candidate node. The terminating node will be executed implicitly after that.
-            else:
-                raise NoActionFound("Can't make any modifications within the step limit.")
-                candidates = [
-                    n for n in self.node_map.values()
-                    if not n.executed
-                    and not n.is_terminating
-                    and n.visible
-                    and n.merged_value is not None
-                ]
-                best_node = max(candidates, key=lambda x: x.merged_value, default=None) # Fallback to max reward node
-                print(f">> No write actions found, fallback to node with highest merged value [{best_node.id}] with merged value {best_node.merged_value}")
-                term_node = self._make_terminating_action(best_node)
-                best_node.visits += 1
-                print(f">> Adding terminating node [{term_node.id}] under node [{best_node.id}]")
-        
-        return best_node
 
 
     def _get_path(self, node):
@@ -321,8 +228,7 @@ class TreeSearchAgent(RewardGuidedAgent):
     def _merge_nodes(self, node_A, node_B):            
         self.SYSTEM_PROMPT = self.candidates[0]["SYSTEM_PROMPT"]
         self.USER_PROMPT = self.candidates[0]["USER_PROMPT"]
-        node_A.commit = node_A.parent.commit
-        node_B.commit = node_B.parent.commit
+
         node_A.executed = node_B.executed = True
         node_A.itr = node_B.itr = self.itr + 1
         node_A.order = node_B.order = self.n_expanded + 1
@@ -331,6 +237,8 @@ class TreeSearchAgent(RewardGuidedAgent):
         instance_logger.debug(f">> Merging nodes [{node_A.id}] and [{node_B.id}] with shared path length {self._count_shared_path_length(node_A, node_B)} and max divergence path length {self._get_max_divergence_path_length(node_A, node_B)}")
         
         merged_node = self._action_to_node(response, action, error, node_A, retries)
+        # if not merged_node.cache_hit:
+        #     self.action_cache[f"{merged_node.state_hash}_{merged_node.last_action['command']}"] = merged_node.id
         return  merged_node # A is parent, since it has higher value
 
     def linearize_path(self, path):
@@ -367,7 +275,7 @@ class TreeSearchAgent(RewardGuidedAgent):
     
     def _stringify_trajectory(self, trajectory):
         return "\n\n".join(
-            [f"Action:\n{step['action']}\n\nObservation:\n{step['observation']}" for step in trajectory]
+            [f"Action:\n{step['action']}\n\nObservation:\n{self.reward_model.format_observation(step['observation'])}" for step in trajectory]
         )
     
     def _summarize_solution(self, node):
@@ -378,39 +286,18 @@ class TreeSearchAgent(RewardGuidedAgent):
         trajectory = self._get_trajectory(node)
         summary = None
         for i in range(len(trajectory)):
+            # Build candidate solution block
+            candidate_block = ("(prior steps are truncated)\n\n" if i > 0 else "") + self._stringify_trajectory(trajectory[i:])
+
+            system_content = self.render_template(self.config.summarize_system_template)
+            user_content = self.render_template(
+                self.config.summarize_user_template,
+                candidate_solution=candidate_block,
+            )
+
             messages = [
-                {
-                "role": "system",
-                "content": """
-You are summarizing a candidate SWE-bench solution trajectory.
-
-Your goal is to produce a concise technical summary that helps another model compare competing solutions.
-
-Focus on:
-- Root cause identified
-- Files/modules modified
-- Main fix strategy
-- Important implementation details
-- Edge cases handled
-- Potential risks or weaknesses
-- Final outcome
-
-Be concise but information dense.
-Do NOT speculate beyond the trajectory.
-"""
-                },
-                {
-                    "role": "user",
-                    "content": f"""
-<pr_description>
-{self.task}
-</pr_description>
-
-<candidate_solution>
-{"(prior steps are truncated)\n\n" if i>0 else "" + self._stringify_trajectory(trajectory[i:])}
-</candidate_solution>
-"""
-                }
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content},
             ]
 
             try:
@@ -420,7 +307,8 @@ Do NOT speculate beyond the trajectory.
                 # instance_logger.debug(f"Summary:\n{summary[:500]}...")
                 break
             except (litellm.exceptions.ContextWindowExceededError, litellm.exceptions.BadRequestError) as e:
-                instance_logger.debug(f">> Failed to summarize solution: {e}. Retrying...")
+                instance_logger.debug(f">> #{i} Failed to summarize solution: {e}. Retrying...")
+                instance_logger.debug(f">> Candidate block length: {len(candidate_block)}, Trajectory length: {len(trajectory)-i}")
                 
         if summary is None:
             raise Exception("Failed to generate summary for solution due to context window limitations.")
@@ -432,63 +320,17 @@ Do NOT speculate beyond the trajectory.
         solution_A = self._summarize_solution(node_A)
         solution_B = self._summarize_solution(node_B)
 
-        messages = []
+        system_content = self.render_template(self.config.voting_system_template)
+        user_content = self.render_template(
+            self.config.voting_user_template,
+            solution_1=solution_A,
+            solution_2=solution_B,
+        )
 
-        messages.append({
-        "role": "system",
-        "content": """
-You are an expert software engineer evaluating candidate fixes for a SWE-bench task.
-
-Your task is to determine which proposed solution is MORE LIKELY to correctly solve the issue described in the PR/task description.
-
-Evaluation criteria:
-- Correctness
-- Completeness
-- Edge case handling
-- Regression risk
-- Alignment with the intended fix
-- Whether the patch addresses the root cause
-
-You must choose exactly ONE solution:
-- 1
-- 2
-"""
-    })
-
-        messages.append({
-            "role": "user",
-            "content": f"""
-<pr_description>
-{self.task}
-</pr_description>
-
-<solution_1>
-{solution_A}
-</solution_1>
-
-<solution_2>
-{solution_B}
-</solution_2>
-
-Analyze both solutions carefully and explain your reasoning.
-
-At the very end of your response, output the verdict in EXACTLY this format:
-
-```json
-{{
-    "verdict": 1
-}}
-```
-
-or
-
-```json
-{{
-    "verdict": 2
-}}
-```
-"""
-        })
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
 
         return messages
     
@@ -584,6 +426,7 @@ or
         
         candidates = sorted_nodes[:2*self.config.top_k_tree_pruning]  # 4*
         candidates = [(n, i) for i, n in enumerate(candidates)]
+        
         # Generate summary in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
             future_to_node = {executor.submit(self._summarize_solution, n[0]): n for n in candidates}
@@ -598,10 +441,6 @@ or
         round = 1
         while len(candidates) > 1:
             new_candidates = []
-            # if len(candidates) % 2 == 1:
-            #     new_candidates.append(candidates[0]) # If odd number of candidates, give a bye to the best candidate (which is the first one in the sorted list)
-            #     pairs = self._make_pairs_elite(candidates[1:])
-            # else:
             pairs = self._make_pairs_elite(candidates)
 
             vote_pairs = [p for p in pairs if p[1] is not None]
@@ -621,12 +460,74 @@ or
 
             for p in pairs:
                 if p[1] is None:
-                    # raise Exception("This should not happen since we are giving bye to the best candidate when there is an odd number of candidates.")
+                    new_candidates.append(p[0])
+
+            # sort by index to preserve original order as much as possible
+            self.rtv.append({
+                "round": round,
+                "candidates": [c[0].id for c in candidates],
+                "pairs": [(p[0][0].id, p[1][0].id if p[1] is not None else None) for p in pairs],
+                "winners": [c[0].id for c in new_candidates]
+            })
+            
+            instance_logger.debug(f">> Tournament Round {round}: {len(candidates)} candidates, {len(new_candidates)} winners")
+            new_candidates.sort(key=lambda x: x[1])
+            candidates = new_candidates
+            round += 1
+                
+        return candidates[0][0] if len(candidates) > 0 else None
+    
+    
+    def _recursive_tournament_voting_2(self, terminating_nodes):
+        if len(terminating_nodes) == 0:
+            return None
+        
+        sorted_nodes = sorted(
+            terminating_nodes,
+            key=lambda x: (
+                # x.merged_value, # OLD
+                0.8 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
+                # NEW: Give priority to AI generated nodes
+                x.get_path_value(0.85) # NEW: In case of tie
+            ),
+            reverse=True
+        )
+        
+        candidates = sorted_nodes[:2*self.config.top_k_tree_pruning]  # 4*
+        candidates = [(n, i) for i, n in enumerate(candidates)]
+        # candidates.reverse()
+        # recursive tournament voting
+        round = 1
+        while len(candidates) > 1:
+            new_candidates = []
+            pairs = self._make_pairs_elite(candidates)
+            # pairs = []
+            # for i in range(0, len(candidates), 2):
+            #     first = candidates[i]
+            #     second = candidates[i + 1] if i + 1 < len(candidates) else None
+            #     pairs.append((first, second))
+            
+            vote_pairs = [p for p in pairs if p[1] is not None]
+            with ThreadPoolExecutor(max_workers=min(4, max(1, len(vote_pairs)))) as executor:
+                future_to_pair = {
+                    executor.submit(self._get_best_solution_by_voting, p[0], p[1]): p
+                    for p in vote_pairs
+                }
+
+                for future in tqdm(
+                    as_completed(future_to_pair),
+                    total=len(future_to_pair),
+                    desc=f"Voting round {round}",
+                ):
+                    best = future.result()
+                    new_candidates.append(best)
+                    
+            for p in pairs:
+                if p[1] is None:
                     new_candidates.append(p[0])
                 # else:
-                #     best = self._get_best_solution_by_voting(p[0], p[1])
-                #     new_candidates.append(best)
-            
+                #     new_candidates.append(self._get_best_solution_by_voting(p[0], p[1]))
+
             # sort by index to preserve original order as much as possible
             self.rtv.append({
                 "round": round,
@@ -643,8 +544,8 @@ or
         return candidates[0][0] if len(candidates) > 0 else None
     
     def get_messages_two_nodes(self, node_A, node_B) -> List[dict]:
-        if node_A.commit != node_B.commit:
-            raise ValueError("Nodes must be on the same commit to merge their paths for messaging.")
+        if self._get_state_key(node_A) != self._get_state_key(node_B):
+            raise ValueError("Nodes must be on the same state to merge their paths for messaging.")
 
         path_a = self._get_path(node_A)
         path_b = self._get_path(node_B)
@@ -679,11 +580,13 @@ or
 From this point, two alternative action sequences were explored. 
 Your task is to reason across both and decide the best next action.
 
-=== Path A ===
+<path_1>
 {self.format_suffix(suffix_b)}
+</path_1>
 
-=== Path B ===
+<path_2>
 {self.format_suffix(suffix_a)}
+</path_2>
 
 Given both trajectories, what is the best next action to take from this point?
 """   
@@ -762,32 +665,26 @@ Given both trajectories, what is the best next action to take from this point?
         chunk_size = 2
         priority = 1
         for node in nodes:
-            if node.modifies_code: 
+            if not buckets.get(self._get_state_key(node)):
                 if bucket_count < k:
-                    buckets[str(uuid.uuid4())] = [(node, priority)]
-                    bucket_count += 1
-                    priority += 1
-            elif not buckets.get(node.parent.commit):
-                if bucket_count < k:
-                    buckets[node.parent.commit] = [(node, priority)]
+                    buckets[self._get_state_key(node)] = [(node, priority)]
                     bucket_count += 1
                     priority += 1
             # else: # NEW
-            elif len(buckets[node.parent.commit]) % chunk_size != 0: # OLD
-                buckets[node.parent.commit].append((node, priority))
+            elif len(buckets[self._get_state_key(node)]) % chunk_size != 0: # OLD
+                buckets[self._get_state_key(node)].append((node, priority))
                 priority += 1
             # OLD
             elif bucket_count < k:
-                buckets[node.parent.commit].append((node, priority))
+                buckets[self._get_state_key(node)].append((node, priority))
                 bucket_count += 1
                 priority += 1
-               
-               
+                  
         old_tree_node = self.tree_node
 
-         
         # Merge
         merged_nodes = []
+        unevaluated_merged_nodes = []
         for commit, bucket in buckets.items():
             if len(bucket) == 1:
                 merged_nodes.append(bucket[0])
@@ -805,38 +702,61 @@ Given both trajectories, what is the best next action to take from this point?
                         p[0][0].add_child(merged_node)
                         p[1][0].add_child(merged_node)
                         merged_node.merged = True
-                        merged_node.value = merged_node.merged_value = self._get_merge_node_score_2(p[0][0], p[1][0], merged_node) 
+                        # merged_node.value = merged_node.merged_value = self._get_merge_node_score_2(p[0][0], p[1][0], merged_node) 
                         merged_node.parent = self._get_merge_node_parent_1(p[0][0], p[1][0], merged_node)
                         merged_nodes.append((merged_node, p[0][1])) # Keep the highest priority among merged nodes
+                        unevaluated_merged_nodes.append((p[0][0], p[1][0], merged_node))
         
+        if len(unevaluated_merged_nodes) > 0:
+            instance_logger.debug(f">> Evaluating {len(unevaluated_merged_nodes)} merged nodes in parallel...")
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                future_to_node = {executor.submit(self._get_merge_node_score_2, p_1, p_2, node): node for p_1, p_2, node in unevaluated_merged_nodes}
+                for future in tqdm(as_completed(future_to_node), total=len(unevaluated_merged_nodes), desc="Evaluating merged nodes"):
+                    node = future_to_node[future]
+                    try:
+                        score = future.result()
+                        node.value = node.merged_value = score
+                    except Exception as e:
+                        instance_logger.error(f"Error evaluating merged node [{node.id}]: {e}")
+                        node.value = node.merged_value = float("-inf") # If evaluation fails, set value to -inf to avoid selecting this node
+
         self._backtrack(old_tree_node)
         self.tree_node = old_tree_node
         
         # Return only nodes (drop priority) but preserve ordering by priority
         return [x[0] for x in sorted(merged_nodes, key=lambda x: x[1])]
     
-    def _estimate_commit(self, node):
-        curr = node
-        while curr is not None:
-            if curr.commit is not None:
-                return curr.commit
-            elif curr.modifies_code: # Scenario: When a merged node modifies code. And we try to merge the merged node with another node.
-                return curr.id
-            curr = curr.parent
-        return None
-    
     def _slice_topk(self, nodes: List[TreeSearchNode], k: int) -> List[TreeSearchNode]:
-        # Future Work
-        # Instead of discarding nodes beyond top-k, we can gather information from them and merge nodes with same commit.
-        # Merging nodes means, let's say 3 nodes in the array have the same commit, then we will give the diverge path trajectory of all of them to agent, and ask it to consider all information and generate next step based on that. This way we can keep more information from the tree and also encourage exploration of different paths while still keeping the search focused on promising trajectories. This can be especially helpful in cases where the reward signal is sparse and we want to gather as much information as possible to guide the search.
-        # Since the array is sorted, we will traverse it from start to end, and keep adding nodes to the top-k array until we have k unique commits.
-        # We don't want to merge more than 2 nodes for now, so let's say there are 3 same commit at the start of an array, we will group the first 2, and treat 3rd as separate commit to encourage exploration of different paths. This is a hyperparameter that can be tuned based on the task and the size of the tree.
-        
-        merged_nodes = self._coalesce_dual_nodes(nodes, k) 
-        return merged_nodes[:k] # NEW:
+        if self.config.reconcile:
+            merged_nodes = self._coalesce_dual_nodes(nodes, k) 
+            return merged_nodes[:k] # NEW:
+        else:
+            return nodes[:k]
     
     def _get_all_unique_edit_paths(self, to_execute=False):
         # For each commit, find the best node
+        sorted_nodes = sorted(
+            (
+                n
+                for n in self.all_node_map.values()
+                if not n.is_terminating
+                and not n.executed # NEW
+                and n.visible
+                and n.merged_value is not None
+                and (not to_execute or n.level < self.config.depth_limit)
+                and (n.commit != self._get_root_commit())
+            ),
+            key=lambda n: n.get_path_value(0.85),
+            reverse=True
+        )
+        
+        # Now pick the best node for each unique commit, and return those nodes as unique edit paths
+        unique_paths = {}
+        for node in sorted_nodes:
+            # OLD
+            if self._get_term_key(node) not in unique_paths:
+                unique_paths[self._get_term_key(node)] = node
+        
         sorted_nodes = sorted(
             (
                 n
@@ -846,24 +766,20 @@ Given both trajectories, what is the best next action to take from this point?
                 and n.visible
                 and n.merged_value is not None
                 and (not to_execute or n.level < self.config.depth_limit)
-                and (n.parent.commit != self._get_root_commit() or n.modifies_code)
-                # and (n.commit is not None and n.commit not in self.terminating_nodes)
-                # and (n.commit is None and self._estimate_commit(n) not in self.terminating_nodes)
+                and (n.commit != self._get_root_commit())
             ),
             key=lambda n: n.get_path_value(0.85),
             reverse=True
         )
         
-        # Now pick the best node for each unique commit, and return those nodes as unique edit paths
-        unique_paths = {}
         for node in sorted_nodes:
-            commit = self._estimate_commit(node)
-            if commit not in unique_paths:
-                unique_paths[commit] = node
+            # OLD
+            if self._get_term_key(node) not in unique_paths:
+                unique_paths[self._get_term_key(node)] = node
                 
         return list(unique_paths.values())
         
-    def _prune_priority(self, node, max_depth):
+    def _prune_priority(self, node):
         # Early explored nodes should get some advantage
         return node.get_path_value(0.85) * 0.95 + (1 - (node.parent.order / self.config.step_limit)) * 0.05,
         
@@ -875,7 +791,6 @@ Given both trajectories, what is the best next action to take from this point?
         sorted_leaves = []
         
         while len(sorted_leaves) < k and curr_i > 0:
-            max_depth = max(n.level for n in self.node_map_itr[curr_i].values())
             candidates = sorted(
                 (
                     n
@@ -885,13 +800,30 @@ Given both trajectories, what is the best next action to take from this point?
                     and n.visible
                     and n.merged_value is not None
                     and (not to_execute or n.level < self.config.depth_limit)
-                    and  (n.parent.commit != self._get_root_commit() or n.modifies_code)
+                    and  (n.commit != self._get_root_commit())
+                    and n not in sorted_leaves
                 ),
-                key=lambda n: self._prune_priority(n, max_depth=max_depth),
+                key=lambda n: self._prune_priority(n),
                 reverse=True
             )
             sorted_leaves.extend(candidates)
             curr_i -= 1
+            
+        # NEW: 62
+        # sorted_leaves = sorted(
+        #      (
+        #             n
+        #             for n in self.all_node_map.values()
+        #             if not n.executed
+        #             and not n.is_terminating
+        #             and n.visible
+        #             and n.merged_value is not None
+        #             and (not to_execute or n.level < self.config.depth_limit)
+        #             and  (n.commit != self._get_root_commit())
+        #         ),
+        #         key=lambda n: self._prune_priority(n),
+        #         reverse=True
+        # )
 
         top_k = self._slice_topk(sorted_leaves, k)
         instance_logger.debug(f">> Found {len(top_k)} edit paths")
@@ -900,7 +832,6 @@ Given both trajectories, what is the best next action to take from this point?
               
     def _update_iteration(self):
         self.node_map_itr[self.itr] = self.node_map # NEW:
-        
         if self.n_submissions >= self.config.sub_thres and len(self.terminating_nodes) >= self.config.u_sub_thres:
         # if len(self.terminating_nodes) >= self.config.sub_thres: # Too harsh
             # TODO: Should we just terminate or consider terminating actions from here?
@@ -910,14 +841,43 @@ Given both trajectories, what is the best next action to take from this point?
             self.frontier.clear()
             self.node_map = {best_node.id: best_node}
             self._update_frontier([best_node]) # Update frontier with the best node to encourage exploitation of the best solution path
-        elif self.itr == self.config.itr_limit:
+        elif self.itr > self.config.itr_limit:
+            if self.mode == "evaluation":
+                best_node = self._get_best_terminating_node()
+                if best_node is None:
+                    raise Exception("ERROR: No solution found.")
+                    instance_logger.debug(">> Fallback: Generating empty submission.")
+                    best_parent = max(
+                        (
+                            n for n in self.node_map.values() 
+                            if n.merged_value is not None 
+                            and not n.is_terminating
+                            and n.visible 
+                            and not n.executed
+                            and n.level < self.config.depth_limit
+                        ),
+                        key=lambda n: self._prune_priority(n),
+                        default=None
+                    )
+                    best_parent.executed = True
+                    best_parent.order = self.n_expanded + 1
+                    self._backtrack(best_parent)
+                    self.tree_node = best_parent
+                    best_node = self._make_terminating_action(best_parent)
+                    best_node.value = best_node.merged_value = 0.0
+                    
+                instance_logger.debug(">> Iteration limit exceeded. Best terminating node: [{}] with merged value {}".format(best_node.id, best_node.merged_value))
+                self.frontier.clear()
+                self.node_map = {best_node.id: best_node} # Prune the rest of
+                self._update_frontier([best_node]) # Update frontier with the best node to encourage exploitation of the best solution path 
+        elif self.itr == self.config.itr_limit and self.config.force_convergence:
             if self.mode == "evaluation":
                 top_k = self._get_topk_edit_paths(k=1)
                 if len(top_k) > 0:
                     best_node = top_k[0]
                 else:
                     # If no nodes with edits are found, fallback to any promising node regardless of edits to at least have some path to follow.
-                    max_depth = max(n.level for n in self.node_map.values())
+                    # max_depth = max(n.level for n in self.node_map.values())
                     best_node = max(
                         (
                             n for n in self.node_map.values() 
@@ -927,7 +887,7 @@ Given both trajectories, what is the best next action to take from this point?
                             and not n.executed
                             and n.level < self.config.depth_limit
                         ),
-                        key=lambda n: self._prune_priority(n, max_depth=max_depth),
+                        key=lambda n: self._prune_priority(n),
                         default=None
                     )
                     
@@ -946,7 +906,7 @@ Given both trajectories, what is the best next action to take from this point?
                 # Update frontier with top-k non-terminating leaves [EXPLOITATION]
                 # Find max depth among all nodes
                 max_depth = max(n.level for n in self.node_map.values())
-                if self.itr + 1 < self.config.itr_limit:
+                if self.itr + 1 < self.config.itr_limit or not self.config.force_convergence:
                     sorted_leaves = sorted(
                         (
                             n
@@ -957,7 +917,7 @@ Given both trajectories, what is the best next action to take from this point?
                             and n.merged_value is not None
                             and n.level < self.config.depth_limit
                         ),
-                        key=lambda n: self._prune_priority(n, max_depth=max_depth), # TODO: On N-2 iteration, we may give 0.1 weight for being edit action
+                        key=lambda n: self._prune_priority(n), # TODO: On N-2 iteration, we may give 0.1 weight for being edit action
                         reverse=True,
                     )
                     top_k = self._slice_topk(sorted_leaves, k=self.config.top_k_tree_pruning) # Keep top-k
@@ -977,9 +937,9 @@ Given both trajectories, what is the best next action to take from this point?
                                 and n.visible
                                 and n.merged_value is not None
                                 and n.level < self.config.depth_limit
-                                and (n.parent.commit == self._get_root_commit() and not n.modifies_code)
+                                and (n.commit == self._get_root_commit())
                             ),
-                            key=lambda n: self._prune_priority(n, max_depth=max_depth),
+                            key=lambda n: self._prune_priority(n),
                             reverse=True,
                         )
                         top_k.extend(self._slice_topk(sorted_reads, k=self.config.top_k_tree_pruning - len(sorted_writes)))
@@ -991,11 +951,11 @@ Given both trajectories, what is the best next action to take from this point?
                 for n in top_k:
                     if n.is_terminating:
                         self.n_submissions += 1
-                        self.terminating_nodes[n.parent.commit] = self.terminating_nodes.get(n.parent.commit, []) + [n]
+                        self.terminating_nodes[self._get_term_key(n)] = self.terminating_nodes.get(self._get_term_key(n), []) + [n]
                         
                 # Keep top-k active nodes
                 self.node_map = {n.id: n for n in top_k}
-                instance_logger.debug(f">> Iteration {self.itr}: Updating frontier with top {len(top_k)} non-terminating leaves based on path value.")
+                instance_logger.debug(f">> Iteration {self.itr + 1}: Updating frontier with top {len(top_k)} non-terminating leaves based on path value.")
         self.itr += 1
 
     def _expand(self):
@@ -1004,29 +964,7 @@ Given both trajectories, what is the best next action to take from this point?
                 n for n in self.tree_node.children if not n.system_generated and n.merged_value is not None
             ]
             instance_logger.debug(f"# {len(tree_nodes)} new nodes generated at level {self.tree_node.level}:")
-            reward_data = []
-            for new_node in tree_nodes:
-                reward_data.append(
-                    [
-                        (
-                            (new_node.last_action["command"][:100] + "...")
-                            if new_node.last_action["command"] is not None and len(new_node.last_action["command"]) > 100
-                            else new_node.last_action["command"]
-                        ),
-                        f"{new_node.value:.6f}",
-                        f"{new_node.merged_value:.6f}",
-                    ]
-                )
-            
-            if len(reward_data) > 0:
-                instance_logger.debug(
-                    tabulate(
-                        reward_data,
-                        headers=["Action", "Reward", "Merged"],
-                        tablefmt="grid",
-                        colalign=("left", "center", "center"),
-                    )
-                )
+            self._print_candidates(tree_nodes)
             return 
         
         if self.tree_node.visits == 0:
@@ -1034,10 +972,10 @@ Given both trajectories, what is the best next action to take from this point?
             tree_nodes = self._update_tree(tree_nodes)
             for node in tree_nodes:
                 if node.is_terminating:
-                    if self.terminating_nodes.get(node.parent.commit) is None:
-                        self.terminating_nodes[node.parent.commit] = []
-                    self.terminating_nodes[node.parent.commit].append(node)
-                    
+                    if self.terminating_nodes.get(self._get_term_key(node)) is None:
+                        self.terminating_nodes[self._get_term_key(node)] = []
+                    self.terminating_nodes[self._get_term_key(node)].append(node)
+
     def _has_reached_finish_line(self):
         # Find the max node.order among all nodes in the tree (from self.tree_root). If self.n_expanded has reached that, then we have reached the finish line.
 
@@ -1054,6 +992,7 @@ Given both trajectories, what is the best next action to take from this point?
     def _get_best_terminating_node_from_checkpoint(self):
         terminating_nodes = []
         def _collect_terminating_nodes(node):
+            # if node.is_terminating and (node.visible or node.merged_value is not None):
             if node.is_terminating and node.visible:
                 terminating_nodes.append(node)
             for child in node.children:
@@ -1063,42 +1002,39 @@ Given both trajectories, what is the best next action to take from this point?
         terminating_nodes = _collect_terminating_nodes(self.tree_root)
         if len(terminating_nodes) == 0:
             return None
+
+        # count = 0
+        # for n in terminating_nodes:
+        #     if n.is_submission and n._pass:
+        #         raise Exception("SKIP")
+        #     if n._pass:
+        #         count += 1
+        # if count == 0:
+        #     raise Exception("SKIP")
         
+        unevaluated_terms = []
         for n in terminating_nodes:
             n.is_submission = False
             n.executed = False
-            
-        return self._recursive_tournament_voting(terminating_nodes)
+            if n.raw_value is None:
+                unevaluated_terms.append(n)
+            # n.solution_summary = None # TMP
         
-        for n in terminating_nodes:
-            # TEMP: Re-evaluate terminating nodes to fix value bug. We can remove this once the bug is fixed.
-            # If n has a sibling terminating node, evaluate both and merge
-            if n.merged_value > n.value:
-                # Find sibling terminating nodes
-                sibling_terminating_nodes = [
-                    s for s in n.parent.children 
-                    if s.is_terminating
-                ]
-                for s in sibling_terminating_nodes:
-                    s.value = self._evaluate_node(s)
-                action_processor.merge_nodes(sibling_terminating_nodes)  
-            else:
-                n.value = n.merged_value = self._evaluate_node(n)
-            n.is_submission = False
-
-        best_node = max(
-            terminating_nodes,
-            key=lambda x: (
-                # x.merged_value, # OLD
-                0.8 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
-                # NEW: Give priority to AI generated nodes
-                x.get_path_value(0.85) # NEW: In case of tie
-            ),
-            default=None
-        )
-
-        return best_node
         
+        if len(unevaluated_terms) > 0:
+            instance_logger.debug(f">> Evaluating {len(unevaluated_terms)} terminating nodes in parallel...")
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                future_to_node = {executor.submit(self._evaluate_node, node): node for node in unevaluated_terms}
+                for future in tqdm(as_completed(future_to_node), total=len(unevaluated_terms), desc="Evaluating terminating nodes"):
+                    node = future_to_node[future]
+                    try:
+                        score = future.result()
+                        node.value = node.merged_value = score
+                    except Exception as e:
+                        instance_logger.error(f"Error evaluating terminating node [{node.id}]: {e}")
+                        node.value = node.merged_value = float("-inf") # If evaluation fails, set value to -inf to avoid selecting this node
+                        
+        return self._recursive_tournament_voting_2(terminating_nodes)
 
         
     def _get_best_node_from_checkpoint(self):
@@ -1146,14 +1082,28 @@ Given both trajectories, what is the best next action to take from this point?
                     if len(candidates) == 0 or self.n_expanded + 1 >= self.config.step_limit: # Only terminating actions are left
                         # TODO: Expand other write paths if n_submissions < config.sub_thres. Since we have some budget left.
                         self.node_map_itr[self.itr] = self.node_map # NEW:
-                        candidates = [self._get_best_terminating_node()] # Get the best terminating node among all nodes in the current iteration. Generating new nodes won't help at this point, so we directly go for the best terminating node if there are no non-terminating nodes left to execute.
-                         
+                        best_node = self._get_best_terminating_node()
+                        if best_node:
+                            candidates = [best_node] # Get the best terminating node among all nodes in the current iteration. Generating new nodes won't help at this point, so we directly go for the best terminating node if there are no non-terminating nodes left to execute.
+                
+                elif not self.config.defer_termination and self.n_submissions >= self.config.sub_thres and len(self.terminating_nodes) >= self.config.u_sub_thres:
+                # if len(self.terminating_nodes) >= self.config.sub_thres: # Too harsh
+                    # TODO: Should we just terminate or consider terminating actions from here?
+                    # We are done exploring. Now check the tree if there is any terminating action. If multiple, choose the one with highest path value/reward. If none, choose the one with highest path value among all nodes and run sequentially from there until we reach a terminating node.   
+                    best_node = self._get_best_terminating_node()
+                    instance_logger.debug(">> Discovered enough solutions. Best terminating node: [{}] with merged value {}".format(best_node.id, best_node.merged_value))
+                    self.frontier.clear()
+                    self.node_map = {best_node.id: best_node}
+                    candidates = [best_node]
+                    
                 self._update_frontier(candidates)
                 
-            if ((self.itr == 1 and self.n_expanded >= 10) or self.n_expanded >= 10 + (self.itr-1) * 10) and self.itr <= self.config.itr_limit:
+            if self.n_expanded >= 10 + (self.itr-1) * 10 and self.itr <= self.config.itr_limit:
+                self._update_iteration()
+                
+            if self.itr > self.config.itr_limit and self.n_expanded + 1 >= 10 + (self.itr-2) * 10 + 10:
                 self._update_iteration()
 
-            
             while best_node is None:
                 if self.mode == "simulation":
                     best_node = self._get_best_node_from_checkpoint()
@@ -1178,6 +1128,7 @@ Given both trajectories, what is the best next action to take from this point?
 
         return best_node
     
+    
     def _act(self):
         if self.tree_node.is_terminating:
             self._stage_to_main_branch()
@@ -1188,36 +1139,22 @@ Given both trajectories, what is the best next action to take from this point?
             self.add_message("assistant", **{"content": self.tree_node.last_action["thought"], "extra": self.tree_node.last_action.get("extra", {})})
         else: # Action generated by System
             self.add_message("system", self.tree_node.last_action["thought"])
-        instance_logger.debug(f">> Executing selected action #{self.n_expanded + 1}: {self.tree_node.last_action['command']}")
+            
+        if self.tree_node.last_action["command"] is not None:
+            instance_logger.debug(f">> Executing selected action #{self.n_expanded + 1}: {self.tree_node.last_action['command'][:300]}{'...' if len(self.tree_node.last_action['command']) > 300 else ''}") # Log only the beginning of the command to avoid cluttering the logs
+        else:
+            instance_logger.debug(f">> Executing selected action #{self.n_expanded + 1}: {self.tree_node.last_action['command']}")
         self.tree_node.executed = True
 
     def _observe(self):
-        # if self.mode == "simulation" or self.tree_node.last_action["command"] is None or (not self.tree_node.is_terminating and not self.tree_node.modifies_code): # For read-only action, no need to re-execute
         observation = self.tree_node.observation
         if self.tree_node.is_terminating:
-            raise Submitted("".join(self.tree_node.observation))
-        # else: # For write action, need to change the environment and get new (which will be basically same as before) observation
-        #     output = self.get_observation(
-        #         {
-        #             "action": self.tree_node.last_action["command"]
-        #         }
-        #     )
-        #     observation = self.render_template(self.config.action_observation_template, output=output)
-            
+            raise Submitted("".join(observation))
+
         instance_logger.debug(f">> Observation: {observation[:200]}...") # Log only the beginning of the observation to avoid cluttering the logs
         self.add_message("user", observation)
-        self.tree_node.observation = observation
 
-        # if self.mode == "evaluation":
-        #     if self.tree_node.modifies_code:            
-        #         self.tree_node.commit, _ = self._commit_changes()
-        #         instance_logger.debug(f">> New commit created: {self.tree_node.commit}")
-                
-        #     else:
-        #         self.tree_node.commit = self._get_commit_hash()
-        #         instance_logger.debug(f">> No changes detected, staying on commit: {self.tree_node.commit}")
-    
-        
+
     def step(self) -> dict:
         if self.tree_node.is_terminating:
             self._create_pseudo_root()
@@ -1228,17 +1165,17 @@ Given both trajectories, what is the best next action to take from this point?
             self.tree_node.visits += 1
             self.tree_node.itr = self.itr
             self.tree_node.order = self.n_expanded
-            
-        self.tree_node = self._select()
-        self._act()
-        self._observe()
-        self.n_expanded += 1
         
         with open("debug_tree.json", "w", encoding="utf-8") as f:
             json.dump(self.tree_root.to_tree(), f, indent=4, ensure_ascii=False)
 
         with open("debug_nodes.json", "w", encoding="utf-8") as f:
             json.dump(self.tree_root.to_json(), f, indent=4, ensure_ascii=False)
+        
+        self.tree_node = self._select()
+        self._act() # Dummy for tree search - As already executed in the environment. But we need to call it to update the messages and logs.
+        self._observe() # Dummy for tree search - As already observed in the environment. But we need to call it to update the messages and logs.
+        self.n_expanded += 1
                 
         return self.tree_node.observation
 

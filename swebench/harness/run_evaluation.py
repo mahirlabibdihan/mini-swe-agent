@@ -78,6 +78,7 @@ def run_instance(
     timeout: int | None = None,
     rewrite_reports: bool = False,
     clean_start: bool = False,
+    redo: bool = False,
 ) -> dict:
     """
     Run a single instance with the given prediction.
@@ -116,7 +117,8 @@ def run_instance(
             "completed": True,
             "resolved": report[instance_id]["resolved"],
         }
-    if report_path.exists():
+        
+    if report_path.exists() and not redo:
         report = json.loads(report_path.read_text())
         return {
             "completed": True,
@@ -297,6 +299,7 @@ def run_instances(
     env_image_tag: str = "latest",
     rewrite_reports: bool = False,
     clean_start: bool = False,
+    redo: bool = False,
 ):
     """
     Run all instances for the given predictions in parallel.
@@ -357,6 +360,7 @@ def run_instances(
                 timeout,
                 rewrite_reports,
                 clean_start,
+                redo,
             )
         )
 
@@ -540,10 +544,10 @@ def main(
         predictions,
         run_id,
         rewrite_reports,
-        exclude_completed=False,
+        exclude_completed=False
     )
 
-    full_dataset = load_swebench_dataset(dataset_name, split, instance_ids)[:50]
+    full_dataset = load_swebench_dataset(dataset_name, split, instance_ids)
 
 
     if modal:
@@ -589,6 +593,7 @@ def main(
             env_image_tag=env_image_tag,
             rewrite_reports=rewrite_reports,
             clean_start=clean_start,
+            redo=redo,
         )
 
     # clean images + make final report

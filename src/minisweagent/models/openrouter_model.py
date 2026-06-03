@@ -84,8 +84,8 @@ class OpenRouterModel:
         }
 
         try:
-            with self._api_call_lock:
-                response = requests.post(self._api_url, headers=headers, data=json.dumps(payload), timeout=100)
+            
+            response = requests.post(self._api_url, headers=headers, data=json.dumps(payload), timeout=100)
             response.raise_for_status()
             response_json = response.json()
             choices = response_json.get("choices")
@@ -109,29 +109,31 @@ class OpenRouterModel:
     def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
         if self.config.set_cache_control:
             messages = set_cache_control(messages, mode=self.config.set_cache_control)
-        response = self._query([{"role": msg["role"], "content": msg["content"]} for msg in messages], **kwargs)
+            
+        with self._api_call_lock:
+            response = self._query([{"role": msg["role"], "content": msg["content"]} for msg in messages], **kwargs)
 
-        usage = response.get("usage", {})
-        cost = usage.get("cost", 0.0)
-        if cost <= 0.0 and self.config.cost_tracking != "ignore_errors":
-            raise RuntimeError(
-                f"No valid cost information available from OpenRouter API for model {self.config.model_name}: "
-                f"Usage {usage}, cost {cost}. Cost must be > 0.0. Set cost_tracking: 'ignore_errors' in your config file or "
-                "export MSWEA_COST_TRACKING='ignore_errors' to ignore cost tracking errors "
-                "(for example for free/local models), more information at https://klieret.short.gy/mini-local-models "
-                "for more details. Still stuck? Please open a github issue at https://github.com/SWE-agent/mini-swe-agent/issues/new/choose!"
-            )
+            usage = response.get("usage", {})
+            cost = usage.get("cost", 0.0)
+            if cost <= 0.0 and self.config.cost_tracking != "ignore_errors":
+                raise RuntimeError(
+                    f"No valid cost information available from OpenRouter API for model {self.config.model_name}: "
+                    f"Usage {usage}, cost {cost}. Cost must be > 0.0. Set cost_tracking: 'ignore_errors' in your config file or "
+                    "export MSWEA_COST_TRACKING='ignore_errors' to ignore cost tracking errors "
+                    "(for example for free/local models), more information at https://klieret.short.gy/mini-local-models "
+                    "for more details. Still stuck? Please open a github issue at https://github.com/SWE-agent/mini-swe-agent/issues/new/choose!"
+                )
 
-        self.n_calls += 1
-        self.cost += cost
-        self.input_tokens += usage.get("prompt_tokens", 0)
-        self.output_tokens += usage.get("completion_tokens", 0)
-        GLOBAL_MODEL_STATS.add(cost)
+            self.n_calls += 1
+            self.cost += cost
+            self.input_tokens += usage.get("prompt_tokens", 0)
+            self.output_tokens += usage.get("completion_tokens", 0)
+            GLOBAL_MODEL_STATS.add(cost)
 
-        choices = response.get("choices")
-        content = ""
-        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-            content = (choices[0].get("message") or {}).get("content") or ""
+            choices = response.get("choices")
+            content = ""
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                content = (choices[0].get("message") or {}).get("content") or ""
 
         return {
             "content": content,

@@ -27,7 +27,7 @@ class SingleActionAgentConfig(AgentConfig):
     
     context_compaction: bool = False
     """Whether to use context compaction to reduce message history length."""
-    
+    selection_level: str = "path" # "path" or "node"
 
 class SingleActionAgent(DefaultAgent):
     def __init__(self, 
@@ -185,7 +185,11 @@ class SingleActionAgent(DefaultAgent):
     def _add_actions_to_frontier(self, actions: List[TreeSearchNode]):
         for new_node in actions:
             # self.frontier.push((-new_node.merged_value, new_node.parent.order), new_node) 
-            self.frontier.push(-new_node.get_path_value(0.3, max_steps=4), new_node)
+            if self.config.selection_level == "path":
+                self.frontier.push(-new_node.get_path_value(0.3, max_steps=4), new_node)
+            else:
+                self.frontier.push(-new_node.merged_value, new_node)
+            
             # In case score ties, prioritize nodes discovered earlier in the search.
             
     def _select_action(self):

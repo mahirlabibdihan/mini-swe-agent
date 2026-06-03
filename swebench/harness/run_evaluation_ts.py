@@ -909,7 +909,7 @@ if __name__ == "__main__":
         "-t",
         "--timeout",
         type=int,
-        default=400,
+        default=500,
         help="Timeout (in seconds) for running tests for each instance",
     )
     parser.add_argument(
