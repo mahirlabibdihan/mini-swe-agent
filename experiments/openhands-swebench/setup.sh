@@ -20,4 +20,4 @@ poetry install --with dev,test,runtime,evaluation
 make setup-config
 cp "$SCRIPT_DIR/config.toml.example" config.toml
 
-echo "Setup complete. Export OPENROUTER_API_KEY, then run $SCRIPT_DIR/run.sh"
+echo "Setup complete. Create $SCRIPT_DIR/.env, then run $SCRIPT_DIR/run.sh"

@@ -31,13 +31,23 @@ From a Linux/WSL shell at the repository root:
 ```bash
 git submodule update --init --recursive
 bash experiments/openhands-swebench/setup.sh
-export OPENROUTER_API_KEY="sk-or-v1-..."
+cp experiments/openhands-swebench/.env.example \
+  experiments/openhands-swebench/.env
+# Edit .env and replace the placeholder with your OpenRouter key.
 bash experiments/openhands-swebench/run.sh
 ```
 
 The default run is deliberately a single Verified instance with one worker.
-The OpenRouter API key is read from `OPENROUTER_API_KEY` and is never written
-to the tracked configuration.
+The runner automatically loads `experiments/openhands-swebench/.env`. The real
+`.env` is ignored by Git, while `.env.example` is safe to commit. Its contents
+should be:
+
+```dotenv
+OPENROUTER_API_KEY=sk-or-v1-your-real-key
+```
+
+You can still override the file for a particular run with
+`ENV_FILE=/path/to/another.env`.
 
 Run a larger sample by overriding the environment variables:
 
