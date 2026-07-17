@@ -84,14 +84,40 @@ Run all 500 Verified instances by passing an empty evaluation limit:
 EVAL_LIMIT= NUM_WORKERS=4 bash experiments/openhands-swebench/run.sh
 ```
 
-OpenHands writes inference artifacts beneath
-`openhands/evaluation/evaluation_outputs/outputs/swe_bench/`. Re-running with
-the same settings resumes/skips completed instances according to the harness.
+OpenHands writes this experiment's inference artifacts beneath:
+
+```text
+openhands/evaluation/evaluation_outputs/outputs/
+  princeton-nlp__SWE-bench_Verified-test/
+    CodeActAgent/
+      gpt-5-mini_maxiter_50_N_0.59.0-no-hint-openrouter-gpt5-mini-50step-run_1/
+```
+
+The run directory contains `output.jsonl`, `metadata.json`, per-instance
+`infer_logs/`, and per-instance `llm_completions/`. Re-running with the same
+settings resumes/skips completed instances according to the harness.
 
 ## Evaluate patches
 
 Inference produces predictions; benchmark scoring is a separate, Docker-based
-step. Follow the pinned checkout's
-`evaluation/benchmarks/swe_bench/README.md` instructions for the generated
-output directory. Start with the one-instance smoke result before launching or
-scoring the full dataset.
+step. The experiment wrapper converts OpenHands output to SWE-bench prediction
+format, invokes the official SWE-bench harness, and prints the resolved rate:
+
+```bash
+# Automatically score the newest Verified output.jsonl:
+bash experiments/openhands-swebench/evaluate.sh
+
+# Or score an explicit inference output:
+bash experiments/openhands-swebench/evaluate.sh \
+  openhands/evaluation/evaluation_outputs/outputs/\
+princeton-nlp__SWE-bench_Verified-test/CodeActAgent/\
+gpt-5-mini_maxiter_50_N_v0.59.0-no-hint-openrouter-gpt5-mini-50step-run_1/\
+output.jsonl
+```
+
+The evaluator downloads official per-instance SWE-bench Docker images and can
+require substantial disk space. It writes `report.json`, `eval_outputs/`, and
+an updated `output.jsonl` beside the inference output. For a partial run,
+"resolve rate over submitted" is the sample score; "overall Verified accuracy"
+uses all 500 Verified tasks as the denominator. A full benchmark result should
+have 500 submitted instances.
