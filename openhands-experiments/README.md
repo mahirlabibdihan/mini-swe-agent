@@ -45,11 +45,11 @@ From a Linux/WSL shell at the repository root:
 
 ```bash
 git submodule update --init --recursive
-bash experiments/openhands-swebench/setup.sh
-cp experiments/openhands-swebench/.env.example \
-  experiments/openhands-swebench/.env
+bash openhands-experiments/setup.sh
+cp openhands-experiments/.env.example \
+  openhands-experiments/.env
 # Edit .env and replace the placeholder with your OpenRouter key.
-bash experiments/openhands-swebench/run.sh
+bash openhands-experiments/run.sh
 ```
 
 Do not skip `setup.sh`: it uses Poetry to install OpenHands and its evaluation
@@ -61,7 +61,7 @@ request sudo access for Chromium system packages. Browsing is disabled in this
 experiment, so those components are unnecessary.
 
 The default run is deliberately a single Verified instance with one worker.
-The runner automatically loads `experiments/openhands-swebench/.env`. The real
+The runner automatically loads `openhands-experiments/.env`. The real
 `.env` is ignored by Git, while `.env.example` is safe to commit. Its contents
 should be:
 
@@ -75,13 +75,13 @@ You can still override the file for a particular run with
 Run a larger sample by overriding the environment variables:
 
 ```bash
-EVAL_LIMIT=10 NUM_WORKERS=2 bash experiments/openhands-swebench/run.sh
+EVAL_LIMIT=10 NUM_WORKERS=2 bash openhands-experiments/run.sh
 ```
 
 Run all 500 Verified instances by passing an empty evaluation limit:
 
 ```bash
-EVAL_LIMIT= NUM_WORKERS=4 bash experiments/openhands-swebench/run.sh
+EVAL_LIMIT= NUM_WORKERS=4 bash openhands-experiments/run.sh
 ```
 
 OpenHands writes this experiment's inference artifacts beneath:
@@ -105,10 +105,10 @@ format, invokes the official SWE-bench harness, and prints the resolved rate:
 
 ```bash
 # Automatically score the newest Verified output.jsonl:
-bash experiments/openhands-swebench/evaluate.sh
+bash openhands-experiments/evaluate.sh
 
 # Or score an explicit inference output:
-bash experiments/openhands-swebench/evaluate.sh \
+bash openhands-experiments/evaluate.sh \
   openhands/evaluation/evaluation_outputs/outputs/\
 princeton-nlp__SWE-bench_Verified-test/CodeActAgent/\
 gpt-5-mini_maxiter_50_N_v0.59.0-no-hint-openrouter-gpt5-mini-50step-run_1/\
