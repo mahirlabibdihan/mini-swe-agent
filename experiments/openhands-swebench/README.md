@@ -17,12 +17,27 @@ The fixed experiment settings are:
 ## Prerequisites
 
 Run this on Linux, or on Windows using WSL 2 and Docker Desktop configured for
-Linux containers. You also need Git, GNU Make, Python, Node.js, Poetry, and a
-funded OpenRouter account. A full 500-instance run can consume substantial API
+Linux containers. You also need Git, Python 3.12, Poetry, and a funded
+OpenRouter account. A full 500-instance run can consume substantial API
 credits, disk space, and time.
 
 This machine did not have WSL, Docker, or Poetry when this setup was created, so
 dependency installation and a live smoke run could not be completed here.
+
+OpenHands 0.59 requires Python 3.12 and Poetry 1.8 or newer; its project pins
+Poetry `^2.1.2`. Poetry creates the isolated Python environment used by the
+evaluation runner. Docker is still used separately for SWE-bench task
+containers.
+
+Install the pinned Poetry version with `pipx`:
+
+```bash
+python3 -m pip install --user pipx
+python3 -m pipx ensurepath
+# Start a new shell after ensurepath, then:
+pipx install poetry==2.1.2
+poetry --version
+```
 
 ## Setup
 
@@ -36,6 +51,14 @@ cp experiments/openhands-swebench/.env.example \
 # Edit .env and replace the placeholder with your OpenRouter key.
 bash experiments/openhands-swebench/run.sh
 ```
+
+Do not skip `setup.sh`: it uses Poetry to install OpenHands and its evaluation
+dependency group before inference starts.
+
+The setup intentionally does not run OpenHands' full `make build`. That target
+installs the web frontend and uses Playwright's `--with-deps` option, which can
+request sudo access for Chromium system packages. Browsing is disabled in this
+experiment, so those components are unnecessary.
 
 The default run is deliberately a single Verified instance with one worker.
 The runner automatically loads `experiments/openhands-swebench/.env`. The real

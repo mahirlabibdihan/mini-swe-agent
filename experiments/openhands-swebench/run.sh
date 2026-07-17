@@ -31,6 +31,16 @@ if ! command -v docker >/dev/null || ! docker info >/dev/null 2>&1; then
   exit 2
 fi
 
+if ! command -v poetry >/dev/null 2>&1; then
+  echo "Poetry is not installed. Install Poetry 2.1.2, then run setup.sh." >&2
+  exit 2
+fi
+
+if [[ ! -d "$OPENHANDS_DIR/.venv" ]] && ! poetry -C "$OPENHANDS_DIR" env info --path >/dev/null 2>&1; then
+  echo "The OpenHands Poetry environment is missing. Run setup.sh first." >&2
+  exit 2
+fi
+
 cp "$SCRIPT_DIR/config.toml.example" "$OPENHANDS_DIR/config.toml"
 cd "$OPENHANDS_DIR"
 

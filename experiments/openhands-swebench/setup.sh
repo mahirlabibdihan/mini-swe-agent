@@ -15,9 +15,24 @@ if ! command -v docker >/dev/null || ! docker info >/dev/null 2>&1; then
   exit 2
 fi
 
-make build
+if ! command -v poetry >/dev/null 2>&1; then
+  echo "Poetry 2.1.2 is required." >&2
+  exit 2
+fi
+
+if ! command -v python3.12 >/dev/null 2>&1; then
+  echo "Python 3.12 is required." >&2
+  exit 2
+fi
+
+# The full OpenHands `make build` also installs the web frontend, Playwright,
+# Chromium system dependencies, and Git hooks. SWE-bench inference needs only
+# the Python runtime and evaluation dependency groups. Skipping those optional
+# builds avoids Playwright's sudo/apt prompt on shared servers.
+export INSTALL_PLAYWRIGHT=false
+export SKIP_VSCODE_BUILD=true
+poetry env use python3.12
 poetry install --with dev,test,runtime,evaluation
-make setup-config
 cp "$SCRIPT_DIR/config.toml.example" config.toml
 
 echo "Setup complete. Create $SCRIPT_DIR/.env, then run $SCRIPT_DIR/run.sh"
