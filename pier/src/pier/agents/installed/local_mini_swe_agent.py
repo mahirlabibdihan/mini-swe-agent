@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import base64
-import hashlib
-import io
 import shlex
-import tarfile
 from pathlib import Path
 
 from pier.agents.installed.base import with_prompt_template
@@ -18,52 +15,19 @@ from pier.models.agent.network import NetworkAllowlist
 from pier.models.trial.paths import EnvironmentPaths
 
 
-LOCAL_REPOSITORY_ROOT = Path(__file__).resolve().parents[5]
-
-
-def _local_source_archive() -> bytes:
-    """Archive the local agent source without outputs, tasks, or Git metadata."""
-    buffer = io.BytesIO()
-
-    def exclude_generated(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-        parts = Path(info.name).parts
-        if "__pycache__" in parts or info.name.endswith((".pyc", ".pyo")):
-            return None
-        return info
-
-    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-        for filename in ("pyproject.toml", "README.md", "LICENSE.md"):
-            archive.add(
-                LOCAL_REPOSITORY_ROOT / filename,
-                arcname=filename,
-                filter=exclude_generated,
-            )
-        archive.add(
-            LOCAL_REPOSITORY_ROOT / "src",
-            arcname="src",
-            filter=exclude_generated,
-        )
-    return buffer.getvalue()
+REPOSITORY = "https://github.com/mahirlabibdihan/mini-swe-agent.git"
 
 
 class ForkMiniSweAgent(MiniSweAgent):
-    """Common installation and OpenRouter behavior for the local fork."""
+    """Common installation and OpenRouter behavior for the public fork."""
 
     def install_spec(self) -> AgentInstallSpec:
         spec = super().install_spec()
         spec.agent_name = self.name()
-        source_archive = _local_source_archive()
-        encoded = base64.b64encode(source_archive).decode()
-        unpack = (
-            "mkdir -p /tmp/local-mini-swe-agent && "
-            f"printf %s {shlex.quote(encoded)} | base64 -d | "
-            "tar -xz -C /tmp/local-mini-swe-agent && "
-        )
-        replacement = f"{unpack}uv tool install /tmp/local-mini-swe-agent"
+        replacement = f"uv tool install 'git+{REPOSITORY}'"
         for step in spec.steps:
             step.run = step.run.replace("uv tool install mini-swe-agent", replacement)
-        digest = hashlib.sha256(source_archive).hexdigest()[:16]
-        spec.cache_key = f"{self.name()}-local-{digest}"
+        spec.cache_key = f"{self.name()}-public-main"
         return spec
 
     def network_allowlist(self) -> NetworkAllowlist:
@@ -72,6 +36,7 @@ class ForkMiniSweAgent(MiniSweAgent):
             domains=parent.domains
             + [
                 "openrouter.ai",
+                "github.com",
                 "raw.githubusercontent.com",
                 "astral.sh",
                 "pypi.org",

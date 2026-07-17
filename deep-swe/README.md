@@ -14,9 +14,11 @@ patch, and runs the held-out verifier.
   reward model currently uses `http://10.141.10.34:3000/v1`; that endpoint
   must be reachable from the task container, or change the reward-model config.
 
-The patched Pier archives the local `../src` tree plus the package metadata and
-installs that archive inside every task container. It does not clone GitHub,
-and it includes local uncommitted source changes present when the job starts.
+The patched Pier installs the latest `main` branch from the public
+`mahirlabibdihan/mini-swe-agent` repository inside every task container.
+Push local changes before starting an experiment if the container should use
+them. Add `--force-build` after pushing a newer version so Docker does not
+reuse an agent layer built from an older `main` revision.
 
 ## Original/base mini-swe-agent
 
