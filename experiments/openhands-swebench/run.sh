@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 OPENHANDS_DIR="${OPENHANDS_DIR:-$WORKSPACE_ROOT/openhands}"
 EVAL_LIMIT="${EVAL_LIMIT-1}"
 NUM_WORKERS="${NUM_WORKERS:-1}"
