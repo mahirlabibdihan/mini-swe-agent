@@ -1,4 +1,4 @@
-# Running the tree-search agent on DeepSWE
+# Running this mini-swe-agent fork on DeepSWE
 
 DeepSWE uses Harbor tasks and program-based verifiers, not Hugging Face
 SWE-bench rows. Consequently `mini-extra swebench-ts` is not the correct
@@ -8,14 +8,15 @@ patch, and runs the held-out verifier.
 ## Prerequisites
 
 - Linux Docker containers (Docker Desktop with Linux containers is fine).
-- Python 3.11+ and `uv`.
-- Pier 0.3.0 or newer: `uv tool install datacurve-pier`.
+- Python 3.12+ and `uv`.
+- Use the patched Pier checkout in `../pier`, not the globally installed Pier.
 - API variables required by `config/extra/swebench_ts.yaml`. The checked-in
   reward model currently uses `http://10.141.10.34:3000/v1`; that endpoint
   must be reachable from the task container, or change the reward-model config.
 
-The custom Pier adapter installs this fork at the pinned `REVISION` in
-`pier_agent.py`. Update that constant after pushing future agent changes.
+The patched Pier installs this fork at the pinned `REVISION` in
+`../pier/src/pier/agents/installed/local_mini_swe_agent.py`. Update that
+constant after pushing future agent changes.
 
 ## Original/base mini-swe-agent
 
@@ -26,14 +27,14 @@ mini-extra swebench --subset verified --split test \
   --output output/verified.test.base/deepseek__deepseek-v4-flash/
 ```
 
-For DeepSWE, use the custom adapter that installs this repository rather than
-Pier's built-in mini-swe-agent package:
+Run the patched Pier source with `uv --project`:
 
 ```bash
 # Run from mini-swe-agent/deep-swe
-pier run -p tasks \
-  --agent pier_agent:LocalMiniSweAgent \
-  --model deepseek/deepseek-v4-flash
+uv run --project ../pier pier run -p tasks \
+  --agent local-mini-swe-agent \
+  --model openrouter/openai/gpt-5-mini \
+  --env-file .env
 ```
 
 Pier creates its own job/trial output tree, so there is no SWE-bench-style
@@ -41,27 +42,26 @@ Pier creates its own job/trial output tree, so there is no SWE-bench-style
 `pier run --help` for the output/job-name option exposed by your installed Pier
 version if you want a fixed experiment directory name.
 
-Before spending on the complete benchmark, test the base agent on one task:
+Test the base agent on one task:
 
 ```bash
-pier run -p tasks/igel-persist-feature-schema \
-  --agent pier_agent:LocalMiniSweAgent \
-  --model deepseek/deepseek-v4-flash
+uv run --project ../pier pier run -p tasks/igel-persist-feature-schema \
+  --agent local-mini-swe-agent \
+  --model openrouter/openai/gpt-5-mini \
+  --env-file .env
 ```
 
 Or use a reproducible ten-task base-agent subset:
 
 ```bash
-pier run -p tasks \
-  --agent pier_agent:LocalMiniSweAgent \
-  --model deepseek/deepseek-v4-flash \
-  --n-tasks 10 --sample-seed 0
+uv run --project ../pier pier run -p tasks \
+  --agent local-mini-swe-agent \
+  --model openrouter/openai/gpt-5-mini \
+  --env-file .env --n-tasks 10 --sample-seed 0
 ```
 
-`LocalMiniSweAgent` runs the normal/base `mini` entry point, but installs it
-from `REPOSITORY` at the exact `REVISION` declared in `pier_agent.py`. It does
-not run the tree-search class. Set `OPENROUTER_API_KEY` before running these
-commands.
+`local-mini-swe-agent` runs the normal/base `mini` entry point from this fork.
+It does not run the tree-search class. Put `OPENROUTER_API_KEY` in `.env`.
 
 ## This fork's tree-search agent
 
@@ -69,20 +69,20 @@ Run these commands from this `deep-swe` directory:
 
 ```bash
 # One task
-pier run -p tasks/igel-persist-feature-schema \
-  --agent pier_agent:TreeSearchMiniSweAgent \
-  --model deepseek/deepseek-v4-flash
+uv run --project ../pier pier run -p tasks/igel-persist-feature-schema \
+  --agent tree-search-mini-swe-agent \
+  --model openrouter/openai/gpt-5-mini --env-file .env
 
 # Deterministic smoke subset
-pier run -p tasks \
-  --agent pier_agent:TreeSearchMiniSweAgent \
-  --model deepseek/deepseek-v4-flash \
-  --n-tasks 10 --sample-seed 0
+uv run --project ../pier pier run -p tasks \
+  --agent tree-search-mini-swe-agent \
+  --model openrouter/openai/gpt-5-mini \
+  --env-file .env --n-tasks 10 --sample-seed 0
 
 # All 113 tasks
-pier run -p tasks \
-  --agent pier_agent:TreeSearchMiniSweAgent \
-  --model deepseek/deepseek-v4-flash
+uv run --project ../pier pier run -p tasks \
+  --agent tree-search-mini-swe-agent \
+  --model openrouter/openai/gpt-5-mini --env-file .env
 ```
 
 Use `--env modal` for parallel Modal sandboxes. Run `pier run --help` for the
