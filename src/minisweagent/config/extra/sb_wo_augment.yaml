@@ -268,10 +268,11 @@ agent:
   top_k_tree_pruning: 4  # Top-k branches to keep during tree pruning phases
   reconcile: true
   selection_level: "path" # "path" or "node"
-  augment_solutions: falsesb
+  augment_solutions: false
   shape_reward: true
   defer_termination: true
   force_convergence: true
+  reward_type: "simple"
   summarize_system_template: |
     You are summarizing a candidate SWE-bench solution trajectory.
 
@@ -352,8 +353,8 @@ environment:
     LESS: -R
     PIP_PROGRESS_BAR: 'off'
     TQDM_DISABLE: '1'
-  environment_class: docker
-  # checkpoint: "output/verified.test.59/openai__gpt-5-mini/"
+  environment_class: dummy
+  checkpoint: "output/verified.test.wo_augment_3/openai__gpt-5-mini/"
 
 model:
   # model_name: "qwen/qwen3.5-flash-02-23"

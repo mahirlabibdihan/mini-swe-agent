@@ -268,11 +268,12 @@ agent:
   top_k_tree_pruning: 4  # Top-k branches to keep during tree pruning phases
   reconcile: false
   selection_level: "path" # "path" or "node"
-  augment_solutions: true
-  shape_reward: true
-  defer_termination: true
+  augment_solutions: false
+  shape_reward: false
+  defer_termination: false
   force_convergence: true
   reward_type: "simple"
+  solution_selector: "reward"
   summarize_system_template: |
     You are summarizing a candidate SWE-bench solution trajectory.
 

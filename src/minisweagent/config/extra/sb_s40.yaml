@@ -252,9 +252,9 @@ agent:
     </output_tail>
     {%- endif %}
     Please try another command and make sure to avoid those requiring interactive input.
-  step_limit: 50
+  step_limit: 40
   cost_limit: 3.
-  depth_limit: 30
+  depth_limit: 25
   branching_factor: 2
   max_expansion: 5
   # frontier_budget: 4
@@ -264,9 +264,9 @@ agent:
   max_history: 16
   sub_thres: 2
   u_sub_thres: 1 # Unique submission threshold
-  itr_limit: 4
+  itr_limit: 3
   top_k_tree_pruning: 4  # Top-k branches to keep during tree pruning phases
-  reconcile: false
+  reconcile: true
   selection_level: "path" # "path" or "node"
   augment_solutions: true
   shape_reward: true
@@ -354,7 +354,7 @@ environment:
     PIP_PROGRESS_BAR: 'off'
     TQDM_DISABLE: '1'
   environment_class: docker
-  # checkpoint: "output/verified.test.wo_reconcile/openai__gpt-5-mini/"
+  # checkpoint: "output/verified.test.63/openai__gpt-5-mini/"
 
 model:
   # model_name: "qwen/qwen3.5-flash-02-23"
@@ -380,10 +380,10 @@ reward_model:
   model_name: "hosted_vllm/Qwen/Qwen2.5-7B-Instruct"
   # model_name: "hosted_vllm/Qwen/Qwen3.5-4B"
   # model_kwargs:
-  #   drop_params: true
-    # temperature: 0.7
+  # drop_params: true
+  # temperature: 0.7
   model_kwargs:
-    api_base: "http://10.141.10.34:3000/v1"
+    api_base: "http://10.141.10.34:5000/v1"
     # enable_thinking: False
   # use_combined_scoring: true   # (default) Single LLM call with chain of thought for all 3 scores (3x faster, cheaper)
   use_combined_scoring: false  # Legacy mode: 3 separate LLM calls (slower, more expensive)

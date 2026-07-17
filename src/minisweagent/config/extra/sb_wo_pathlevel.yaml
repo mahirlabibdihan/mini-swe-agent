@@ -272,6 +272,7 @@ agent:
   shape_reward: true
   defer_termination: true
   force_convergence: true
+  reward_type: "simple"
   summarize_system_template: |
     You are summarizing a candidate SWE-bench solution trajectory.
 

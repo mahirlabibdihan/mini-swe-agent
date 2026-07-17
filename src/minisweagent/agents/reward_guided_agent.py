@@ -36,6 +36,7 @@ class RewardGuidedAgentConfig(SingleActionAgentConfig):
     branching_factor: int = 3
     """The maximum number of branches to explore at each node."""
     shape_reward: bool = True
+    reward_type: str = "complex"
 
         
 parser = BashParser()
@@ -452,7 +453,10 @@ EOF
         start_time = time.time()
         cmd_type = node.last_action['type']
         if not node.raw_value:
-            node.raw_value = node.value = self.reward_model.compute_reward(node, self.task, cmd_type=cmd_type)
+            if self.config.reward_type == "simple":
+                node.raw_value = node.value = self.reward_model.compute_reward_simple(node, self.task, cmd_type=cmd_type)
+            else:
+                node.raw_value = node.value = self.reward_model.compute_reward(node, self.task, cmd_type=cmd_type)
         else:
             node.value = node.raw_value
         
@@ -1085,13 +1089,14 @@ EOF
                     if self._repo_has_changes():
                         raise Exception(">> Error: Changes detected after state hashing.")
                     
-                    new_node.test_status = self._get_test_status()
-                    if new_node.test_status == None:
-                        instance_logger.debug(">> Warning: Failed to get test status after code modifications. Marking all tests as ERROR for this node.")
-                        new_node.test_status = [
-                            {**test, "status": "ERROR"}
-                            for test in current_node.test_status
-                        ]
+                    if self.config.shape_reward:
+                        new_node.test_status = self._get_test_status()
+                        if new_node.test_status == None:
+                            instance_logger.debug(">> Warning: Failed to get test status after code modifications. Marking all tests as ERROR for this node.")
+                            new_node.test_status = [
+                                {**test, "status": "ERROR"}
+                                for test in current_node.test_status
+                            ]
 
                     self.env.execute(f"git checkout {current_node.commit}") # Move back to previous commit after evaluation to avoid affecting other branches
                     
@@ -1120,7 +1125,13 @@ EOF
                     instance_logger.debug(f"Action: {new_node.last_action['command']}")
                     instance_logger.debug(f"Observation: {observation[:200]}{'...' if len(observation) > 200 else ''}")
                     time.sleep(2)  # To avoid rate limiting
-                    return None     
+                    new_node.is_system_response = True
+                    new_node.is_terminating = False
+                    new_node.invalid_termination = True
+                    new_node.last_action["thought"] = new_node.last_action["thought"].replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
+                    new_node.last_action["command"] = new_node.last_action["command"].replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
+                    new_node.observation = "<warning>Can't parse the terminating action. Make sure to follow the specified format for submission.</warning>\n\n" + observation
+                    new_node.raw_observation = raw_observation
             else:
                 observation = error
                 raw_observation = None

@@ -4,7 +4,13 @@ agent:
     Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).
 
     Include a THOUGHT section before your command where you explain your reasoning process.
-    Include a COMMAND_TYPE line before your command. It must be exactly one of: [READ], [EDIT], [TEST], [SUBMIT].
+    Include a COMMAND_TYPE line before your command. It must be exactly one of: [SEARCH], [READ], [EDIT], [TEST], [SUBMIT].
+    Command types mean:
+    READ: inspect files/directory or look up existing code
+    SEARCH: locate files, symbols, or text patterns
+    EDIT: modify code
+    TEST: run tests or verification commands
+    SUBMIT: finalize the solution
     Format your response as shown in <format_example>.
 
     <format_example>
@@ -35,7 +41,7 @@ agent:
 
     For each response:
     1. Include a THOUGHT section explaining your reasoning and what you're trying to accomplish
-    2. Include a COMMAND_TYPE line with exactly one of: [READ], [EDIT], [TEST], [SUBMIT]
+    2. Include a COMMAND_TYPE line with exactly one of: [SEARCH], [READ], [EDIT], [TEST], [SUBMIT].
     3. Provide exactly ONE bash command to execute
 
     ## Important Boundaries
@@ -58,7 +64,7 @@ agent:
 
     Each response should include:
     1. A **THOUGHT** section where you explain your reasoning and plan
-    2. A **COMMAND_TYPE** line with exactly one of: [READ], [EDIT], [TEST], [SUBMIT]
+    2. A **COMMAND_TYPE** line with exactly one of: [SEARCH], [READ], [EDIT], [TEST], [SUBMIT].
     3. A single bash code block with your command
 
     Format your responses like this:
@@ -81,7 +87,7 @@ agent:
 
     **CRITICAL REQUIREMENTS:**
     - Your response SHOULD include a THOUGHT section explaining your reasoning
-    - Your response MUST include exactly one COMMAND_TYPE line with one of: [READ], [EDIT], [TEST], [SUBMIT]
+    - Your response MUST include exactly one COMMAND_TYPE line with one of: [SEARCH], [READ], [EDIT], [TEST], [SUBMIT].
     - Your response MUST include EXACTLY ONE bash code block
     - This bash block MUST contain EXACTLY ONE command (or a set of commands connected with && or ||)
     - If you include zero or multiple bash blocks, or no command at all, YOUR RESPONSE WILL FAIL
@@ -251,18 +257,96 @@ agent:
   depth_limit: 30
   branching_factor: 2
   max_expansion: 5
-  frontier_budget: 4
+  # frontier_budget: 4
   selection_scope: "global"
   epsilon: 0.3
   context_compaction: false
   max_history: 16
   sub_thres: 2
+  u_sub_thres: 1 # Unique submission threshold
   itr_limit: 4
-  
+  top_k_tree_pruning: 4  # Top-k branches to keep during tree pruning phases
+  reconcile: true
+  selection_level: "path" # "path" or "node"
+  augment_solutions: true
+  shape_reward: true
+  defer_termination: true
+  force_convergence: true
+  reward_type: "simple"
+  summarize_system_template: |
+    You are summarizing a candidate SWE-bench solution trajectory.
+
+    Your goal is to produce a concise technical summary that helps another model compare competing solutions.
+
+    Focus on:
+    - Root cause identified
+    - Files/modules modified
+    - Main fix strategy
+    - Important implementation details
+    - Edge cases handled
+    - Potential risks or weaknesses
+    - Final outcome
+
+    Be concise but information dense.
+    Do NOT speculate beyond the trajectory.
+  summarize_user_template: |
+    <pr_description>
+    {{task}}
+    </pr_description>
+
+    <candidate_solution>
+    {{candidate_solution}}
+    </candidate_solution>
+  voting_system_template: |
+    You are an expert software engineer evaluating candidate fixes for a SWE-bench task.
+
+    Your task is to determine which proposed solution is MORE LIKELY to correctly solve the issue described in the PR/task description.
+
+    Evaluation criteria:
+    - Correctness
+    - Completeness
+    - Edge case handling
+    - Regression risk
+    - Alignment with the intended fix
+    - Whether the patch addresses the root cause
+
+    You must choose exactly ONE solution:
+    - 1
+    - 2
+  voting_user_template: |
+    <pr_description>
+    {{task}}
+    </pr_description>
+
+    <solution_1>
+    {{solution_1}}
+    </solution_1>
+
+    <solution_2>
+    {{solution_2}}
+    </solution_2>
+
+    Analyze both solutions carefully and explain your reasoning.
+
+    At the very end of your response, output the verdict in EXACTLY this format:
+
+    ```json
+    {
+      "verdict": 1
+    }
+    ```
+
+    or
+
+    ```json
+    {
+      "verdict": 2
+    }
+    ```
 environment:
   cwd: "/testbed"
   timeout: 120
-  clean_start: false
+  clean_start: true
   env:
     PAGER: cat
     MANPAGER: cat
@@ -270,15 +354,21 @@ environment:
     PIP_PROGRESS_BAR: 'off'
     TQDM_DISABLE: '1'
   environment_class: docker
+  # checkpoint: "output/verified.test.63/openai__gpt-5-mini/"
 
 model:
   # model_name: "qwen/qwen3.5-flash-02-23"
-  model_name: "openai/gpt-5-mini"
+  # model_name: "openai/gpt-5-mini"
+  model_name: "deepseek/deepseek-v4-flash"
+  # model_name: "z-ai/glm-4.7-flash"
+  # model_name: "xiaomi/mimo-v2.5"
+  # model_name: "hosted_vllm/Qwen/Qwen2.5-7B-Instruct"
   # model_name: "deepseek/deepseek-v3.2"
   model_class: openrouter
   model_kwargs:
     drop_params: true
     temperature: 0.7
+    # api_base: "http://10.141.10.34:3000/v1"
 
 # reward_model:
 #   model_name: "Qwen/Qwen2.5-7B-Instruct"
@@ -292,6 +382,9 @@ reward_model:
   # model_class: openrouter
   model_name: "hosted_vllm/Qwen/Qwen2.5-7B-Instruct"
   # model_name: "hosted_vllm/Qwen/Qwen3.5-4B"
+  # model_kwargs:
+  #   drop_params: true
+    # temperature: 0.7
   model_kwargs:
     api_base: "http://10.141.10.34:3000/v1"
     # enable_thinking: False

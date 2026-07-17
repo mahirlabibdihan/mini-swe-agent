@@ -272,6 +272,7 @@ agent:
   shape_reward: false
   defer_termination: true
   force_convergence: true
+  reward_type: "simple"
   summarize_system_template: |
     You are summarizing a candidate SWE-bench solution trajectory.
 
@@ -382,7 +383,7 @@ reward_model:
   #   drop_params: true
     # temperature: 0.7
   model_kwargs:
-    api_base: "http://10.141.10.34:3000/v1"
+    api_base: "http://10.141.10.34:5000/v1"
     # enable_thinking: False
   # use_combined_scoring: true   # (default) Single LLM call with chain of thought for all 3 scores (3x faster, cheaper)
   use_combined_scoring: false  # Legacy mode: 3 separate LLM calls (slower, more expensive)

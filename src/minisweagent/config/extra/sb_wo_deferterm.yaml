@@ -272,6 +272,7 @@ agent:
   shape_reward: true
   defer_termination: false
   force_convergence: true
+  reward_type: "simple"
   summarize_system_template: |
     You are summarizing a candidate SWE-bench solution trajectory.
 
@@ -352,8 +353,8 @@ environment:
     LESS: -R
     PIP_PROGRESS_BAR: 'off'
     TQDM_DISABLE: '1'
-  environment_class: docker
-  # checkpoint: "output/verified.test.59/openai__gpt-5-mini/"
+  environment_class: dummy
+  checkpoint: "output/verified.test.63/openai__gpt-5-mini/"
 
 model:
   # model_name: "qwen/qwen3.5-flash-02-23"

@@ -266,7 +266,82 @@ agent:
   u_sub_thres: 1 # Unique submission threshold
   itr_limit: 4
   top_k_tree_pruning: 4  # Top-k branches to keep during tree pruning phases
-  
+  reconcile: true
+  selection_level: "path" # "path" or "node"
+  augment_solutions: true
+  shape_reward: true
+  defer_termination: true
+  force_convergence: true
+  summarize_system_template: |
+    You are summarizing a candidate SWE-bench solution trajectory.
+
+    Your goal is to produce a concise technical summary that helps another model compare competing solutions.
+
+    Focus on:
+    - Root cause identified
+    - Files/modules modified
+    - Main fix strategy
+    - Important implementation details
+    - Edge cases handled
+    - Potential risks or weaknesses
+    - Final outcome
+
+    Be concise but information dense.
+    Do NOT speculate beyond the trajectory.
+  summarize_user_template: |
+    <pr_description>
+    {{task}}
+    </pr_description>
+
+    <candidate_solution>
+    {{candidate_solution}}
+    </candidate_solution>
+  voting_system_template: |
+    You are an expert software engineer evaluating candidate fixes for a SWE-bench task.
+
+    Your task is to determine which proposed solution is MORE LIKELY to correctly solve the issue described in the PR/task description.
+
+    Evaluation criteria:
+    - Correctness
+    - Completeness
+    - Edge case handling
+    - Regression risk
+    - Alignment with the intended fix
+    - Whether the patch addresses the root cause
+
+    You must choose exactly ONE solution:
+    - 1
+    - 2
+  voting_user_template: |
+    <pr_description>
+    {{task}}
+    </pr_description>
+
+    <solution_1>
+    {{solution_1}}
+    </solution_1>
+
+    <solution_2>
+    {{solution_2}}
+    </solution_2>
+
+    Analyze both solutions carefully and explain your reasoning.
+
+    At the very end of your response, output the verdict in EXACTLY this format:
+
+    ```json
+    {
+      "verdict": 1
+    }
+    ```
+
+    or
+
+    ```json
+    {
+      "verdict": 2
+    }
+    ```
 environment:
   cwd: "/testbed"
   timeout: 120
@@ -278,16 +353,18 @@ environment:
     PIP_PROGRESS_BAR: 'off'
     TQDM_DISABLE: '1'
   environment_class: dummy
-  checkpoint: "output/verified.test.47/openai__gpt-5-mini/"
+  checkpoint: "output/verified.test.63/openai__gpt-5-mini/"
 
 model:
   # model_name: "qwen/qwen3.5-flash-02-23"
-  model_name: "openai/gpt-5-mini"
+  # model_name: "openai/gpt-5-mini"
+  model_name: "hosted_vllm/Qwen/Qwen2.5-7B-Instruct"
   # model_name: "deepseek/deepseek-v3.2"
-  model_class: openrouter
+  # model_class: openrouter
   model_kwargs:
     drop_params: true
     temperature: 0.7
+    api_base: "http://10.141.10.34:3000/v1"
 
 # reward_model:
 #   model_name: "Qwen/Qwen2.5-7B-Instruct"
@@ -301,6 +378,9 @@ reward_model:
   # model_class: openrouter
   model_name: "hosted_vllm/Qwen/Qwen2.5-7B-Instruct"
   # model_name: "hosted_vllm/Qwen/Qwen3.5-4B"
+  # model_kwargs:
+  #   drop_params: true
+    # temperature: 0.7
   model_kwargs:
     api_base: "http://10.141.10.34:3000/v1"
     # enable_thinking: False

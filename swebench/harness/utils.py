@@ -236,7 +236,7 @@ def _collect_terminating_nodes(node: TreeSearchNode, terminating_nodes: list[Tre
     
     # Recursively traverse children
     for child in node.children:
-        if child.visible:  # Only traverse visible nodes to avoid duplicates
+        if child.visible or child.merged_value is not None:  # Only traverse visible nodes to avoid duplicates
             _collect_terminating_nodes(child, terminating_nodes)
 
 def _extract_patch_from_node(node: dict) -> str:

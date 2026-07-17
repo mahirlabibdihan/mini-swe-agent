@@ -242,7 +242,86 @@ class RewardModel():
             formatted_trajectory += f"Observation #{i+ offset + 1}: {step['observation']}\n\n"
                 
         return formatted_trajectory.strip()
+    
+    def compute_reward_simple(
+        self,
+        node: TreeSearchNode,
+        task: Optional[str] = None,
+        cmd_type: str = "read"
+    ) -> float:
+        """Legacy compute reward with 3 separate LLM calls.
+        
+        Args:
+            node: The current tree search node
+            task: Optional task description for context
+            
+        Returns:
+            A float reward value. Higher is better.
+        """
+        # return random.random()  # A random number from 0 to 1 for now; replace with proper evaluation later
+        action = node.last_action['thought']
+        observation = node.observation
+        task = f"""
+<pr_description>
+Consider the following PR description:
+{task}
+</pr_description>
 
+You're a software engineer interacting continuously with a computer by submitting commands.
+You'll be helping implement necessary changes to meet requirements in the PR description.
+Your task is specifically to make changes to non-test files in the current directory in order to fix the issue described in the PR description in a way that is general and consistent with the codebase.
+        """
+        # Create plain trajectory text
+        trajectory = []
+        history_summary = None
+        
+        curr = node.parent
+        offset = 0
+        while curr.last_action is not None:
+            if curr.history_summary is not None:
+                history_summary = curr.history_summary
+                offset = curr.level
+                break
+            trajectory.append(
+                {
+                    "thought": curr.last_action["thought"],
+                    "action": curr.last_action["command"],
+                    "observation": curr.observation
+                }
+            )
+            curr = curr.parent
+        trajectory.reverse()
+
+        
+        # Detailed scoring (independent dimensions can run in parallel)
+        K_prompt = None
+        if cmd_type == "edit":
+            K_prompt = code_edit_effectiveness_prompt
+        elif cmd_type == "test":
+            K_prompt = test_feedback_gain_prompt
+        elif cmd_type == "submit":
+            K_prompt = termination_readiness_prompt
+        elif cmd_type == "search":
+            K_prompt = search_information_gain_prompt
+        elif cmd_type == "read":
+            K_prompt = read_information_gain_prompt
+        else:
+            K_prompt = knowledge_gain_prompt
+
+        score_args = (task, offset, history_summary, trajectory, action, observation)
+        
+        K_score = self.score(
+            K_prompt,
+            *score_args,
+            log_file="reward_model_scores_specific.log",
+        )
+        
+        instance_logger.debug(
+            f"[{cmd_type}] Reward scores - {K_score:.2f}"
+        )
+        
+        return K_score
+    
     def compute_reward(
         self,
         node: TreeSearchNode,

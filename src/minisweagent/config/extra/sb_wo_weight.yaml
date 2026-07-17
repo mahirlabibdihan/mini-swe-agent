@@ -266,7 +266,7 @@ agent:
   u_sub_thres: 1 # Unique submission threshold
   itr_limit: 4
   top_k_tree_pruning: 4  # Top-k branches to keep during tree pruning phases
-  reconcile: false
+  reconcile: true
   selection_level: "path" # "path" or "node"
   augment_solutions: true
   shape_reward: true

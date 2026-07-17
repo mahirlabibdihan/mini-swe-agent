@@ -403,7 +403,7 @@ def main(
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     redo_existing_repro: bool = typer.Option(False, "--redo-existing-repro", help="Redo existing reproduction instances", rich_help_panel="Data selection"),
     reproduce_only: bool = typer.Option(False, "--reproduce-only", help="Only run reproduction stage, skip fixing", rich_help_panel="Reproduction"),
-    config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_ts_3.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
+    config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_ts.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
     repro_config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_repro.yaml", "--repro-config", help="Path to reproduction config file", rich_help_panel="Reproduction"),
 ) -> None:

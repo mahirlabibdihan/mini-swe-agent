@@ -22,6 +22,7 @@ class TreeSearchAgentConfig(RewardGuidedAgentConfig):
     augment_solutions: bool = True
     defer_termination: bool = True
     force_convergence: bool = True
+    solution_selector: str = "rtv"
     summarize_system_template: str = ""
     summarize_user_template: str = ""
     voting_system_template: str = ""
@@ -50,8 +51,8 @@ class TreeSearchAgent(RewardGuidedAgent):
             instance_logger.debug(f">> {_type} from [{self.tree_node.commit[:7]}] to [{n_commit[:7]}]")
             out = self.env.execute(f"git checkout {n_commit}")
             if out["returncode"] != 0:
-                instance_logger.error(f"Git checkout failed: {out['stderr']}")
-                raise Exception(f"Git checkout failed: {out['stderr']}")
+                instance_logger.error(f"Git checkout failed: {out.get('stderr', 'Unknown error')}")
+                raise Exception(f"Git checkout failed: {out.get('stderr', 'Unknown error')}")
             self.add_message("system", f"THOUGHT: {_type} to node:{target_node.id}.\n\n```bash\ngit checkout {n_commit}\n```")
         elif self.tree_node.id != target_node.parent.id:
             instance_logger.debug(f">> Backtracking from [{self.tree_node.id}] to [{target_node.id}]")
@@ -242,7 +243,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         return  merged_node # A is parent, since it has higher value
 
     def linearize_path(self, path):
-        messages = []
+        messages = [] 
         for node in path:
             if node.last_action is None:
                 continue
@@ -424,6 +425,9 @@ class TreeSearchAgent(RewardGuidedAgent):
             reverse=True
         )
         
+        if self.config.solution_selector != "rtv":
+            return sorted_nodes[0] 
+        
         candidates = sorted_nodes[:2*self.config.top_k_tree_pruning]  # 4*
         candidates = [(n, i) for i, n in enumerate(candidates)]
         
@@ -485,6 +489,7 @@ class TreeSearchAgent(RewardGuidedAgent):
         sorted_nodes = sorted(
             terminating_nodes,
             key=lambda x: (
+                # -x.parent.order, # TEMP
                 # x.merged_value, # OLD
                 0.8 * x.merged_value + (1 - (x.parent.order / self.config.step_limit)) * 0.1 + 0.1 * (not x.system_generated), # NEW:  Should give priority to early discovered solutions
                 # NEW: Give priority to AI generated nodes
@@ -492,6 +497,7 @@ class TreeSearchAgent(RewardGuidedAgent):
             ),
             reverse=True
         )
+        # return sorted_nodes[0] # First discovered solution
         
         candidates = sorted_nodes[:2*self.config.top_k_tree_pruning]  # 4*
         candidates = [(n, i) for i, n in enumerate(candidates)]
@@ -841,6 +847,7 @@ Given both trajectories, what is the best next action to take from this point?
             self.frontier.clear()
             self.node_map = {best_node.id: best_node}
             self._update_frontier([best_node]) # Update frontier with the best node to encourage exploitation of the best solution path
+        
         elif self.itr > self.config.itr_limit:
             if self.mode == "evaluation":
                 best_node = self._get_best_terminating_node()
@@ -991,18 +998,28 @@ Given both trajectories, what is the best next action to take from this point?
 
     def _get_best_terminating_node_from_checkpoint(self):
         terminating_nodes = []
-        def _collect_terminating_nodes(node):
-            # if node.is_terminating and (node.visible or node.merged_value is not None):
-            if node.is_terminating and node.visible:
+        def _collect_terminating_nodes(node,ignore=True,clear=False):
+            # if node.is_terminating and (node.visible or node.merged_
+            # value is not None):
+            if node.is_terminating:
+                node.is_submission = False
+                node.executed = False
+            if node.is_terminating and node.visible and node.level <= 20 and (node.raw_value is not None or not ignore):
                 terminating_nodes.append(node)
             for child in node.children:
-                _collect_terminating_nodes(child)
+                _collect_terminating_nodes(child,ignore,clear)
             return terminating_nodes
         
         terminating_nodes = _collect_terminating_nodes(self.tree_root)
         if len(terminating_nodes) == 0:
-            return None
+            terminating_nodes = _collect_terminating_nodes(self.tree_root, False)
+            if len(terminating_nodes) == 0:
+                return None
 
+        # for n in terminating_nodes:
+        #     if n.is_submission:
+        #         return n
+        # raise Exception("SKIP")
         # count = 0
         # for n in terminating_nodes:
         #     if n.is_submission and n._pass:
@@ -1085,7 +1102,7 @@ Given both trajectories, what is the best next action to take from this point?
                         best_node = self._get_best_terminating_node()
                         if best_node:
                             candidates = [best_node] # Get the best terminating node among all nodes in the current iteration. Generating new nodes won't help at this point, so we directly go for the best terminating node if there are no non-terminating nodes left to execute.
-                
+                    
                 elif not self.config.defer_termination and self.n_submissions >= self.config.sub_thres and len(self.terminating_nodes) >= self.config.u_sub_thres:
                 # if len(self.terminating_nodes) >= self.config.sub_thres: # Too harsh
                     # TODO: Should we just terminate or consider terminating actions from here?
@@ -1098,12 +1115,15 @@ Given both trajectories, what is the best next action to take from this point?
                     
                 self._update_frontier(candidates)
                 
-            if self.n_expanded >= 10 + (self.itr-1) * 10 and self.itr <= self.config.itr_limit:
+            if not best_node and self.n_expanded >= 10 + (self.itr-1) * 10 and self.itr <= self.config.itr_limit:
                 self._update_iteration()
                 
-            if self.itr > self.config.itr_limit and self.n_expanded + 1 >= 10 + (self.itr-2) * 10 + 10:
+            if not best_node and self.itr > self.config.itr_limit and self.n_expanded + 1 >= 10 + (self.itr-2) * 10 + 10:
                 self._update_iteration()
 
+            if best_node:
+                best_node = None
+                
             while best_node is None:
                 if self.mode == "simulation":
                     best_node = self._get_best_node_from_checkpoint()
@@ -1121,6 +1141,8 @@ Given both trajectories, what is the best next action to take from this point?
                     # Find best terminating node
                     instance_logger.debug(">> Finish line reached. Searching for best terminating node in the tree.")
                     best_node = self._get_best_terminating_node_from_checkpoint()
+                    if best_node is None:
+                        raise Exception("ERROR: No solution found at finish line.")
                 else:
                     instance_logger.debug(f">> No actions in frontier. Updating iteration to expand more nodes. Current iteration: {self.itr}")
                     # NEW:
