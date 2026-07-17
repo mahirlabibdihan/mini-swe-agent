@@ -14,9 +14,9 @@ patch, and runs the held-out verifier.
   reward model currently uses `http://10.141.10.34:3000/v1`; that endpoint
   must be reachable from the task container, or change the reward-model config.
 
-The patched Pier installs this fork at the pinned `REVISION` in
-`../pier/src/pier/agents/installed/local_mini_swe_agent.py`. Update that
-constant after pushing future agent changes.
+The patched Pier archives the local `../src` tree plus the package metadata and
+installs that archive inside every task container. It does not clone GitHub,
+and it includes local uncommitted source changes present when the job starts.
 
 ## Original/base mini-swe-agent
 
