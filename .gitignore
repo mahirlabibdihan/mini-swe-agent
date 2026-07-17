@@ -196,3 +196,6 @@ notebooks/
 output/
 evaluation/
 retrieval/
+
+# Local secrets for the OpenHands SWE-bench experiment
+experiments/openhands-swebench/config.toml
