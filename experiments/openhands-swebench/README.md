@@ -93,9 +93,10 @@ openhands/evaluation/evaluation_outputs/outputs/
       gpt-5-mini_maxiter_50_N_0.59.0-no-hint-openrouter-gpt5-mini-50step-run_1/
 ```
 
-The run directory contains `output.jsonl`, `metadata.json`, per-instance
-`infer_logs/`, and per-instance `llm_completions/`. Re-running with the same
-settings resumes/skips completed instances according to the harness.
+The run directory contains `metadata.json`, per-instance `infer_logs/`, and
+per-instance `llm_completions/`. Inference results are written atomically to
+`output/<instance_id>.json`; it does not append a new `output.jsonl`. Re-running
+with the same settings scans `output/` and skips completed instance IDs.
 
 ## Evaluate patches
 
@@ -104,20 +105,19 @@ step. The experiment wrapper converts OpenHands output to SWE-bench prediction
 format, invokes the official SWE-bench harness, and prints the resolved rate:
 
 ```bash
-# Automatically score the newest Verified output.jsonl:
+# Automatically score the newest Verified output/ directory:
 bash experiments/openhands-swebench/evaluate.sh
 
-# Or score an explicit inference output:
+# Or score an explicit run directory (or its output/ directory):
 bash experiments/openhands-swebench/evaluate.sh \
   openhands/evaluation/evaluation_outputs/outputs/\
 princeton-nlp__SWE-bench_Verified-test/CodeActAgent/\
-gpt-5-mini_maxiter_50_N_v0.59.0-no-hint-openrouter-gpt5-mini-50step-run_1/\
-output.jsonl
+gpt-5-mini_maxiter_50_N_v0.59.0-no-hint-openrouter-gpt5-mini-50step-run_1/
 ```
 
 The evaluator downloads official per-instance SWE-bench Docker images and can
-require substantial disk space. It writes `report.json`, `eval_outputs/`, and
-an updated `output.jsonl` beside the inference output. For a partial run,
-"resolve rate over submitted" is the sample score; "overall Verified accuracy"
-uses all 500 Verified tasks as the denominator. A full benchmark result should
-have 500 submitted instances.
+require substantial disk space. It checks the `.report` field in each
+`output/<instance_id>.json`, evaluates only files without a report, then writes
+the new `.report` back to those files. Use `FORCE_REEVALUATE=1` to score every
+instance again. Temporary JSONL and SWE-bench artifacts are kept in an
+`evaluation-pending.*` directory under the run directory.
