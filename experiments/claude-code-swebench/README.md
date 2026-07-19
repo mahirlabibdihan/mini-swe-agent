@@ -49,6 +49,16 @@ N_TASKS=10 N_CONCURRENT=2 SAMPLE_SEED=0 \
   bash experiments/claude-code-swebench/run.sh
 ```
 
+Run the first 10 tasks in dataset order:
+
+```bash
+N_TASKS=10 N_CONCURRENT=1 \
+  bash experiments/claude-code-swebench/run.sh
+```
+
+Set `SAMPLE_SEED` only when you want Pier to shuffle tasks before selecting the
+requested number.
+
 Run all 500 tasks:
 
 ```bash

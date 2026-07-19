@@ -8,7 +8,9 @@ CONFIG_FILE="$SCRIPT_DIR/config.yaml"
 ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env}"
 DATASET_DIR="${DATASET_DIR:-$WORKSPACE_ROOT/datasets/swe-bench-verified}"
 N_TASKS="${N_TASKS:-1}"
-SAMPLE_SEED="${SAMPLE_SEED:-0}"
+# Set SAMPLE_SEED only when a deterministic shuffled sample is wanted.
+# Omitting it preserves the dataset order (for example, the first 10 tasks).
+SAMPLE_SEED="${SAMPLE_SEED:-}"
 N_CONCURRENT="${N_CONCURRENT:-1}"
 DISABLE_VERIFICATION="${DISABLE_VERIFICATION:-1}"
 JOB_DIR="${JOB_DIR:-$SCRIPT_DIR/jobs/claude-code-gpt5-mini-swebench-verified}"
@@ -43,12 +45,17 @@ elif [[ "$DISABLE_VERIFICATION" != "0" ]]; then
   exit 2
 fi
 
+sample_args=()
+if [[ -n "$SAMPLE_SEED" ]]; then
+  sample_args+=(--sample-seed "$SAMPLE_SEED")
+fi
+
 uv run --project "$PIER_DIR" pier run \
   --config "$CONFIG_FILE" \
   --env-file "$ENV_FILE" \
   --path "$DATASET_DIR" \
   --n-tasks "$N_TASKS" \
-  --sample-seed "$SAMPLE_SEED" \
+  "${sample_args[@]}" \
   --n-concurrent "$N_CONCURRENT" \
   "${verification_args[@]}" \
   --yes
