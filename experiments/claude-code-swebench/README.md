@@ -89,6 +89,11 @@ uv run --project pier pier job resume \
   experiments/claude-code-swebench/jobs/<job-directory>
 ```
 
+When an existing job directory has a different configuration, `run.sh` asks
+whether to delete it and start a new job. This removes its old trajectories,
+patches, and predictions. For a noninteractive replacement, set
+`OVERWRITE_JOB=1`.
+
 Each completed trial contains `agent/model.patch`. The run wrapper automatically
 collects these into `jobs/claude-code-gpt5-mini-swebench-verified/predictions.jsonl`,
 the official SWE-bench prediction format. Evaluate that file with the existing

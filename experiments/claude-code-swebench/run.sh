@@ -15,6 +15,7 @@ N_CONCURRENT="${N_CONCURRENT:-1}"
 DISABLE_VERIFICATION="${DISABLE_VERIFICATION:-1}"
 JOB_DIR="${JOB_DIR:-$SCRIPT_DIR/jobs/claude-code-gpt5-mini-swebench-verified}"
 PREDICTIONS_PATH="${PREDICTIONS_PATH:-$JOB_DIR/predictions.jsonl}"
+OVERWRITE_JOB="${OVERWRITE_JOB:-0}"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv is not installed. Run setup.sh after installing uv." >&2
@@ -34,6 +35,28 @@ fi
 if [[ ! -d "$DATASET_DIR" ]] || ! find "$DATASET_DIR" -mindepth 2 -name task.toml -print -quit | grep -q .; then
   echo "SWE-bench Verified tasks were not found at $DATASET_DIR. Run setup.sh first." >&2
   exit 2
+fi
+
+if [[ -d "$JOB_DIR" ]]; then
+  if [[ "$OVERWRITE_JOB" == "1" ]]; then
+    answer="y"
+  elif [[ -t 0 ]]; then
+    read -r -p "Job directory $JOB_DIR already exists. Delete it and start a new job? [y/N] " answer
+  else
+    echo "Job directory $JOB_DIR already exists. Set OVERWRITE_JOB=1 to replace it." >&2
+    exit 2
+  fi
+
+  if [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+    # This is the wrapper's own result directory; refuse broader targets.
+    case "$(realpath -m "$JOB_DIR")" in
+      "$(realpath -m "$SCRIPT_DIR/jobs")"/*) rm -rf -- "$JOB_DIR" ;;
+      *) echo "Refusing to delete a job directory outside $SCRIPT_DIR/jobs." >&2; exit 2 ;;
+    esac
+  else
+    echo "Keeping the existing job directory; no experiment was started."
+    exit 0
+  fi
 fi
 
 cd "$WORKSPACE_ROOT"
