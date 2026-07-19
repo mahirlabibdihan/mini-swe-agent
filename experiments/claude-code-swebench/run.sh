@@ -10,6 +10,9 @@ DATASET_DIR="${DATASET_DIR:-$WORKSPACE_ROOT/datasets/swe-bench-verified}"
 N_TASKS="${N_TASKS:-1}"
 SAMPLE_SEED="${SAMPLE_SEED:-0}"
 N_CONCURRENT="${N_CONCURRENT:-1}"
+DISABLE_VERIFICATION="${DISABLE_VERIFICATION:-1}"
+JOB_DIR="${JOB_DIR:-$SCRIPT_DIR/jobs/claude-code-gpt5-mini-swebench-verified}"
+PREDICTIONS_PATH="${PREDICTIONS_PATH:-$JOB_DIR/predictions.jsonl}"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv is not installed. Run setup.sh after installing uv." >&2
@@ -32,6 +35,14 @@ if [[ ! -d "$DATASET_DIR" ]] || ! find "$DATASET_DIR" -mindepth 2 -name task.tom
 fi
 
 cd "$WORKSPACE_ROOT"
+verification_args=()
+if [[ "$DISABLE_VERIFICATION" == "1" ]]; then
+  verification_args+=(--disable-verification)
+elif [[ "$DISABLE_VERIFICATION" != "0" ]]; then
+  echo "DISABLE_VERIFICATION must be 0 or 1." >&2
+  exit 2
+fi
+
 uv run --project "$PIER_DIR" pier run \
   --config "$CONFIG_FILE" \
   --env-file "$ENV_FILE" \
@@ -39,4 +50,12 @@ uv run --project "$PIER_DIR" pier run \
   --n-tasks "$N_TASKS" \
   --sample-seed "$SAMPLE_SEED" \
   --n-concurrent "$N_CONCURRENT" \
+  "${verification_args[@]}" \
   --yes
+
+uv run --project "$PIER_DIR" python "$SCRIPT_DIR/export_predictions.py" \
+  --overwrite \
+  "$JOB_DIR" \
+  "$PREDICTIONS_PATH"
+
+echo "SWE-bench predictions: $PREDICTIONS_PATH"
