@@ -4,3 +4,6 @@
 [submodule "pier"]
 	path = pier
 	url = https://github.com/mahirlabibdihan/pier.git
+[submodule "deep-swe"]
+	path = deep-swe
+	url = https://github.com/mahirlabibdihan/deep-swe.git
