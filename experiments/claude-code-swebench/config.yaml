@@ -17,4 +17,6 @@ agents:
     kwargs:
       max_turns: 50
       thinking: disabled
-      disallowed_tools: EnterPlanMode
+      # SWE-bench is evaluated from the repository patch.  Prevent the model
+      # from spending a whole trial answering from web search instead of editing.
+      disallowed_tools: EnterPlanMode,WebSearch,WebFetch
