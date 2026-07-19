@@ -1,3 +1,6 @@
 [submodule "openhands"]
 	path = openhands
 	url = https://github.com/mahirlabibdihan/OpenHands.git
+[submodule "pier"]
+	path = pier
+	url = https://github.com/mahirlabibdihan/pier.git

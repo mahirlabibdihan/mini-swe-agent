@@ -199,3 +199,7 @@ retrieval/
 
 # Local secrets for the OpenHands SWE-bench experiment
 experiments/openhands-swebench/config.toml
+
+# Downloaded Harbor datasets and local Claude Code experiment outputs
+datasets/
+experiments/claude-code-swebench/jobs/
