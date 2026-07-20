@@ -49,11 +49,20 @@ class TreeSearchAgent(RewardGuidedAgent):
             _type = "Backtracking" if self.tree_node.id != target_node.parent.id else "Forwarding"
             instance_logger.debug(f">> {_type} from [{self.tree_node.id}] to [{target_node.id}]")
             instance_logger.debug(f">> {_type} from [{self.tree_node.commit[:7]}] to [{n_commit[:7]}]")
-            out = self.env.execute(f"git checkout {n_commit}")
+            command = (
+                "git reset --hard HEAD && git clean -fd && "
+                f"git checkout --detach {n_commit}"
+            )
+            out = self.env.execute(command)
             if out["returncode"] != 0:
-                instance_logger.error(f"Git checkout failed: {out.get('stderr', 'Unknown error')}")
-                raise Exception(f"Git checkout failed: {out.get('stderr', 'Unknown error')}")
-            self.add_message("system", f"THOUGHT: {_type} to node:{target_node.id}.\n\n```bash\ngit checkout {n_commit}\n```")
+                error = out.get("stderr") or out.get("output") or "Unknown error"
+                instance_logger.error(f"Git checkout failed: {error}")
+                raise Exception(f"Git checkout failed: {error}")
+            self.add_message(
+                "system",
+                f"THOUGHT: {_type} to node:{target_node.id}.\n\n"
+                f"```bash\n{command}\n```",
+            )
         elif self.tree_node.id != target_node.parent.id:
             instance_logger.debug(f">> Backtracking from [{self.tree_node.id}] to [{target_node.id}]")
             self.add_message("system", f"THOUGHT: Backtracking to node:{target_node.id}.")
@@ -1208,4 +1217,3 @@ Given both trajectories, what is the best next action to take from this point?
         
         instance_logger.debug(f"Frontier size {self.frontier.length()}. Adding new {len(tree_nodes)} actions...")    
         self._add_actions_to_frontier(tree_nodes)
-    
