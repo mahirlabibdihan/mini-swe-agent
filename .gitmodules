@@ -11,3 +11,7 @@
 	path = swebenchpro
 	url = https://github.com/mahirlabibdihan/SWE-bench-pro.git
 	branch = main
+[submodule "swebench"]
+	path = swebench
+	url = https://github.com/mahirlabibdihan/SWE-bench.git
+	branch = main
