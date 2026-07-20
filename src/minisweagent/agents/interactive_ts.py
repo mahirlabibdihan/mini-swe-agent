@@ -53,7 +53,7 @@ class InteractiveAgent(TreeSearchAgent):
             console.print(f"\n[bold green]{role.capitalize()}[/bold green]:\n", end="", highlight=False)
         console.print(content, highlight=False, markup=False)
 
-    def query(self) -> dict:
+    def query(self, messages: list[dict]) -> dict:
         # Extend supermethod to handle human mode
         if self.config.mode == "human":
             match command := self._prompt_and_handle_special("[bold yellow]>[/bold yellow] "):
@@ -65,7 +65,7 @@ class InteractiveAgent(TreeSearchAgent):
                     return msg
         try:
             with console.status("Waiting for the LM to respond..."):
-                return super().query()
+                return super().query(messages)
         except LimitsExceeded:
             console.print(
                 f"Limits exceeded. Limits: {self.config.step_limit} steps, ${self.config.cost_limit}.\n"
@@ -73,7 +73,7 @@ class InteractiveAgent(TreeSearchAgent):
             )
             self.config.step_limit = int(input("New step limit: "))
             self.config.cost_limit = float(input("New cost limit: "))
-            return super().query()
+            return super().query(messages)
 
     def step(self) -> dict:
         # Override the step method to handle user interruption
