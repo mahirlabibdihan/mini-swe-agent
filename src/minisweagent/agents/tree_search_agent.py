@@ -49,10 +49,7 @@ class TreeSearchAgent(RewardGuidedAgent):
             _type = "Backtracking" if self.tree_node.id != target_node.parent.id else "Forwarding"
             instance_logger.debug(f">> {_type} from [{self.tree_node.id}] to [{target_node.id}]")
             instance_logger.debug(f">> {_type} from [{self.tree_node.commit[:7]}] to [{n_commit[:7]}]")
-            command = (
-                "git reset --hard HEAD && git clean -fd && "
-                f"git checkout --detach {n_commit}"
-            )
+            command = f"git checkout {n_commit}"
             out = self.env.execute(command)
             if out["returncode"] != 0:
                 error = out.get("stderr") or out.get("output") or "Unknown error"
