@@ -58,8 +58,12 @@ class RewardGuidedAgent(SingleActionAgent):
         self.action_cache = {}
         self.node_creation_lock = threading.RLock()
         # instance_logger.debug(result)
-        image_ref = self.env.config.image
-        image_ref = self.env.config.image
+        # Container environments expose an image name, while local environments
+        # (including DeepSWE's already-containerized /app workspace) do not.
+        # The value is only used to namespace the retrieval cache.
+        image_ref = getattr(self.env.config, "image", None) or str(
+            getattr(self.env.config, "cwd", "local")
+        )
         last_part = image_ref.split("/")[-1]
         if ":" in last_part and last_part.rsplit(":", 1)[1] == "latest":
             image_name = last_part.split(":", 1)[0]
@@ -71,7 +75,7 @@ class RewardGuidedAgent(SingleActionAgent):
         attempt = 0
         while True:
             if not Path(f"retrieval/{image_name}/documents.jsonl").exists():
-                instance_logger.debug("Extracting Python files from the codebase..." + self.env.config.image)
+                instance_logger.debug("Extracting files from the codebase: " + image_ref)
                 result = self.env.execute("""
 python3 - << 'EOF' 2>/dev/null
 import json

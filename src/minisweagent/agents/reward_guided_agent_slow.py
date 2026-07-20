@@ -49,14 +49,16 @@ class RewardGuidedAgent(SingleActionAgent):
         self.n_modifications = 0 # Number of nodes which have at least one write child
 
         # instance_logger.debug(result)
-        image_ref = self.env.config.image
+        image_ref = getattr(self.env.config, "image", None) or str(
+            getattr(self.env.config, "cwd", "local")
+        )
         image_name = image_ref.split("/")[-1].split(":")[0]
         # Check if documents/{image_name}.jsonl exists
 
         attempt = 0
         while True:
             if not Path(f"retrieval/{image_name}/documents.jsonl").exists():
-                instance_logger.debug("Extracting Python files from the codebase..." + self.env.config.image)
+                instance_logger.debug("Extracting files from the codebase: " + image_ref)
                 result = self.env.execute("""
 python3 - << 'EOF' 2>/dev/null
 import json
