@@ -7,3 +7,7 @@
 [submodule "deep-swe"]
 	path = deep-swe
 	url = https://github.com/mahirlabibdihan/deep-swe.git
+[submodule "swebenchpro"]
+	path = swebenchpro
+	url = https://github.com/mahirlabibdihan/SWE-bench-pro.git
+	branch = main
