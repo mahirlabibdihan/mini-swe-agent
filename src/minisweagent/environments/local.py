@@ -10,6 +10,7 @@ class LocalEnvironmentConfig(BaseModel):
     cwd: str = ""
     env: dict[str, str] = {}
     timeout: int = 30
+    checkpoint: str | None = None
 
 
 class LocalEnvironment:
