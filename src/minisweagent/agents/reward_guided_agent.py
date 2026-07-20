@@ -675,13 +675,14 @@ EOF
     def _reset(self):
         super()._reset()
         
-        if self.env.config.checkpoint:
-            with open(self.env.config.checkpoint, "r", encoding="utf-8") as f:
+        checkpoint = getattr(self.env.config, "checkpoint", None)
+        if checkpoint:
+            with open(checkpoint, "r", encoding="utf-8") as f:
                 tree_json = json.load(f)
             self.tree_root.from_tree(tree_json)
             self.mode = "simulation"
             self.tree_node = self.tree_root.children[0]
-            instance_logger.info(f">> Loaded tree from checkpoint {self.env.config.checkpoint}. Starting in simulation mode.")
+            instance_logger.info(f">> Loaded tree from checkpoint {checkpoint}. Starting in simulation mode.")
         else:
             self.tree_root.commit = self._get_commit_hash()
             self._create_pseudo_root()
@@ -885,7 +886,7 @@ EOF
                     instance_logger.debug(f">> Error parsing action. Retrying #{i+1}...")
                     
     def _get_root_commit(self) -> str:
-        if self.env.config.clean_start:
+        if getattr(self.env.config, "clean_start", False):
             return self.tree_root.children[0].commit
         return self.tree_root.commit
     
