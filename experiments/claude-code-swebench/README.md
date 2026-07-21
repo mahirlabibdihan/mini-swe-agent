@@ -17,7 +17,7 @@ affect reliability and score.
 Use Linux or WSL 2 with Docker Desktop configured for Linux containers. Install
 Git, Docker, `uv`, and obtain a funded OpenRouter API key. A 500-task run is
 expensive and can require substantial time, API credit, and Docker storage. The
-scripts therefore default to one deterministic task and one worker.
+scripts therefore default to the first dataset task and one worker.
 
 ## Setup
 
@@ -42,10 +42,10 @@ Smoke-test one task:
 bash experiments/claude-code-swebench/run.sh
 ```
 
-Run a deterministic 10-task sample with two workers:
+Run the first 10 dataset tasks with two workers:
 
 ```bash
-N_TASKS=10 N_CONCURRENT=2 SAMPLE_SEED=0 \
+N_TASKS=10 N_CONCURRENT=2 \
   bash experiments/claude-code-swebench/run.sh
 ```
 
