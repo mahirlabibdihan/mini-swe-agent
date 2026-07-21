@@ -88,10 +88,11 @@ uv run --project pier pier job resume \
 
 When a job directory already contains a Pier `config.json`, `run.sh` extends its
 saved task selection with the requested instances, resumes it, and skips
-completed instances. Overlapping selections are deduplicated. Set `JOB_NAME`
-only when you intentionally want an independent experiment directory. To
-discard a named job and start it again, set `OVERWRITE_JOB=1`; this removes its
-trajectories, patches, and predictions.
+completed instances. It prints the resolved instance IDs before resuming so the
+selection can be audited. Overlapping selections are deduplicated. Set
+`JOB_NAME` only when you intentionally want an independent experiment
+directory. To discard a named job and start it again, set `OVERWRITE_JOB=1`;
+this removes its trajectories, patches, and predictions.
 
 Each completed trial contains `agent/model.patch`. The run wrapper automatically
 collects these into `jobs/<JOB_NAME>/predictions.jsonl`,

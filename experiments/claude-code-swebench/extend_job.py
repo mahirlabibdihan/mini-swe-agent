@@ -47,6 +47,15 @@ async def extend(args: argparse.Namespace) -> int:
         sample_seed=args.sample_seed,
     ).get_task_configs(disable_verification=args.disable_verification)
 
+    selection_label = (
+        f"seeded selection (seed={args.sample_seed})"
+        if args.sample_seed is not None
+        else "dataset-order selection"
+    )
+    print(f"Requested {selection_label}:")
+    for index, task in enumerate(requested_tasks, start=1):
+        print(f"  {index:>3}. {task_name(task)}")
+
     combined = list(existing_tasks)
     seen = {task_name(task) for task in existing_tasks}
     additions = [task for task in requested_tasks if task_name(task) not in seen]
