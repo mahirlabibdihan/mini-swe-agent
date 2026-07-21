@@ -104,7 +104,7 @@ On resume, trials recorded with `RuntimeError` or `CancelledError` are retried.
 This includes transient Docker environment-start failures. Trials containing
 Claude Code's synthetic model-selection failure are also removed and retried.
 
-The Pier adapter pins Claude Code `2.1.111` for reproducible gateway behavior
+The Pier adapter pins Claude Code `2.1.215` for reproducible gateway behavior
 and disables experimental beta request fields when using an Anthropic-compatible
 gateway. OpenRouter supports `openai/gpt-5-mini` through its Messages endpoint,
 but guarantees Claude Code compatibility only for Anthropic models, so this
