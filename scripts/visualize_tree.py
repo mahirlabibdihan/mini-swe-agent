@@ -58,9 +58,17 @@ def _score_to_color(score: float | None) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _with_alpha(hex_color: str, alpha: float) -> str:
+    """Return #RRGGBBAA for Graphviz-compatible color alpha."""
+    if not isinstance(hex_color, str) or not hex_color.startswith("#") or len(hex_color) < 7:
+        return hex_color
+    a = max(0.0, min(1.0, float(alpha)))
+    return f"{hex_color[:7]}{int(round(a * 255)):02x}"
+
+
 def _state_key(node: Dict[str, Any]) -> str:
     # branch = node.get("branch") or "<none>"
-    commit = node.get("commit") or "<none>"
+    commit = node.get("state_hash") or node.get("commit") or "<none>"
     return f"{commit}"
 
 
@@ -77,8 +85,15 @@ def _build_state_color_map(nodes: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
         "#f032e6",  # magenta
         "#bcf60c",  # lime
         "#fabebe",  # light pink
+        "#008080",  # teal
+        "#e6beff",  # lavender
+        "#9a6324",  # brown
+        "#fffac8",  # light yellow
+        "#800000",  # maroon
+        "#aaffc3",  # mint
+        "#808000",  # olive
     ]
-    states = sorted({_state_key(n) for n in nodes.values() if n.get("executed", False)})
+    states = sorted({_state_key(n) for n in nodes.values()})
     return {state: palette[i % len(palette)] for i, state in enumerate(states)}
 
 
@@ -174,7 +189,7 @@ def filter_visible(
     if not hide_unseen:
         return nodes, edges
 
-    kept = {node_id: n for node_id, n in nodes.items() if n.get("visible", True)}
+    kept = {node_id: n for node_id, n in nodes.items() if n.get("visible", False)}
     kept_edges = [e for e in edges if e.parent in kept and e.child in kept]
     return kept, kept_edges
 
@@ -199,26 +214,52 @@ def build_dot(
 
     
     for node_id, node in nodes.items():
-        score_val = node.get(score_field)
+        score_val = node.get("merged_value") if node.get("is_terminating", False) else node.get(score_field)
         order_val = node.get("order")
         is_terminating = bool(node.get("is_terminating", False))
         pass_val = node.get("pass")
-        if not node.get("executed", False):
-            color = "#bdbdbd"
-        elif color_by == "state":
+        is_cached = node.get("cache_hit") is not None
+        is_executed = node.get("executed", False)
+        # if not node.get("executed", False):
+        #     color = "#bdbdbd"
+        if color_by == "state":
             color = state_colors[_state_key(node)]
         else:
             color = _score_to_color(score_val if isinstance(score_val, (int, float)) else None)
+        
+        # Lighten color for non-executed nodes
+        if not is_executed:
+            # Convert hex to RGB, make lighter, convert back
+            rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
+            lighter = tuple(int(c + (255 - c) * 0.0) for c in rgb)
+            color = f"#{lighter[0]:02x}{lighter[1]:02x}{lighter[2]:02x}"
 
         # Highlight terminating node validity when pass is set.
         penwidth = "1.2"
         border_color = "#333333"
+        border_style = "solid"
         if is_terminating and pass_val is True:
             border_color = "#1b8f3a"
             penwidth = "3.0"
         elif is_terminating and pass_val is False:
             border_color = "#c62828"
             penwidth = "3.0"
+
+        # Fade borders for non-executed nodes to match execution emphasis.
+        if not is_executed:
+            border_color = _with_alpha(border_color, 0.5)
+
+        # Fade label text for non-executed nodes.
+        font_color = _with_alpha("#111111", 0.55) if not is_executed else "#111111"
+        
+        # Make cached nodes visually distinct with dashed and thicker border
+        if is_cached:
+            border_style = "filled,dashed"
+            # Graphviz does not expose a direct dash-length control for node borders,
+            # so a thicker pen makes the dash and gap pattern much more noticeable.
+            penwidth = str(max(float(penwidth), 2.0))
+        else:
+            border_style = "filled"
 
         shape = "doublecircle" if (node_id == root_id or node.get("is_submission", False)) else "circle"
         score_str = _format_score(score_val)
@@ -234,46 +275,37 @@ def build_dot(
         else:
             label = _escape_dot_label(f"{term_prefix}{score_str}")
         lines.append(
-            f'  "{node_id}" [label="{label}" fillcolor="{color}" shape="{shape}" color="{border_color}" penwidth="{penwidth}"];'
+            f'  "{node_id}" [label="{label}" fillcolor="{color}" shape="{shape}" color="{border_color}" penwidth="{penwidth}" style="{border_style}" fontcolor="{font_color}"];'
         )
 
     for edge in edges:
         if edge.parent in nodes and edge.child in nodes:
             child_node = nodes[edge.child]
             real_child = (child_node.get("parent") is None or child_node.get("parent") == nodes[edge.parent]["id"])
+            is_child_executed = child_node.get("executed", False)
+            
+            # Determine edge color based on child node type
             if child_node.get("modifies_code", False):
-                if real_child:
-                    lines.append(
-                        f'  "{edge.parent}" -> "{edge.child}" [color="#d62728" penwidth=2.0];'
-                    )
-                else: # dashed
-                    lines.append(
-                        f'  "{edge.parent}" -> "{edge.child}" [color="#d62728" penwidth=2.0 style=dashed];'
-                    )
-                    
+                color = "#d62728"
             elif child_node.get("is_terminating", False):
-                if real_child:
-                    lines.append(
-                        f'  "{edge.parent}" -> "{edge.child}" [color="#2ca02c" penwidth=2.0];'
-                    )
-                else: # dashed
-                    lines.append(
-                        f'  "{edge.parent}" -> "{edge.child}" [color="#2ca02c" penwidth=2.0 style=dashed];'
-                    )
-            elif not child_node.get("executed", False):
-                if real_child:
-                    lines.append(
-                        f'  "{edge.parent}" -> "{edge.child}" [color="#999999"];'
-                    )
-                else:
-                    lines.append(
-                        f'  "{edge.parent}" -> "{edge.child}" [color="#999999" style=dashed];'
-                    )
+                color = "#2ca02c"
             else:
-                if real_child:
-                    lines.append(f'  "{edge.parent}" -> "{edge.child}" [color="#000000"];')
-                else: # dashed
-                    lines.append(f'  "{edge.parent}" -> "{edge.child}" [color="#000000" style=dashed];')
+                color = "#000000"
+            
+            # Lighten color for non-executed edges
+            if not is_child_executed:
+                rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
+                lighter = tuple(int(c + (255 - c) * 0.0) for c in rgb)
+                color = f"#{lighter[0]:02x}{lighter[1]:02x}{lighter[2]:02x}"
+            
+            if real_child:
+                lines.append(
+                    f'  "{edge.parent}" -> "{edge.child}" [color="{color}" penwidth=2.0];'
+                )
+            else: # dashed
+                lines.append(
+                    f'  "{edge.parent}" -> "{edge.child}" [color="{color}" penwidth=2.0 style=dashed];'
+                )
 
     lines.append("}")
     return "\n".join(lines)
@@ -302,13 +334,13 @@ def build_cytoscape_html(
     # Build node elements
     cy_nodes = []
     for node_id, node in nodes.items():
-        score_val = node.get(score_field)
+        score_val = node.get("merged_value") if node.get("is_terminating", False) else node.get(score_field)
         order_val = node.get("order")
         is_terminating = bool(node.get("is_terminating", False))
         pass_val = node.get("pass")
-        if not node.get("executed", False):
-            color = "#bdbdbd"
-        elif color_by == "state":
+        # if not node.get("executed", False):
+        #     color = "#bdbdbd"
+        if color_by == "state":
             color = state_colors[_state_key(node)]
         else:
             color = _score_to_color(score_val if isinstance(score_val, (int, float)) else None)
@@ -331,6 +363,14 @@ def build_cytoscape_html(
             border_color = "#c62828"
             border_width = "3"
         
+        # Use dashed + thicker border for cached nodes so they are easy to spot
+        is_cached = node.get("cache_hit") is not None
+        is_executed = node.get("executed", False)
+        cached_border_width = "4" if is_cached else border_width
+        node_opacity = "0.5" if not is_executed else "1.0"
+        border_opacity = "0.5" if not is_executed else "1.0"
+        label_opacity = "0.55" if not is_executed else "1.0"
+        
         cy_nodes.append({
             "data": {
                 "id": node_id,
@@ -350,12 +390,15 @@ def build_cytoscape_html(
                 "executed": node.get("executed", False),
                 "visible": node.get("visible", True),
                 "visits": node.get("visits", 0),
-            },
-            "style": {
                 "background-color": color,
-                "border-width": border_width,
+                "border-width": cached_border_width,
                 "border-color": border_color,
-            }
+                "border-style": "solid",
+                "border-opacity": border_opacity,
+                "opacity": node_opacity,
+                "label-opacity": label_opacity,
+                "is_cached": is_cached,
+            },
         })
     
     # Build edge elements
@@ -363,15 +406,16 @@ def build_cytoscape_html(
     for edge in edges:
         if edge.parent in nodes and edge.child in nodes:
             child_node = nodes[edge.child]
+            is_child_executed = child_node.get("executed", False)
+            edge_opacity = "1.0" if is_child_executed else "0.5"
+            
+            # Determine edge color and width based on child node type
             if child_node.get("modifies_code", False):
                 line_color = "#d62728"
                 width = "2.5"
             elif child_node.get("is_terminating", False):
                 line_color = "#2ca02c"
                 width = "2.5"
-            elif not child_node.get("executed", False):
-                line_color = "#999999"
-                width = "1"
             else:
                 line_color = "#000000"
                 width = "1.5"
@@ -385,6 +429,7 @@ def build_cytoscape_html(
                 "style": {
                     "line-color": line_color,
                     "width": width,
+                    "opacity": edge_opacity,
                 }
             })
     
@@ -575,7 +620,19 @@ def build_cytoscape_html(
                         'font-size': '10px',
                         'background-color': 'data(background-color)',
                         'border-width': 'data(border-width)',
-                        'border-color': '#333',
+                        'border-color': 'data(border-color)',
+                        'border-style': 'data(border-style)',
+                        'border-opacity': 'data(border-opacity)',
+                        'opacity': 'data(opacity)',
+                        'text-opacity': 'data(label-opacity)',
+                    }}
+                }},
+                {{
+                    selector: 'node[is_cached]',
+                    style: {{
+                        'border-style': 'dashed',
+                        'border-dash-pattern': [14, 10],
+                        'border-width': '4px',
                     }}
                 }},
                 {{
@@ -791,6 +848,11 @@ def parse_args() -> argparse.Namespace:
         choices=["state", "score"],
         help="Color nodes by commit state (default) or by score",
     )
+    parser.add_argument(
+        "--redo",
+        action="store_true",
+        help="Regenerate directory outputs even when the target already exists",
+    )
     return parser.parse_args()
 
 
@@ -883,6 +945,10 @@ def main() -> int:
             output_path = instance_dir / f"tree.{args.format}"
             
             rel_path = tree_file.relative_to(input_path)
+            if output_path.exists() and not args.redo:
+                print(f"  {rel_path} (skipping existing {output_path.name}; use --redo to overwrite)")
+                continue
+
             print(f"  {rel_path}")
             if _process_single_tree(
                 json_path=tree_file,

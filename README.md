@@ -233,7 +233,7 @@ stack and experiment infrastructure.
 
 ## Acknowledgments
 
-SWE-Xplorer builds on [mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent) and [SWE-bench](https://github.com/SWE-bench/SWE-bench).
+SWE-Xplorer builds on [mini-SWE-agent](https://github.com/SWE-agent/mini-swe-agent), [SWE-bench](https://github.com/SWE-bench/SWE-bench) and [WebOperator](https://github.com/kagnlp/WebOperator).
 
 ## License
 
