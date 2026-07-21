@@ -114,11 +114,11 @@ JOB_NAME=claude-code-smoke N_TASKS=1 N_CONCURRENT=1 \
   bash experiments/claude-code-swebench/run.sh
 ```
 
-The Pier adapter pins Claude Code `2.1.215` for reproducible gateway behavior
-and disables experimental beta request fields when using an Anthropic-compatible
-gateway. OpenRouter supports `openai/gpt-5-mini` through its Messages endpoint,
-but guarantees Claude Code compatibility only for Anthropic models, so this
-remains an interoperability experiment rather than a supported configuration.
+The Pier adapter leaves Claude Code version and gateway request features at
+their native defaults, matching the original working experiment. OpenRouter
+supports `openai/gpt-5-mini` through its Messages endpoint, but guarantees
+Claude Code compatibility only for Anthropic models, so this remains an
+interoperability experiment rather than a supported configuration.
 
 Each completed trial contains `agent/model.patch`. The run wrapper automatically
 collects these into `jobs/<JOB_NAME>/predictions.jsonl`,
