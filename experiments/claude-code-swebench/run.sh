@@ -139,9 +139,22 @@ uv run --project "$PIER_DIR" pier run \
   "${verification_args[@]}" \
   --yes
 
-uv run --project "$PIER_DIR" python "$SCRIPT_DIR/export_predictions.py" \
-  --overwrite \
-  "$JOB_DIR" \
-  "$PREDICTIONS_PATH"
+export_succeeded=0
+for attempt in 1 2 3 4 5; do
+  if uv run --project "$PIER_DIR" python "$SCRIPT_DIR/export_predictions.py" \
+    --overwrite \
+    "$JOB_DIR" \
+    "$PREDICTIONS_PATH"; then
+    export_succeeded=1
+    break
+  fi
+  echo "Prediction export failed (attempt $attempt/5); retrying in 3 seconds." >&2
+  sleep 3
+done
+
+if [[ "$export_succeeded" != "1" ]]; then
+  echo "Prediction export failed after 5 attempts; the completed job was preserved." >&2
+  exit 1
+fi
 
 echo "SWE-bench predictions: $PREDICTIONS_PATH"

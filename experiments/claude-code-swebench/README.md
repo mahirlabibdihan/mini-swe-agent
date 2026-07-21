@@ -118,6 +118,17 @@ collects these into `jobs/<JOB_NAME>/predictions.jsonl`,
 the official SWE-bench prediction format. Evaluate that file with the existing
 SWE-bench evaluator:
 
+On NFS filesystems, the wrapper retries prediction export up to five times when
+a transient stale file handle occurs. Export failure never removes the completed
+job. Regenerate predictions without rerunning trials with:
+
+```bash
+uv run --project pier python \
+  experiments/claude-code-swebench/export_predictions.py --overwrite \
+  experiments/claude-code-swebench/jobs/<JOB_NAME> \
+  experiments/claude-code-swebench/jobs/<JOB_NAME>/predictions.jsonl
+```
+
 ```bash
 cd openhands
 poetry run python -m swebench.harness.run_evaluation \
