@@ -512,8 +512,8 @@ class SingleActionAgent(DefaultAgent):
             raise LimitsExceeded()
         
         # save to file for debugging
-        with open("debug_messages.json", "w", encoding="utf-8") as f:
-            json.dump(messages, f, indent=4, ensure_ascii=False)
+        # with open("debug_messages.json", "w", encoding="utf-8") as f:
+        #     json.dump(messages, f, indent=4, ensure_ascii=False)
         response = self.model.query(messages)
         if "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in response["content"]:
             response["content"] = response["content"].replace("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && git add -A && git diff --cached")
