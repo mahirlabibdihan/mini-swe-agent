@@ -38,12 +38,19 @@ def task_name(task: TaskConfig) -> str:
     return task.get_task_id().get_name()
 
 
-def remove_model_selection_failures(job_dir: Path) -> int:
+def remove_model_selection_failures(
+    job_dir: Path, requested_task_names: set[str]
+) -> int:
     failure_text = "There's an issue with the selected model"
     failed_trial_dirs: list[Path] = []
     for output_path in job_dir.glob("*/agent/claude-code.txt"):
-        if failure_text in output_path.read_text(errors="replace"):
-            failed_trial_dirs.append(output_path.parent.parent)
+        trial_dir = output_path.parent.parent
+        trial_task_name = trial_dir.name.rsplit("__", maxsplit=1)[0]
+        if (
+            trial_task_name in requested_task_names
+            and failure_text in output_path.read_text(errors="replace")
+        ):
+            failed_trial_dirs.append(trial_dir)
 
     for trial_dir in failed_trial_dirs:
         print(f"Removing model-selection failure for retry: {trial_dir.name}")
@@ -54,7 +61,6 @@ def remove_model_selection_failures(job_dir: Path) -> int:
 async def extend(args: argparse.Namespace) -> int:
     config_path = args.job_dir / "config.json"
     config = JobConfig.model_validate_json(config_path.read_text())
-    remove_model_selection_failures(args.job_dir)
     existing_tasks = await resolve_saved_tasks(config)
     requested_tasks = await DatasetConfig(
         path=args.dataset_dir,
@@ -70,6 +76,10 @@ async def extend(args: argparse.Namespace) -> int:
     print(f"Requested {selection_label}:")
     for index, task in enumerate(requested_tasks, start=1):
         print(f"  {index:>3}. {task_name(task)}")
+
+    remove_model_selection_failures(
+        args.job_dir, {task_name(task) for task in requested_tasks}
+    )
 
     combined = list(existing_tasks)
     seen = {task_name(task) for task in existing_tasks}

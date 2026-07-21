@@ -102,7 +102,17 @@ this removes its trajectories, patches, and predictions.
 
 On resume, trials recorded with `RuntimeError` or `CancelledError` are retried.
 This includes transient Docker environment-start failures. Trials containing
-Claude Code's synthetic model-selection failure are also removed and retried.
+Claude Code's synthetic model-selection failure are also removed and retried
+when they belong to the currently requested selection.
+
+`N_TASKS` controls which instances are added to a cumulative job; it does not
+limit Pier to that many trials when the saved job already has other unfinished
+instances. Use a separate job for an isolated one-task smoke test:
+
+```bash
+JOB_NAME=claude-code-smoke N_TASKS=1 N_CONCURRENT=1 \
+  bash experiments/claude-code-swebench/run.sh
+```
 
 The Pier adapter pins Claude Code `2.1.215` for reproducible gateway behavior
 and disables experimental beta request fields when using an Anthropic-compatible
