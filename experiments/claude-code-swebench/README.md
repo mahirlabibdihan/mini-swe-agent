@@ -47,20 +47,28 @@ Smoke-test one task:
 bash experiments/claude-code-swebench/run.sh
 ```
 
-Add the alphabetically first 10 instance IDs to the default job with two workers:
+Run the alphabetically first 10 instance IDs with two workers:
 
 ```bash
 N_TASKS=10 N_CONCURRENT=2 \
   bash experiments/claude-code-swebench/run.sh
 ```
 
-If that job previously ran a random sample, its completed instances are kept
-and only missing instances from the first 10 are run. The resulting trajectories
-and `predictions.jsonl` remain together in the default job directory.
-
 Pier sorts local datasets alphabetically by instance ID. Set `SAMPLE_SEED` only
 when you want it to shuffle that stable ordering before selecting the requested
 number.
+
+Jobs are immutable. If the selected `JOB_NAME` already exists, the wrapper asks
+whether to delete its directory and start again. Answering no keeps the existing
+results and exits. For scripts without an interactive terminal, set
+`OVERWRITE_JOB=1` to replace the directory explicitly.
+
+Use a different name to preserve an earlier experiment:
+
+```bash
+JOB_NAME=claude-code-first10 N_TASKS=10 N_CONCURRENT=2 \
+  bash experiments/claude-code-swebench/run.sh
+```
 
 Run all 500 tasks:
 
@@ -85,34 +93,7 @@ uv run --project pier pier run \
 ```
 
 Results and ATIF trajectories are written beneath
-`experiments/claude-code-swebench/jobs/`. Resume an interrupted job with:
-
-```bash
-uv run --project pier pier job resume \
-  experiments/claude-code-swebench/jobs/<job-directory>
-```
-
-When a job directory already contains a Pier `config.json`, `run.sh` extends its
-saved task selection with the requested instances, resumes it, and skips
-completed instances. It prints the resolved instance IDs before resuming so the
-selection can be audited. Overlapping selections are deduplicated. Set
-`JOB_NAME` only when you intentionally want an independent experiment
-directory. To discard a named job and start it again, set `OVERWRITE_JOB=1`;
-this removes its trajectories, patches, and predictions.
-
-On resume, trials recorded with `RuntimeError` or `CancelledError` are retried.
-This includes transient Docker environment-start failures. Trials containing
-Claude Code's synthetic model-selection failure are also removed and retried
-when they belong to the currently requested selection.
-
-`N_TASKS` controls which instances are added to a cumulative job; it does not
-limit Pier to that many trials when the saved job already has other unfinished
-instances. Use a separate job for an isolated one-task smoke test:
-
-```bash
-JOB_NAME=claude-code-smoke N_TASKS=1 N_CONCURRENT=1 \
-  bash experiments/claude-code-swebench/run.sh
-```
+`experiments/claude-code-swebench/jobs/<JOB_NAME>/`.
 
 The Pier adapter leaves Claude Code version and gateway request features at
 their native defaults, matching the original working experiment. OpenRouter
