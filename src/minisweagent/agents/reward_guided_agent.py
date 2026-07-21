@@ -58,24 +58,43 @@ class RewardGuidedAgent(SingleActionAgent):
         self.action_cache = {}
         self.node_creation_lock = threading.RLock()
         # instance_logger.debug(result)
-        # Container environments expose an image name, while local environments
-        # (including DeepSWE's already-containerized /app workspace) do not.
-        # The value is only used to namespace the retrieval cache.
-        image_ref = getattr(self.env.config, "image", None) or str(
-            getattr(self.env.config, "cwd", "local")
-        )
-        last_part = image_ref.split("/")[-1]
-        if ":" in last_part and last_part.rsplit(":", 1)[1] == "latest":
-            image_name = last_part.split(":", 1)[0]
+        image_ref = getattr(self.env.config, "image", None)
+        if image_ref:
+            last_part = image_ref.split("/")[-1]
+            if ":" in last_part and last_part.rsplit(":", 1)[1] == "latest":
+                cache_key = last_part.split(":", 1)[0]
+            else:
+                cache_key = last_part.replace(":", "_")
+            cache_dir = Path("retrieval") / cache_key
         else:
-            image_name = last_part.replace(":", "_")
-        print(f">> Image name: {image_name}")
-        # Check if documents/{image_name}.jsonl exists
+            repo_root_result = self.env.execute("git rev-parse --show-toplevel")
+            commit_result = self.env.execute("git rev-parse HEAD")
+            if repo_root_result.get("returncode") != 0 or commit_result.get("returncode") != 0:
+                raise RuntimeError("Unable to identify repository for retrieval cache")
+            repo_name = Path(repo_root_result["output"].strip()).name or "repository"
+            commit = commit_result["output"].strip()
+            safe_repo_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", repo_name)
+            cache_key = f"{safe_repo_name}-{commit[:12]}"
+            cache_root = Path(
+                os.getenv(
+                    "MSWEA_RETRIEVAL_CACHE_DIR",
+                    str(Path(tempfile.gettempdir()) / "mini-swe-agent-retrieval"),
+                )
+            )
+            cache_dir = cache_root / cache_key
+
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        documents_path = cache_dir / "documents.jsonl"
+        structure_path = cache_dir / "structure.json"
+        optimized_structure_path = cache_dir / "structure_opt.json"
+        hierarchical_index_path = cache_dir / "bm25_hindex.pkl"
+        file_index_path = cache_dir / "bm25_index.pkl"
+        print(f">> Retrieval cache: {cache_dir}")
 
         attempt = 0
         while True:
-            if not Path(f"retrieval/{image_name}/documents.jsonl").exists():
-                instance_logger.debug("Extracting files from the codebase: " + image_ref)
+            if not documents_path.exists():
+                instance_logger.debug(f"Extracting files from the codebase into {cache_dir}")
                 result = self.env.execute("""
 python3 - << 'EOF' 2>/dev/null
 import json
@@ -115,7 +134,10 @@ files = subprocess.check_output(
     text=True
 ).splitlines()
 
-ALLOWED_EXT = {".py", ".js", ".ts", ".go"}
+ALLOWED_EXT = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java",
+    ".kt", ".c", ".h", ".cc", ".cpp", ".cs", ".rb", ".php",
+}
 
 for relative in files:
     try:
@@ -132,60 +154,60 @@ for relative in files:
         pass
 EOF
     """)
-                dir_path = f"retrieval/{image_name}"    
-                os.makedirs(dir_path, exist_ok=True)
-
                 print(f"Found {len(result['output'].splitlines())} files in the codebase.")
-                with open(f"{dir_path}/documents.jsonl", "w") as f:
+                with documents_path.open("w") as f:
                     f.write(result["output"])
                                 
             repo_files = []
             try:
-                with open(f"retrieval/{image_name}/documents.jsonl") as f:
+                with documents_path.open() as f:
                     for line in f:
                         obj = json.loads(line)
                         repo_files.append(obj)
             except Exception as e:
-                instance_logger.debug(f">> Error reading documents.jsonl for {image_name}: {repr(e)}")
+                instance_logger.debug(f">> Error reading {documents_path}: {repr(e)}")
                 repo_files = []
         
             if len(repo_files) == 0:
                 # remove the file to trigger re-extraction in the next episode
-                os.remove(f"retrieval/{image_name}/documents.jsonl")
+                documents_path.unlink(missing_ok=True)
                 attempt += 1
                 if attempt >= 3:
-                    raise Exception(f">> Failed to extract any Python files after {attempt} attempts. Please check the environment and the extraction script.")
+                    raise Exception(
+                        f">> Failed to extract any source files after {attempt} attempts. "
+                        "Please check the environment and the extraction script."
+                    )
             else:
                 break
                     
         while True:
-            if not Path(f"retrieval/{image_name}/structure.json").exists():
+            if not structure_path.exists():
                 structure = result_to_structure(repo_files)
-                with open(f"retrieval/{image_name}/structure.json", "w") as f:
+                with structure_path.open("w") as f:
                     json.dump(structure, f, indent=2)
             
-            with open(f"retrieval/{image_name}/structure.json") as f:
+            with structure_path.open() as f:
                 structure = json.load(f)
             
             if structure == {}:
                 # remove the file to trigger re-extraction in the next episode
-                os.remove(f"retrieval/{image_name}/structure.json")
+                structure_path.unlink(missing_ok=True)
             else:
                 break
                 
         while True:
-            if not Path(f"retrieval/{image_name}/structure_opt.json").exists():
+            if not optimized_structure_path.exists():
                 structure_opt = structure
                 remove_redundancy(structure_opt)
-                with open(f"retrieval/{image_name}/structure_opt.json", "w") as f:
+                with optimized_structure_path.open("w") as f:
                     json.dump(structure_opt, f, indent=2)
    
-            with open(f"retrieval/{image_name}/structure_opt.json") as f:
+            with optimized_structure_path.open() as f:
                 structure_opt = json.load(f)
             
             if structure_opt == {}:
                 # remove the file to trigger re-extraction in the next episode
-                os.remove(f"retrieval/{image_name}/structure_opt.json")
+                optimized_structure_path.unlink(missing_ok=True)
             else:
                 break
                 
@@ -193,14 +215,13 @@ EOF
         # self.repo_root.print()
         self.rank_nodes = collect_rankable_nodes(self.repo_root)
         
-        index_path = f"retrieval/{image_name}/bm25_hindex.pkl"
-        if os.path.exists(index_path):
-            with open(index_path, "rb") as f:
+        if hierarchical_index_path.exists():
+            with hierarchical_index_path.open("rb") as f:
                 self.bm25_h = pickle.load(f)
         else:
             documents = ["\n".join([node.qualified_name()] + node.text).split() for node in self.rank_nodes]
             self.bm25_h = BM25Okapi(documents)
-            with open(index_path, "wb") as f:
+            with hierarchical_index_path.open("wb") as f:
                 pickle.dump(self.bm25_h, f)
 
         documents = []
@@ -210,13 +231,12 @@ EOF
             documents.append(obj["content"].split())  # tokenize by whitespace
             self.file_ids.append(obj["id"])
         
-        index_path = f"retrieval/{image_name}/bm25_index.pkl"
-        if os.path.exists(index_path):
-            with open(index_path, "rb") as f:
+        if file_index_path.exists():
+            with file_index_path.open("rb") as f:
                 self.bm25 = pickle.load(f)
         else:
             self.bm25 = BM25Okapi(documents)
-            with open(index_path, "wb") as f:
+            with file_index_path.open("wb") as f:
                 pickle.dump(self.bm25, f)
                 
         self.relevance_dict = {}
