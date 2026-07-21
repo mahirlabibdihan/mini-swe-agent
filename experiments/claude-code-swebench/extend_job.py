@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import shutil
 from pathlib import Path
 
 from pier.models.job.config import DatasetConfig, JobConfig
@@ -37,9 +38,23 @@ def task_name(task: TaskConfig) -> str:
     return task.get_task_id().get_name()
 
 
+def remove_model_selection_failures(job_dir: Path) -> int:
+    failure_text = "There's an issue with the selected model"
+    failed_trial_dirs: list[Path] = []
+    for output_path in job_dir.glob("*/agent/claude-code.txt"):
+        if failure_text in output_path.read_text(errors="replace"):
+            failed_trial_dirs.append(output_path.parent.parent)
+
+    for trial_dir in failed_trial_dirs:
+        print(f"Removing model-selection failure for retry: {trial_dir.name}")
+        shutil.rmtree(trial_dir)
+    return len(failed_trial_dirs)
+
+
 async def extend(args: argparse.Namespace) -> int:
     config_path = args.job_dir / "config.json"
     config = JobConfig.model_validate_json(config_path.read_text())
+    remove_model_selection_failures(args.job_dir)
     existing_tasks = await resolve_saved_tasks(config)
     requested_tasks = await DatasetConfig(
         path=args.dataset_dir,
