@@ -58,6 +58,18 @@ Pier sorts local datasets alphabetically by instance ID. Set `SAMPLE_SEED` only
 when you want it to shuffle that stable ordering before selecting the requested
 number.
 
+Run a fixed range using the same Python slice syntax as the base SWE-bench
+runner:
+
+```bash
+JOB_NAME=claude-code-10-20 N_CONCURRENT=2 \
+  bash experiments/claude-code-swebench/run.sh --slice 10:20
+```
+
+`--slice` supports `START:STOP` and `START:STOP:STEP`, including open or
+negative bounds. It cannot be combined with `SAMPLE_SEED`; `N_TASKS` is ignored
+when a slice is supplied.
+
 Jobs are immutable. If the selected `JOB_NAME` already exists, the wrapper asks
 whether to delete its directory and start again. Answering no keeps the existing
 results and exits. For scripts without an interactive terminal, set
