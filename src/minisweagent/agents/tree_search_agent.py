@@ -406,13 +406,13 @@ class TreeSearchAgent(RewardGuidedAgent):
                 else:
                     instance_logger.debug(f">> Error parsing action. Retrying #{i+1}...")
         # write message and response to file debug_vote.txt
-        with open("debug_vote.txt", "w") as f:
-            f.write("Messages:\n")
-            for m in messages:
-                f.write(f"{m['role']}:\n{m['content']}\n\n")
-            f.write(f"Response:\n{response['content']}\n\n")
-            f.write(f"Final verdict: {verdict}\n")
-            f.write("="*50 + "\n\n")
+        # with open("debug_vote.txt", "w") as f:
+        #     f.write("Messages:\n")
+        #     for m in messages:
+        #         f.write(f"{m['role']}:\n{m['content']}\n\n")
+        #     f.write(f"Response:\n{response['content']}\n\n")
+        #     f.write(f"Final verdict: {verdict}\n")
+        #     f.write("="*50 + "\n\n")
         
         return node_A if verdict == 1 else node_B
 
@@ -1194,11 +1194,11 @@ Given both trajectories, what is the best next action to take from this point?
             self.tree_node.itr = self.itr
             self.tree_node.order = self.n_expanded
         
-        with open("debug_tree.json", "w", encoding="utf-8") as f:
-            json.dump(self.tree_root.to_tree(), f, indent=4, ensure_ascii=False)
+        # with open("debug_tree.json", "w", encoding="utf-8") as f:
+        #     json.dump(self.tree_root.to_tree(), f, indent=4, ensure_ascii=False)
 
-        with open("debug_nodes.json", "w", encoding="utf-8") as f:
-            json.dump(self.tree_root.to_json(), f, indent=4, ensure_ascii=False)
+        # with open("debug_nodes.json", "w", encoding="utf-8") as f:
+        #     json.dump(self.tree_root.to_json(), f, indent=4, ensure_ascii=False)
         
         self.tree_node = self._select()
         self._act() # Dummy for tree search - As already executed in the environment. But we need to call it to update the messages and logs.
