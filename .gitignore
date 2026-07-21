@@ -203,3 +203,12 @@ experiments/openhands-swebench/config.toml
 # Downloaded Harbor datasets and local Claude Code experiment outputs
 datasets/
 experiments/claude-code-swebench/jobs/
+
+# Root-level tree-search debugging and visualization artifacts
+/debug_*.json
+/debug_*.dot
+/last_agent_messages.json
+/prediction_mismatches.json
+/d_tree.png
+/tree.png
+/tree.html
