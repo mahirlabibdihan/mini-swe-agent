@@ -32,30 +32,30 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 2
 fi
 
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+
 if [[ ! -d "$DATASET_DIR" ]] || ! find "$DATASET_DIR" -mindepth 2 -name task.toml -print -quit | grep -q .; then
   echo "SWE-bench Verified tasks were not found at $DATASET_DIR. Run setup.sh first." >&2
   exit 2
 fi
 
+resume_job=0
 if [[ -d "$JOB_DIR" ]]; then
   if [[ "$OVERWRITE_JOB" == "1" ]]; then
-    answer="y"
-  elif [[ -t 0 ]]; then
-    read -r -p "Job directory $JOB_DIR already exists. Delete it and start a new job? [y/N] " answer
-  else
-    echo "Job directory $JOB_DIR already exists. Set OVERWRITE_JOB=1 to replace it." >&2
-    exit 2
-  fi
-
-  if [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
     # This is the wrapper's own result directory; refuse broader targets.
     case "$(realpath -m "$JOB_DIR")" in
       "$(realpath -m "$SCRIPT_DIR/jobs")"/*) rm -rf -- "$JOB_DIR" ;;
       *) echo "Refusing to delete a job directory outside $SCRIPT_DIR/jobs." >&2; exit 2 ;;
     esac
+  elif [[ -f "$JOB_DIR/config.json" ]]; then
+    resume_job=1
   else
-    echo "Keeping the existing job directory; no experiment was started."
-    exit 0
+    echo "$JOB_DIR exists but is not a resumable Pier job (config.json is missing)." >&2
+    echo "Move it aside or set OVERWRITE_JOB=1 to replace it." >&2
+    exit 2
   fi
 fi
 
@@ -73,15 +73,20 @@ if [[ -n "$SAMPLE_SEED" ]]; then
   sample_args+=(--sample-seed "$SAMPLE_SEED")
 fi
 
-uv run --project "$PIER_DIR" pier run \
-  --config "$CONFIG_FILE" \
-  --env-file "$ENV_FILE" \
-  --path "$DATASET_DIR" \
-  --n-tasks "$N_TASKS" \
-  "${sample_args[@]}" \
-  --n-concurrent "$N_CONCURRENT" \
-  "${verification_args[@]}" \
-  --yes
+if [[ "$resume_job" == "1" ]]; then
+  echo "Resuming $JOB_DIR; completed instances will be skipped."
+  uv run --project "$PIER_DIR" pier job resume --job-path "$JOB_DIR"
+else
+  uv run --project "$PIER_DIR" pier run \
+    --config "$CONFIG_FILE" \
+    --env-file "$ENV_FILE" \
+    --path "$DATASET_DIR" \
+    --n-tasks "$N_TASKS" \
+    "${sample_args[@]}" \
+    --n-concurrent "$N_CONCURRENT" \
+    "${verification_args[@]}" \
+    --yes
+fi
 
 uv run --project "$PIER_DIR" python "$SCRIPT_DIR/export_predictions.py" \
   --overwrite \
