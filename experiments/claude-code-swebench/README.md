@@ -42,12 +42,16 @@ Smoke-test one task:
 bash experiments/claude-code-swebench/run.sh
 ```
 
-Run the first 10 dataset tasks with two workers in a new named job:
+Add the first 10 dataset tasks to the default job with two workers:
 
 ```bash
-JOB_NAME=claude-code-first10 N_TASKS=10 N_CONCURRENT=2 \
+N_TASKS=10 N_CONCURRENT=2 \
   bash experiments/claude-code-swebench/run.sh
 ```
+
+If that job previously ran a random sample, its completed instances are kept
+and only missing instances from the first 10 are run. The resulting trajectories
+and `predictions.jsonl` remain together in the default job directory.
 
 Set `SAMPLE_SEED` only when you want Pier to shuffle tasks before selecting the
 requested number.
@@ -82,12 +86,12 @@ uv run --project pier pier job resume \
   experiments/claude-code-swebench/jobs/<job-directory>
 ```
 
-Set `JOB_NAME` to create or resume a particular experiment. When that job
-directory already contains a Pier `config.json`, `run.sh` automatically resumes
-it and skips completed instances. The original saved task selection remains
-authoritative during resume, so use a new `JOB_NAME` when changing from a random
-sample to the first dataset tasks. To discard a named job and start it again,
-set `OVERWRITE_JOB=1`; this removes its trajectories, patches, and predictions.
+When a job directory already contains a Pier `config.json`, `run.sh` extends its
+saved task selection with the requested instances, resumes it, and skips
+completed instances. Overlapping selections are deduplicated. Set `JOB_NAME`
+only when you intentionally want an independent experiment directory. To
+discard a named job and start it again, set `OVERWRITE_JOB=1`; this removes its
+trajectories, patches, and predictions.
 
 Each completed trial contains `agent/model.patch`. The run wrapper automatically
 collects these into `jobs/<JOB_NAME>/predictions.jsonl`,

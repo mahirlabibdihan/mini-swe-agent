@@ -76,6 +76,19 @@ if [[ -n "$SAMPLE_SEED" ]]; then
 fi
 
 if [[ "$resume_job" == "1" ]]; then
+  extend_args=()
+  if [[ -n "$SAMPLE_SEED" ]]; then
+    extend_args+=(--sample-seed "$SAMPLE_SEED")
+  fi
+  if [[ "$DISABLE_VERIFICATION" == "1" ]]; then
+    extend_args+=(--disable-verification)
+  fi
+  uv run --project "$PIER_DIR" python "$SCRIPT_DIR/extend_job.py" \
+    "$JOB_DIR" \
+    "$DATASET_DIR" \
+    --n-tasks "$N_TASKS" \
+    --n-concurrent "$N_CONCURRENT" \
+    "${extend_args[@]}"
   echo "Resuming $JOB_DIR; completed instances will be skipped."
   uv run --project "$PIER_DIR" pier job resume --job-path "$JOB_DIR"
 else
