@@ -9,7 +9,7 @@ ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env}"
 DATASET_DIR="${DATASET_DIR:-$WORKSPACE_ROOT/datasets/swe-bench-verified}"
 N_TASKS="${N_TASKS:-1}"
 # Set SAMPLE_SEED only when a deterministic shuffled sample is wanted.
-# Omitting it preserves the dataset order (for example, the first 10 tasks).
+# Omitting it preserves alphabetical instance-id order (for example, the first 10 tasks).
 SAMPLE_SEED="${SAMPLE_SEED:-}"
 N_CONCURRENT="${N_CONCURRENT:-1}"
 DISABLE_VERIFICATION="${DISABLE_VERIFICATION:-1}"

@@ -42,7 +42,7 @@ Smoke-test one task:
 bash experiments/claude-code-swebench/run.sh
 ```
 
-Add the first 10 dataset tasks to the default job with two workers:
+Add the alphabetically first 10 instance IDs to the default job with two workers:
 
 ```bash
 N_TASKS=10 N_CONCURRENT=2 \
@@ -53,8 +53,9 @@ If that job previously ran a random sample, its completed instances are kept
 and only missing instances from the first 10 are run. The resulting trajectories
 and `predictions.jsonl` remain together in the default job directory.
 
-Set `SAMPLE_SEED` only when you want Pier to shuffle tasks before selecting the
-requested number.
+Pier sorts local datasets alphabetically by instance ID. Set `SAMPLE_SEED` only
+when you want it to shuffle that stable ordering before selecting the requested
+number.
 
 Run all 500 tasks:
 

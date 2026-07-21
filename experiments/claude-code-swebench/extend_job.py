@@ -50,7 +50,7 @@ async def extend(args: argparse.Namespace) -> int:
     selection_label = (
         f"seeded selection (seed={args.sample_seed})"
         if args.sample_seed is not None
-        else "dataset-order selection"
+        else "alphabetical instance-id selection"
     )
     print(f"Requested {selection_label}:")
     for index, task in enumerate(requested_tasks, start=1):
