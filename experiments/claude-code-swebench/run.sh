@@ -39,6 +39,10 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# Docker daemon bind mounts can fail on NFS-backed home directories. Pier will
+# copy logs and patches out of the container when mounts are disabled.
+export PIER_MOUNT_LOGS="${PIER_MOUNT_LOGS:-0}"
+
 if [[ ! -d "$DATASET_DIR" ]] || ! find "$DATASET_DIR" -mindepth 2 -name task.toml -print -quit | grep -q .; then
   echo "SWE-bench Verified tasks were not found at $DATASET_DIR. Run setup.sh first." >&2
   exit 2
@@ -90,7 +94,10 @@ if [[ "$resume_job" == "1" ]]; then
     --n-concurrent "$N_CONCURRENT" \
     "${extend_args[@]}"
   echo "Resuming $JOB_DIR; completed instances will be skipped."
-  uv run --project "$PIER_DIR" pier job resume --job-path "$JOB_DIR"
+  uv run --project "$PIER_DIR" pier job resume \
+    --job-path "$JOB_DIR" \
+    --filter-error-type CancelledError \
+    --filter-error-type RuntimeError
 else
   uv run --project "$PIER_DIR" pier run \
     --config "$CONFIG_FILE" \

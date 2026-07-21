@@ -34,6 +34,11 @@ cp experiments/claude-code-swebench/.env.example \
 `swe-bench/swe-bench-verified` Harbor dataset to
 `datasets/swe-bench-verified`.
 
+The experiment disables Docker bind mounts for trial logs by default and copies
+logs and patches from the container instead. This avoids Docker daemon
+permission failures on NFS-backed cluster home directories. Set
+`PIER_MOUNT_LOGS=1` in `.env` only when the workspace is on a local filesystem.
+
 ## Run
 
 Smoke-test one task:
@@ -94,6 +99,9 @@ selection can be audited. Overlapping selections are deduplicated. Set
 `JOB_NAME` only when you intentionally want an independent experiment
 directory. To discard a named job and start it again, set `OVERWRITE_JOB=1`;
 this removes its trajectories, patches, and predictions.
+
+On resume, trials recorded with `RuntimeError` or `CancelledError` are retried.
+This includes transient Docker environment-start failures.
 
 Each completed trial contains `agent/model.patch`. The run wrapper automatically
 collects these into `jobs/<JOB_NAME>/predictions.jsonl`,
