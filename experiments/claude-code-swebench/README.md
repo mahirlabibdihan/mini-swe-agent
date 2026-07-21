@@ -42,17 +42,10 @@ Smoke-test one task:
 bash experiments/claude-code-swebench/run.sh
 ```
 
-Run the first 10 dataset tasks with two workers:
+Run the first 10 dataset tasks with two workers in a new named job:
 
 ```bash
-N_TASKS=10 N_CONCURRENT=2 \
-  bash experiments/claude-code-swebench/run.sh
-```
-
-Run the first 10 tasks in dataset order:
-
-```bash
-N_TASKS=10 N_CONCURRENT=1 \
+JOB_NAME=claude-code-first10 N_TASKS=10 N_CONCURRENT=2 \
   bash experiments/claude-code-swebench/run.sh
 ```
 
@@ -62,7 +55,7 @@ requested number.
 Run all 500 tasks:
 
 ```bash
-N_TASKS=500 N_CONCURRENT=4 \
+JOB_NAME=claude-code-all500 N_TASKS=500 N_CONCURRENT=4 \
   bash experiments/claude-code-swebench/run.sh
 ```
 
@@ -89,14 +82,15 @@ uv run --project pier pier job resume \
   experiments/claude-code-swebench/jobs/<job-directory>
 ```
 
-When the job directory already contains a Pier `config.json`, `run.sh`
-automatically resumes it and skips completed instances. The original saved job
-configuration remains authoritative during resume. To discard the old job and
-start again, set `OVERWRITE_JOB=1`; this removes its trajectories, patches, and
-predictions.
+Set `JOB_NAME` to create or resume a particular experiment. When that job
+directory already contains a Pier `config.json`, `run.sh` automatically resumes
+it and skips completed instances. The original saved task selection remains
+authoritative during resume, so use a new `JOB_NAME` when changing from a random
+sample to the first dataset tasks. To discard a named job and start it again,
+set `OVERWRITE_JOB=1`; this removes its trajectories, patches, and predictions.
 
 Each completed trial contains `agent/model.patch`. The run wrapper automatically
-collects these into `jobs/claude-code-gpt5-mini-swebench-verified/predictions.jsonl`,
+collects these into `jobs/<JOB_NAME>/predictions.jsonl`,
 the official SWE-bench prediction format. Evaluate that file with the existing
 SWE-bench evaluator:
 

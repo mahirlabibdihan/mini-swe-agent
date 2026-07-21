@@ -13,7 +13,9 @@ N_TASKS="${N_TASKS:-1}"
 SAMPLE_SEED="${SAMPLE_SEED:-}"
 N_CONCURRENT="${N_CONCURRENT:-1}"
 DISABLE_VERIFICATION="${DISABLE_VERIFICATION:-1}"
-JOB_DIR="${JOB_DIR:-$SCRIPT_DIR/jobs/claude-code-gpt5-mini-swebench-verified}"
+JOBS_DIR="${JOBS_DIR:-$SCRIPT_DIR/jobs}"
+JOB_NAME="${JOB_NAME:-claude-code-gpt5-mini-swebench-verified}"
+JOB_DIR="$JOBS_DIR/$JOB_NAME"
 PREDICTIONS_PATH="${PREDICTIONS_PATH:-$JOB_DIR/predictions.jsonl}"
 OVERWRITE_JOB="${OVERWRITE_JOB:-0}"
 
@@ -47,8 +49,8 @@ if [[ -d "$JOB_DIR" ]]; then
   if [[ "$OVERWRITE_JOB" == "1" ]]; then
     # This is the wrapper's own result directory; refuse broader targets.
     case "$(realpath -m "$JOB_DIR")" in
-      "$(realpath -m "$SCRIPT_DIR/jobs")"/*) rm -rf -- "$JOB_DIR" ;;
-      *) echo "Refusing to delete a job directory outside $SCRIPT_DIR/jobs." >&2; exit 2 ;;
+      "$(realpath -m "$JOBS_DIR")"/*) rm -rf -- "$JOB_DIR" ;;
+      *) echo "Refusing to delete a job directory outside $JOBS_DIR." >&2; exit 2 ;;
     esac
   elif [[ -f "$JOB_DIR/config.json" ]]; then
     resume_job=1
@@ -80,6 +82,8 @@ else
   uv run --project "$PIER_DIR" pier run \
     --config "$CONFIG_FILE" \
     --env-file "$ENV_FILE" \
+    --jobs-dir "$JOBS_DIR" \
+    --job-name "$JOB_NAME" \
     --path "$DATASET_DIR" \
     --n-tasks "$N_TASKS" \
     "${sample_args[@]}" \
