@@ -186,6 +186,7 @@ pyrightconfig.json
 .keys
 .vscode/
 .cursor/
+.agents/
 *.jsonl
 *.jsonl.*
 *.DS_Store
