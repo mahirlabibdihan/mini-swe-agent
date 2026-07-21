@@ -125,9 +125,12 @@ job. Regenerate predictions without rerunning trials with:
 ```bash
 uv run --project pier python \
   experiments/claude-code-swebench/export_predictions.py --overwrite \
-  experiments/claude-code-swebench/jobs/<JOB_NAME> \
-  experiments/claude-code-swebench/jobs/<JOB_NAME>/predictions.jsonl
+  experiments/claude-code-swebench/jobs/claude-code-gpt5-mini-swebench-verified \
+  experiments/claude-code-swebench/jobs/claude-code-gpt5-mini-swebench-verified/predictions.jsonl
 ```
+
+Replace `claude-code-gpt5-mini-swebench-verified` in both paths when the run
+used a custom `JOB_NAME`.
 
 ```bash
 cd openhands
