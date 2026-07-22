@@ -490,9 +490,9 @@ Your task is specifically to make changes to non-test files in the current direc
 
             # If parsing succeeded, we're done
             # if error is None:
-            with open(log_file, "w") as f:
-                f.write(f"Prompt:\n{curr_prompt}\n\nOutput:\n{out}\n\nParsed score: {score}")
-            break
+            # with open(log_file, "w") as f:
+            #     f.write(f"Prompt:\n{curr_prompt}\n\nOutput:\n{out}\n\nParsed score: {score}")
+            # break
 
             # If parsing failed and we have retries left, ask LLM to fix it
             # if retry_attempt < self.max_retries - 1:
