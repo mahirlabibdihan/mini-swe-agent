@@ -450,8 +450,8 @@ Your task is specifically to make changes to non-test files in the current direc
 
         curr_prompt = formatted_prompt
 
-        with open(log_file, "w") as f:
-            f.write(f"Prompt:\n{curr_prompt}")
+        # with open(log_file, "w") as f:
+        #     f.write(f"Prompt:\n{curr_prompt}")
 
         score, error = None, None
 
@@ -481,8 +481,8 @@ Your task is specifically to make changes to non-test files in the current direc
                         score_format_prompt=score_format_prompt
                     )
                     curr_prompt = formatted_prompt
-                    with open(log_file, "a") as f:
-                        f.write(f"Prompt:\n{curr_prompt}")
+                    # with open(log_file, "a") as f:
+                    #     f.write(f"Prompt:\n{curr_prompt}")
                     sleep(1)
 
             out = response["content"]
