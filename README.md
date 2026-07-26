@@ -18,7 +18,7 @@ The system uses mini-SWE-agent as its lightweight backbone and adds:
 This repository is the working research artifact for the **SWE-Xplorer** paper.
 It also provides reproducible experiment setups for multiple agent scaffolds,
 including the SWE-Xplorer tree-search agent, base mini-SWE-agent, OpenHands,
-Claude Code, and Codex CLI.
+Claude Code, and OpenCode.
 
 ## Repository Map
 
@@ -30,7 +30,7 @@ Claude Code, and Codex CLI.
 | `deep-swe/` | Harbor/Pier workflows for base and tree-search agents on DeepSWE tasks |
 | `experiments/openhands-swebench/` | OpenHands baseline on SWE-bench Verified |
 | `experiments/claude-code-swebench/` | Claude Code baseline using GPT-5 mini on SWE-bench Verified |
-| `experiments/codex-cli-swebench/` | Codex CLI baseline using GPT-5 Mini on SWE-bench Verified |
+| `experiments/opencode-swebench/` | OpenCode baseline using GPT-5 Mini on SWE-bench Verified |
 | `pier/` | Pier evaluation framework, pinned as a submodule |
 | `openhands/` | OpenHands release used by the baseline, pinned as a submodule |
 | `swebench/` | SWE-bench evaluation tooling |
@@ -251,32 +251,31 @@ existing run. See
 [`experiments/claude-code-swebench/README.md`](experiments/claude-code-swebench/README.md)
 for prediction export and official SWE-bench evaluation.
 
-## Codex CLI Baseline
+## OpenCode Baseline
 
-This experiment runs the official Codex CLI through Pier with
-`openai/gpt-5-mini` on OpenRouter's Responses API:
+This experiment runs OpenCode through Pier with `openai/gpt-5-mini` on
+OpenRouter. Its primary agent is capped at 50 agentic steps and cannot spawn
+subagents with independent budgets:
 
 ```bash
-bash experiments/codex-cli-swebench/setup.sh
-cp experiments/codex-cli-swebench/.env.example \
-  experiments/codex-cli-swebench/.env
+bash experiments/opencode-swebench/setup.sh
+cp experiments/opencode-swebench/.env.example \
+  experiments/opencode-swebench/.env
 # Add OPENROUTER_API_KEY to the new .env file.
 
-JOB_NAME=codex-cli-first10 N_TASKS=10 N_CONCURRENT=2 \
-  bash experiments/codex-cli-swebench/run.sh
+JOB_NAME=opencode-first10 N_TASKS=10 N_CONCURRENT=2 \
+  bash experiments/opencode-swebench/run.sh
 ```
 
 Run a fixed alphabetical range with:
 
 ```bash
-JOB_NAME=codex-cli-10-20 N_CONCURRENT=2 \
-  bash experiments/codex-cli-swebench/run.sh --slice 10:20
+JOB_NAME=opencode-10-20 N_CONCURRENT=2 \
+  bash experiments/opencode-swebench/run.sh --slice 10:20
 ```
 
-Codex CLI has no turn-count option equivalent to Claude Code's `--max-turns`;
-the experiment uses Pier and task timeouts instead. Full setup, export, and
-evaluation instructions are in
-[`experiments/codex-cli-swebench/README.md`](experiments/codex-cli-swebench/README.md).
+Full setup, budget, export, and evaluation instructions are in
+[`experiments/opencode-swebench/README.md`](experiments/opencode-swebench/README.md).
 
 ## Interactive mini-SWE-agent
 

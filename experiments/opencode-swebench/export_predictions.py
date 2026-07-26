@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export Codex CLI trial patches into the official SWE-bench JSONL format."""
+"""Export OpenCode trial patches into the official SWE-bench JSONL format."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("output_jsonl", type=Path, help="Destination predictions JSONL")
     parser.add_argument(
         "--model-name",
-        default="codex-cli-gpt5-mini",
+        default="opencode-gpt5-mini",
         help="model_name_or_path value for each prediction",
     )
     parser.add_argument(
@@ -58,7 +58,7 @@ def main() -> None:
 
     if not predictions:
         raise SystemExit(
-            "No agent/model.patch files found. Run the Codex CLI experiment first."
+            "No agent/model.patch files found. Run the OpenCode experiment first."
         )
 
     args.output_jsonl.parent.mkdir(parents=True, exist_ok=True)
