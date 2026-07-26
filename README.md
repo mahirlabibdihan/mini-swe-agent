@@ -17,8 +17,8 @@ The system uses mini-SWE-agent as its lightweight backbone and adds:
 
 This repository is the working research artifact for the **SWE-Xplorer** paper.
 It also provides reproducible experiment setups for multiple agent scaffolds,
-including the SWE-Xplorer tree-search agent, base mini-SWE-agent, OpenHands, and
-Claude Code.
+including the SWE-Xplorer tree-search agent, base mini-SWE-agent, OpenHands,
+Claude Code, and Codex CLI.
 
 ## Repository Map
 
@@ -30,6 +30,7 @@ Claude Code.
 | `deep-swe/` | Harbor/Pier workflows for base and tree-search agents on DeepSWE tasks |
 | `experiments/openhands-swebench/` | OpenHands baseline on SWE-bench Verified |
 | `experiments/claude-code-swebench/` | Claude Code baseline using GPT-5 mini on SWE-bench Verified |
+| `experiments/codex-cli-swebench/` | Codex CLI baseline using GPT-5 Mini on SWE-bench Verified |
 | `pier/` | Pier evaluation framework, pinned as a submodule |
 | `openhands/` | OpenHands release used by the baseline, pinned as a submodule |
 | `swebench/` | SWE-bench evaluation tooling |
@@ -159,6 +160,40 @@ uv run --project ../pier pier run -p tasks \
   --env-file .env
 ```
 
+### Network filesystems, jobs, and retries
+
+On NFS and other network filesystems, Docker may reject Pier's bind mounts.
+Use mountless logging so Pier copies logs and artifacts from each container
+after it finishes:
+
+```bash
+PIER_MOUNT_LOGS=0 uv run --project ../pier pier run -p tasks \
+  --agent tree-search-mini-swe-agent \
+  --model openrouter/openai/gpt-5-mini \
+  --env-file .env \
+  --job-name full-gpt-5-mini \
+  --n-concurrent 5
+```
+
+Reusing the same job name continues incomplete work and preserves completed
+trials. `PIER_MOUNT_LOGS` is runtime state and is not saved in the job
+configuration, so it must also prefix resume commands:
+
+```bash
+PIER_MOUNT_LOGS=0 uv run --project ../pier pier job resume \
+  --job-path jobs/full-gpt-5-mini \
+  --filter-error-type EnvironmentStartTimeoutError
+```
+
+Use `--max-retries 2` on `pier run` to retry eligible exceptions during a new
+run. A completed trial that produced no patch is not automatically considered
+retryable.
+
+Use `--force-build` after changing the installed agent or adapter. Omit it when
+continuing a large job unless a rebuild is necessary: forcing a build disables
+Docker's build cache and also rebuilds Pier's egress-proxy image, making runs
+more vulnerable to transient package-mirror failures.
+
 See [`deep-swe/README.md`](deep-swe/README.md) for single-task runs, sampling,
 network-filesystem notes, artifacts, and verifier behavior.
 
@@ -198,14 +233,50 @@ cp experiments/claude-code-swebench/.env.example \
   experiments/claude-code-swebench/.env
 # Add OPENROUTER_API_KEY to the new .env file.
 
-N_TASKS=10 N_CONCURRENT=2 \
+JOB_NAME=claude-code-first10 N_TASKS=10 N_CONCURRENT=2 \
   bash experiments/claude-code-swebench/run.sh
 ```
 
-Omit `SAMPLE_SEED` to take tasks in dataset order. Set it explicitly only for
-a reproducible shuffled sample. See
+Omit `SAMPLE_SEED` to take tasks in alphabetical instance-ID order. Set it
+explicitly only for a reproducible shuffled sample. To run a fixed range:
+
+```bash
+JOB_NAME=claude-code-10-20 N_CONCURRENT=2 \
+  bash experiments/claude-code-swebench/run.sh --slice 10:20
+```
+
+Claude Code jobs are immutable. If `JOB_NAME` already exists, the wrapper asks
+whether to delete it and start again; use a different name to preserve the
+existing run. See
 [`experiments/claude-code-swebench/README.md`](experiments/claude-code-swebench/README.md)
 for prediction export and official SWE-bench evaluation.
+
+## Codex CLI Baseline
+
+This experiment runs the official Codex CLI through Pier with
+`openai/gpt-5-mini` on OpenRouter's Responses API:
+
+```bash
+bash experiments/codex-cli-swebench/setup.sh
+cp experiments/codex-cli-swebench/.env.example \
+  experiments/codex-cli-swebench/.env
+# Add OPENROUTER_API_KEY to the new .env file.
+
+JOB_NAME=codex-cli-first10 N_TASKS=10 N_CONCURRENT=2 \
+  bash experiments/codex-cli-swebench/run.sh
+```
+
+Run a fixed alphabetical range with:
+
+```bash
+JOB_NAME=codex-cli-10-20 N_CONCURRENT=2 \
+  bash experiments/codex-cli-swebench/run.sh --slice 10:20
+```
+
+Codex CLI has no turn-count option equivalent to Claude Code's `--max-turns`;
+the experiment uses Pier and task timeouts instead. Full setup, export, and
+evaluation instructions are in
+[`experiments/codex-cli-swebench/README.md`](experiments/codex-cli-swebench/README.md).
 
 ## Interactive mini-SWE-agent
 
