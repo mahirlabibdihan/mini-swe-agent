@@ -23,6 +23,13 @@ app = typer.Typer(add_completion=False)
 DEFAULT_OUTPUT = global_config_dir / "last_swebench_single_run.traj.json"
 
 
+def resolve_config_path(subset: str, config_path: Path | None) -> Path:
+    if config_path is None:
+        config_name = "swebench_pro.yaml" if subset == "pro" else "swebench.yaml"
+        config_path = builtin_config_dir / "extra" / config_name
+    return get_config_path(config_path)
+
+
 # fmt: off
 @app.command()
 def main(
@@ -31,7 +38,7 @@ def main(
     instance_spec: str = typer.Option(0, "-i", "--instance", help="SWE-Bench instance ID or index", rich_help_panel="Data selection"),
     model_name: str | None = typer.Option(None, "-m", "--model", help="Model to use", rich_help_panel="Basic"),
     model_class: str | None = typer.Option(None, "-c", "--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced"),
-    config_path: Path = typer.Option( builtin_config_dir / "extra" / "swebench.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
+    config_path: Path | None = typer.Option(None, "-c", "--config", help="Path to a config file (defaults to swebench_pro.yaml for --subset pro, otherwise swebench.yaml)", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option(None, "--environment-class", rich_help_panel="Advanced"),
     exit_immediately: bool = typer.Option( False, "--exit-immediately", help="Exit immediately when the agent wants to finish instead of prompting.", rich_help_panel="Basic"),
     output: Path = typer.Option(DEFAULT_OUTPUT, "-o", "--output", help="Output trajectory file", rich_help_panel="Basic"),
@@ -48,7 +55,7 @@ def main(
         instance_spec = sorted(instances.keys())[int(instance_spec)]
     instance: dict = instances[instance_spec]  # type: ignore
 
-    config_path = get_config_path(config_path)
+    config_path = resolve_config_path(subset, config_path)
     logger.info(f"Loading agent config from '{config_path}'")
     config = yaml.safe_load(config_path.read_text())
     if environment_class is not None:
