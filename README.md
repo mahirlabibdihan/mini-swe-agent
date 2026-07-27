@@ -71,6 +71,22 @@ uv sync
 ```
 
 Conda is not required. `uv` manages the project environment directly.
+Run project commands through `uv` without activating the environment:
+
+```bash
+uv run mini-extra --help
+uv run mini --help
+```
+
+Alternatively, activate the environment once per shell and then use the
+commands directly:
+
+```bash
+source .venv/bin/activate
+mini-extra --help
+```
+
+On Windows PowerShell, activation is `.venv\Scripts\Activate.ps1`.
 
 ## SWE-bench Experiments
 
