@@ -595,7 +595,7 @@ def main(
             #     else:
             #         logger.error("Evaluation failed")
                 
-            progress_manager.on_instance_end(instance_id, final_exit_status, resolved)
+            progress_manager.on_instance_end(instance_id, final_exit_status)
 
 if __name__ == "__main__":
     app()
