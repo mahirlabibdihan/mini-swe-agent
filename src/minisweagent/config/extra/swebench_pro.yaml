@@ -232,7 +232,7 @@ agent:
 
 environment:
   cwd: "/app"
-  entrypoint: null
+  entrypoint: "/bin/bash"
   timeout: 120
   pull_timeout: 500
   clean_start: true
