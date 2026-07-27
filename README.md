@@ -67,10 +67,12 @@ git submodule update --init --recursive
 Install the main project:
 
 ```bash
-uv sync
+uv sync --extra dev
 ```
 
-Conda is not required. `uv` manages the project environment directly.
+The `dev` extra includes the Hugging Face `datasets` package required by the
+SWE-bench runners. Conda is not required; `uv` manages the project environment
+directly.
 Run project commands through `uv` without activating the environment:
 
 ```bash
