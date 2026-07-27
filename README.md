@@ -182,7 +182,7 @@ configuration, so it must also prefix resume commands:
 ```bash
 PIER_MOUNT_LOGS=0 uv run --project ../pier pier job resume \
   --job-path jobs/full-gpt-5-mini \
-  --n-concurrent 2 \
+  --max-workers 2 \
   --filter-error-type EnvironmentStartTimeoutError
 ```
 
