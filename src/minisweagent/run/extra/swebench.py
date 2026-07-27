@@ -48,6 +48,13 @@ DATASET_MAPPING = {
 }
 
 
+def resolve_config_path(subset: str, config_path: Path | None) -> Path:
+    if config_path is None:
+        config_name = "swebench_pro.yaml" if subset == "pro" else "swebench.yaml"
+        config_path = builtin_config_dir / "extra" / config_name
+    return get_config_path(config_path)
+
+
 _OUTPUT_FILE_LOCK = threading.Lock()
 
 
@@ -206,7 +213,7 @@ def main(
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use", rich_help_panel="Basic"),
     model_class: str | None = typer.Option(None, "-c", "--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced"),
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
-    config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
+    config_spec: Path | None = typer.Option(None, "-c", "--config", help="Path to a config file (defaults to swebench_pro.yaml for --subset pro, otherwise swebench.yaml)", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
 ) -> None:
     # fmt: on
@@ -226,7 +233,7 @@ def main(
         instances = [instance for instance in instances if instance["instance_id"] not in existing_instances]
     logger.info(f"Running on {len(instances)} instances...")
 
-    config_path = get_config_path(config_spec)
+    config_path = resolve_config_path(subset, config_spec)
     logger.info(f"Loading agent config from '{config_path}'")
     config = yaml.safe_load(config_path.read_text())
     if environment_class is not None:

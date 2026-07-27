@@ -9,11 +9,11 @@ from datasets import load_dataset
 
 from minisweagent import global_config_dir
 from minisweagent.agents.interactive import InteractiveAgent
-from minisweagent.config import builtin_config_dir, get_config_path
 from minisweagent.models import get_model
 from minisweagent.run.extra.swebench import (
     DATASET_MAPPING,
     get_sb_environment,
+    resolve_config_path,
 )
 from minisweagent.run.utils.save import save_traj
 from minisweagent.utils.log import logger
@@ -21,13 +21,6 @@ from minisweagent.utils.log import logger
 app = typer.Typer(add_completion=False)
 
 DEFAULT_OUTPUT = global_config_dir / "last_swebench_single_run.traj.json"
-
-
-def resolve_config_path(subset: str, config_path: Path | None) -> Path:
-    if config_path is None:
-        config_name = "swebench_pro.yaml" if subset == "pro" else "swebench.yaml"
-        config_path = builtin_config_dir / "extra" / config_name
-    return get_config_path(config_path)
 
 
 # fmt: off

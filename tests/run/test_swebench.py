@@ -12,8 +12,17 @@ from minisweagent.run.extra.swebench import (
     get_swebench_docker_image_name,
     main,
     remove_from_preds_file,
+    resolve_config_path,
     update_preds_file,
 )
+
+
+def test_resolve_config_path_uses_pro_config_for_pro_subset(tmp_path):
+    assert resolve_config_path("pro", None).name == "swebench_pro.yaml"
+
+    explicit_config = tmp_path / "custom.yaml"
+    explicit_config.write_text("agent: {}", encoding="utf-8")
+    assert resolve_config_path("pro", explicit_config) == explicit_config
 
 
 @pytest.mark.slow
