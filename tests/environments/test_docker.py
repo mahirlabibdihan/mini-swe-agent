@@ -1,6 +1,6 @@
 import os
 import subprocess
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -51,6 +51,42 @@ def test_docker_environment_config_defaults(executable):
     assert config.forward_env == []
     assert config.timeout == 30
     assert config.executable == executable
+    assert config.entrypoint == "/bin/bash"
+
+
+def test_container_entrypoint_is_a_docker_option():
+    completed = Mock(stdout="container-id\n")
+    with (
+        patch("minisweagent.environments.docker.subprocess.run", return_value=completed) as run,
+        patch("minisweagent.environments.docker.subprocess.Popen"),
+    ):
+        env = DockerEnvironment(image="jefzda/sweap-images:example", cwd="/app", pull_timeout=500)
+        try:
+            command = run.call_args.args[0]
+            image_index = command.index("jefzda/sweap-images:example")
+            entrypoint_index = command.index("--entrypoint")
+
+            assert entrypoint_index < image_index
+            assert command[entrypoint_index + 1] == "/bin/bash"
+            assert command[image_index + 1 :] == ["-c", "sleep 2h"]
+        finally:
+            env.cleanup()
+
+
+def test_container_can_preserve_image_entrypoint():
+    completed = Mock(stdout="container-id\n")
+    with (
+        patch("minisweagent.environments.docker.subprocess.run", return_value=completed) as run,
+        patch("minisweagent.environments.docker.subprocess.Popen"),
+    ):
+        env = DockerEnvironment(image="custom/image:latest", entrypoint=None)
+        try:
+            command = run.call_args.args[0]
+
+            assert "--entrypoint" not in command
+            assert command[-3:] == ["custom/image:latest", "sleep", "2h"]
+        finally:
+            env.cleanup()
 
 
 @pytest.mark.slow

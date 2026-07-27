@@ -232,6 +232,7 @@ agent:
 
 environment:
   cwd: "/testbed"
+  entrypoint: null
   timeout: 120
   pull_timeout: 500
   clean_start: true

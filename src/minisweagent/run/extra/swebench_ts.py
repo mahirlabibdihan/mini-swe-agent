@@ -403,7 +403,7 @@ def main(
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     redo_existing_repro: bool = typer.Option(False, "--redo-existing-repro", help="Redo existing reproduction instances", rich_help_panel="Data selection"),
     reproduce_only: bool = typer.Option(False, "--reproduce-only", help="Only run reproduction stage, skip fixing", rich_help_panel="Reproduction"),
-    config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_ts.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
+    config_spec: Path | None = typer.Option(None, "-c", "--config", help="Path to a config file (defaults to swebench_ts_pro.yaml for --subset pro, otherwise swebench_ts.yaml)", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
     repro_config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_repro.yaml", "--repro-config", help="Path to reproduction config file", rich_help_panel="Reproduction"),
 ) -> None:
@@ -483,6 +483,9 @@ def main(
             f"Running in per-instance mode: reproduction on {len(instances_to_reproduce)} instances and fix on {len(instances_to_process)} instances..."
         )
 
+    if config_spec is None:
+        config_name = "swebench_ts_pro.yaml" if subset == "pro" else "swebench_ts.yaml"
+        config_spec = builtin_config_dir / "extra" / config_name
     config_path = get_config_path(config_spec)
     logger.info(f"Loading agent config from '{config_path}'")
     config = yaml.safe_load(config_path.read_text())

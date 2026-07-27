@@ -34,6 +34,8 @@ class DockerEnvironmentConfig(BaseModel):
     """
     container_timeout: str = "2h"
     """Max duration to keep container running. Uses the same format as the sleep command."""
+    entrypoint: str | None = "/bin/bash"
+    """Entrypoint used for the idle container. Set to None to preserve the image entrypoint."""
     pull_timeout: int = 60
     """Timeout in seconds for pulling images."""
     checkpoint: str | None = None
@@ -70,12 +72,13 @@ class DockerEnvironment:
             "-w",
             self.config.cwd,
             *self.config.run_args,
-            self.config.image,
         ]
-        if "swebench" in self.config.image.lower():
+        if self.config.entrypoint is not None:
+            cmd.extend(["--entrypoint", self.config.entrypoint])
+        cmd.append(self.config.image)
+        if self.config.entrypoint is None:
             cmd.extend(["sleep", self.config.container_timeout])
         else:
-            cmd.extend(["--entrypoint", "/bin/bash"])
             cmd.extend(["-c", f"sleep {self.config.container_timeout}"])
         self.logger.debug(f"Starting container with command: {shlex.join(cmd)}")
         result = subprocess.run(
@@ -148,7 +151,9 @@ class DockerEnvironment:
     def cleanup(self):
         """Stop and remove the Docker container."""
         if getattr(self, "container_id", None) is not None:  # if init fails early, container_id might not be set
-            cmd = f"(timeout 60 {self.config.executable} stop {self.container_id} || {self.config.executable} rm -f {self.container_id}) >/dev/null 2>&1 &"
+            container_id = self.container_id
+            self.container_id = None
+            cmd = f"(timeout 60 {self.config.executable} stop {container_id} || {self.config.executable} rm -f {container_id}) >/dev/null 2>&1 &"
             subprocess.Popen(cmd, shell=True)
 
     def __del__(self):

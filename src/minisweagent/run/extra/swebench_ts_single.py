@@ -11,7 +11,7 @@ from minisweagent import global_config_dir
 from minisweagent.agents.interactive_ts import InteractiveAgent
 from minisweagent.config import builtin_config_dir, get_config_path
 from minisweagent.models import get_model
-from minisweagent.run.extra.swebench import (
+from minisweagent.run.extra.swebench_ts import (
     DATASET_MAPPING,
     get_sb_environment,
 )
@@ -32,7 +32,7 @@ def main(
     instance_spec: str = typer.Option(0, "-i", "--instance", help="SWE-Bench instance ID or index", rich_help_panel="Data selection"),
     model_name: str | None = typer.Option(None, "-m", "--model", help="Model to use", rich_help_panel="Basic"),
     model_class: str | None = typer.Option(None, "-c", "--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced"),
-    config_path: Path = typer.Option( builtin_config_dir / "extra" / "swebench_ts.yaml", "-c", "--config", help="Path to a config file", rich_help_panel="Basic"),
+    config_path: Path | None = typer.Option(None, "-c", "--config", help="Path to a config file (defaults to swebench_ts_pro.yaml for --subset pro, otherwise swebench_ts.yaml)", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option(None, "--environment-class", rich_help_panel="Advanced"),
     exit_immediately: bool = typer.Option( False, "--exit-immediately", help="Exit immediately when the agent wants to finish instead of prompting.", rich_help_panel="Basic"),
     output: Path = typer.Option(DEFAULT_OUTPUT, "-o", "--output", help="Output trajectory file", rich_help_panel="Basic"),
@@ -49,6 +49,9 @@ def main(
         instance_spec = sorted(instances.keys())[int(instance_spec)]
     instance: dict = instances[instance_spec]  # type: ignore
 
+    if config_path is None:
+        config_name = "swebench_ts_pro.yaml" if subset == "pro" else "swebench_ts.yaml"
+        config_path = builtin_config_dir / "extra" / config_name
     config_path = get_config_path(config_path)
     logger.info(f"Loading agent config from '{config_path}'")
     config = yaml.safe_load(config_path.read_text())

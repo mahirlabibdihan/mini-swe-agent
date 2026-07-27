@@ -345,6 +345,7 @@ agent:
     ```
 environment:
   cwd: "/testbed"
+  entrypoint: null
   timeout: 120
   clean_start: true
   env:
