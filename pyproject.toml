@@ -50,8 +50,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+swebenchpro = [
+    "datasets>=2.14.0",
+    "docker>=6.0.0",
+    "huggingface-hub>=0.16.0",
+    "pandas>=1.5.0",
+]
+
 full = [
     "mini-swe-agent[dev]",
+    "mini-swe-agent[swebenchpro]",
     "swe-rex>=1.4.0",
 ]
 
