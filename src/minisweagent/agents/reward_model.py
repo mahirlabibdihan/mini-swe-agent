@@ -453,9 +453,9 @@ Your task is specifically to make changes to non-test files in the current direc
         # with open(log_file, "w") as f:
         #     f.write(f"Prompt:\n{curr_prompt}")
 
-        score, error = None, None
-
         for retry_attempt in range(self.max_retries):
+            score, error = None, None
+            
             # Make LLM call with context window retry logic
             while True:
                 try:
@@ -488,11 +488,12 @@ Your task is specifically to make changes to non-test files in the current direc
             out = response["content"]
             score, error = self.parse_score(out)
 
-            # If parsing succeeded, we're done
-            # if error is None:
+            # If parsing succeeded, we're done.
+            if error is None:
+                break
+
             # with open(log_file, "w") as f:
             #     f.write(f"Prompt:\n{curr_prompt}\n\nOutput:\n{out}\n\nParsed score: {score}")
-            # break
 
             # If parsing failed and we have retries left, ask LLM to fix it
             # if retry_attempt < self.max_retries - 1:

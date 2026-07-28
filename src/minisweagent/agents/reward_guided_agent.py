@@ -476,7 +476,7 @@ EOF
         # track the time taken for reward computation
         start_time = time.time()
         cmd_type = node.last_action['type']
-        if not node.raw_value:
+        if node.raw_value is None:
             if self.config.reward_type == "simple":
                 node.raw_value = node.value = self.reward_model.compute_reward_simple(node, self.task, cmd_type=cmd_type)
             else:
