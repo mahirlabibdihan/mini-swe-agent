@@ -706,7 +706,8 @@ EOF
         else:
             self.tree_root.commit = self._get_commit_hash()
             self._create_pseudo_root()
-            self.tree_node.test_status = self._get_test_status()
+            if self.config.shape_reward:
+                self.tree_node.test_status = self._get_test_status()
             self.tree_node.state_hash = self._get_state_hash(self.tree_node)
             if self.tree_node.test_status == None:
                 self.tree_node.test_status = []        
