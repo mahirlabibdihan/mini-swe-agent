@@ -45,6 +45,10 @@ class OpenRouterRateLimitError(Exception):
 
     pass
 
+class OpenRouterContextWindowExceededError(Exception):
+    """Custom exception for OpenRouter context window exceeded errors."""
+
+    pass
 
 class OpenRouterModel:
     _api_call_lock = threading.RLock()
@@ -66,6 +70,7 @@ class OpenRouterModel:
         retry=retry_if_not_exception_type(
             (
                 OpenRouterAuthenticationError,
+                OpenRouterContextWindowExceededError,
                 KeyboardInterrupt,
             )
         ),
@@ -101,6 +106,8 @@ class OpenRouterModel:
             #     raise OpenRouterAuthenticationError(error_msg) from e
             if response.status_code == 429:
                 raise OpenRouterRateLimitError("Rate limit exceeded") from e
+            elif response.status_code == 400:
+                raise OpenRouterContextWindowExceededError("Context window exceeded") from e
             else:
                 raise OpenRouterAPIError(f"HTTP {response.status_code}: {response.text}") from e
         except requests.exceptions.RequestException as e:
