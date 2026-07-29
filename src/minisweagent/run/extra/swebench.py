@@ -7,6 +7,7 @@ import concurrent.futures
 import json
 import random
 import re
+import subprocess
 import threading
 import time
 import traceback
@@ -87,6 +88,26 @@ def get_swebench_docker_image_name(instance: dict) -> str:
             id_docker_compatible = iid.replace("__", "_1776_")
             image_name = f"docker.io/swebench/sweb.eval.x86_64.{id_docker_compatible}:latest".lower()
     return image_name
+
+
+def pull_docker_images(instances: list[dict], environment_config: dict) -> None:
+    """Pull all unique Docker images needed by a batch before starting any tasks."""
+    environment_class = environment_config.get("environment_class", "docker")
+    if environment_class != "docker" or not instances:
+        return
+
+    executable = environment_config.get("executable", "docker")
+    pull_timeout = environment_config.get("pull_timeout", 60)
+    image_names = sorted({get_swebench_docker_image_name(instance) for instance in instances})
+    logger.info(f"Pre-pulling {len(image_names)} Docker image(s)...")
+    for index, image_name in enumerate(image_names, start=1):
+        logger.info(f"Pulling Docker image {index}/{len(image_names)}: {image_name}")
+        subprocess.run(
+            [executable, "pull", image_name],
+            check=True,
+            timeout=pull_timeout,
+        )
+    logger.info("All Docker images are available locally.")
 
 
 def get_sb_environment(config: dict, instance: dict) -> Environment:
@@ -212,6 +233,7 @@ def main(
     workers: int = typer.Option(1, "-w", "--workers", help="Number of worker threads for parallel processing", rich_help_panel="Basic"),
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use", rich_help_panel="Basic"),
     model_class: str | None = typer.Option(None, "-c", "--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced"),
+    pre_pull: bool = typer.Option(False, "--pre-pull", help="Pull all required Docker images before starting any tasks", rich_help_panel="Basic"),
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     config_spec: Path | None = typer.Option(None, "-c", "--config", help="Path to a config file (defaults to swebench_pro.yaml for --subset pro, otherwise swebench.yaml)", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
@@ -242,6 +264,9 @@ def main(
         config.setdefault("model", {})["model_name"] = model
     if model_class is not None:
         config.setdefault("model", {})["model_class"] = model_class
+
+    if pre_pull:
+        pull_docker_images(instances, config.get("environment", {}))
 
     progress_manager = RunBatchProgressManager(len(instances), output_path / f"exit_statuses_{time.time()}.yaml")
 

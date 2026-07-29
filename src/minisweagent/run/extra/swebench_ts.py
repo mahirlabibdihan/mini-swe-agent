@@ -23,6 +23,7 @@ from minisweagent.agents.default import DefaultAgent
 from minisweagent.config import builtin_config_dir, get_config_path
 from minisweagent.environments import get_environment
 from minisweagent.models import get_model
+from minisweagent.run.extra.swebench import pull_docker_images
 from minisweagent.run.extra.utils.batch_progress import RunBatchProgressManager
 from minisweagent.run.utils.save import save_traj
 from minisweagent.utils.log import add_file_handler, logger, set_instance_file_handler
@@ -400,6 +401,7 @@ def main(
     workers: int = typer.Option(1, "-w", "--workers", help="Number of worker threads for parallel processing", rich_help_panel="Basic"),
     model: str | None = typer.Option(None, "-m", "--model", help="Model to use", rich_help_panel="Basic"),
     model_class: str | None = typer.Option(None, "-c", "--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced"),
+    pre_pull: bool = typer.Option(False, "--pre-pull", help="Pull all required Docker images before starting any tasks", rich_help_panel="Basic"),
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     redo_existing_repro: bool = typer.Option(False, "--redo-existing-repro", help="Redo existing reproduction instances", rich_help_panel="Data selection"),
     reproduce_only: bool = typer.Option(False, "--reproduce-only", help="Only run reproduction stage, skip fixing", rich_help_panel="Reproduction"),
@@ -506,6 +508,25 @@ def main(
 
     repro_ids = {instance["instance_id"] for instance in instances_to_reproduce}
     process_ids = {instance["instance_id"] for instance in instances_to_process}
+
+    if pre_pull:
+        repro_instances = [instance for instance in instances if instance["instance_id"] in repro_ids]
+        process_instances = [instance for instance in instances if instance["instance_id"] in process_ids]
+        repro_environment = repro_config.get("environment", {})
+        process_environment = config.get("environment", {})
+        pull_docker_images(repro_instances, repro_environment)
+        if process_environment.get("environment_class", "docker") == "docker":
+            already_pulled_ids = (
+                {instance["instance_id"] for instance in repro_instances}
+                if repro_environment.get("environment_class", "docker") == "docker"
+                and repro_environment.get("executable", "docker")
+                == process_environment.get("executable", "docker")
+                else set()
+            )
+            pull_docker_images(
+                [instance for instance in process_instances if instance["instance_id"] not in already_pulled_ids],
+                process_environment,
+            )
 
     total_progress_tasks = sum(
         1 for instance in instances if instance["instance_id"] in repro_ids or instance["instance_id"] in process_ids

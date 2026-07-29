@@ -11,6 +11,7 @@ from minisweagent.run.extra.swebench import (
     filter_instances,
     get_swebench_docker_image_name,
     main,
+    pull_docker_images,
     remove_from_preds_file,
     resolve_config_path,
     update_preds_file,
@@ -95,6 +96,30 @@ def test_get_image_name_with_complex_instance_id():
     instance = {"instance_id": "project__sub__module__version__1.2.3"}
     expected = "docker.io/swebench/sweb.eval.x86_64.project_1776_sub_1776_module_1776_version_1776_1.2.3:latest"
     assert get_swebench_docker_image_name(instance) == expected
+
+
+def test_pull_docker_images_deduplicates_images():
+    instances = [
+        {"instance_id": "repo__one", "image_name": "example/image:one"},
+        {"instance_id": "repo__two", "image_name": "example/image:one"},
+        {"instance_id": "repo__three", "image_name": "example/image:two"},
+    ]
+
+    with patch("minisweagent.run.extra.swebench.subprocess.run") as mock_run:
+        pull_docker_images(instances, {"environment_class": "docker", "pull_timeout": 123})
+
+    assert [call.args[0] for call in mock_run.call_args_list] == [
+        ["docker", "pull", "example/image:one"],
+        ["docker", "pull", "example/image:two"],
+    ]
+    assert all(call.kwargs == {"check": True, "timeout": 123} for call in mock_run.call_args_list)
+
+
+def test_pull_docker_images_skips_non_docker_environments():
+    with patch("minisweagent.run.extra.swebench.subprocess.run") as mock_run:
+        pull_docker_images([{"instance_id": "repo__one"}], {"environment_class": "singularity"})
+
+    mock_run.assert_not_called()
 
 
 def test_filter_instances_no_filters():
