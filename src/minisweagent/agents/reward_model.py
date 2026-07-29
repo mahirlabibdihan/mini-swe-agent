@@ -11,6 +11,7 @@ import random
 import re
 import time
 import litellm
+from openai import OpenAI, BadRequestError
 
 from minisweagent.utils.log import instance_logger
 
@@ -463,7 +464,7 @@ Your task is specifically to make changes to non-test files in the current direc
                         {"role": "user", "content": curr_prompt}
                     ])
                     break
-                except (litellm.exceptions.ContextWindowExceededError, litellm.exceptions.BadRequestError) as e:
+                except (litellm.exceptions.ContextWindowExceededError, litellm.exceptions.BadRequestError, BadRequestError) as e:
                     if n_steps == 1:
                         instance_logger.debug(f"Final exception during model query with n_steps=1: {e}.")
                         with open("debug_error.log", 'w') as f:
