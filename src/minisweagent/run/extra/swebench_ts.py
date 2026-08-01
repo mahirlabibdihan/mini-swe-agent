@@ -407,7 +407,7 @@ def main(
     reproduce_only: bool = typer.Option(False, "--reproduce-only", help="Only run reproduction stage, skip fixing", rich_help_panel="Reproduction"),
     config_spec: Path | None = typer.Option(None, "-c", "--config", help="Path to a config file (defaults to swebench_ts_pro.yaml for --subset pro, otherwise swebench_ts.yaml)", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
-    repro_config_spec: Path = typer.Option( builtin_config_dir / "extra" / "swebench_repro.yaml", "--repro-config", help="Path to reproduction config file", rich_help_panel="Reproduction"),
+    repro_config_spec: Path | None = typer.Option(None, "--repro-config", help="Path to a reproduction config file (defaults to swebench_pro_repro.yaml for --subset pro, otherwise swebench_repro.yaml)", rich_help_panel="Reproduction"),
 ) -> None:
     # fmt: on
     output_path = Path(output)
@@ -416,6 +416,9 @@ def main(
     add_file_handler(output_path / "minisweagent.log")
 
     # Load reproduction config
+    if repro_config_spec is None:
+        repro_config_name = "swebench_pro_repro.yaml" if subset == "pro" else "swebench_repro.yaml"
+        repro_config_spec = builtin_config_dir / "extra" / repro_config_name
     repro_config_path = get_config_path(repro_config_spec)
     logger.info(f"Loading reproduction agent config from '{repro_config_path}'")
     repro_config = yaml.safe_load(repro_config_path.read_text())
@@ -442,9 +445,7 @@ def main(
     # Determine which instances to process
     instances_to_process = instances.copy()
     instances_to_reproduce = instances.copy()
-    
-    
-    
+
     # Check for existing fix results
     if not redo_existing and (output_path / "preds.json").exists():
         existing_results = json.loads((output_path / "preds.json").read_text())
@@ -497,8 +498,6 @@ def main(
         config.setdefault("model", {})["model_name"] = model
     if model_class is not None:
         config.setdefault("model", {})["model_class"] = model_class
-
-    
 
     if workers != 1:
         logger.info(
