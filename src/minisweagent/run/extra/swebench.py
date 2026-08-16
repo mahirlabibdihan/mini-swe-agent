@@ -49,6 +49,17 @@ DATASET_MAPPING = {
 }
 
 
+def get_instance_exit_status(traj_path: Path) -> str | None:
+    """Read info.exit_status from a trajectory file if it exists and is valid JSON."""
+    if not traj_path.exists():
+        return None
+    try:
+        data = json.loads(traj_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data.get("info", {}).get("exit_status")
+
+
 def resolve_config_path(subset: str, config_path: Path | None) -> Path:
     if config_path is None:
         config_name = "swebench_pro.yaml" if subset == "pro" else "swebench.yaml"
@@ -235,6 +246,12 @@ def main(
     model_class: str | None = typer.Option(None, "-c", "--model-class", help="Model class to use (e.g., 'anthropic' or 'minisweagent.models.anthropic.AnthropicModel')", rich_help_panel="Advanced"),
     pre_pull: bool = typer.Option(False, "--pre-pull", help="Pull all required Docker images before starting any tasks", rich_help_panel="Basic"),
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
+    redo_exit_status: str | None = typer.Option(
+        None,
+        "--redo-exit-status",
+        help="Redo instances whose traj info.exit_status matches this value, plus instances with no existing traj",
+        rich_help_panel="Data selection",
+    ),
     config_spec: Path | None = typer.Option(None, "-c", "--config", help="Path to a config file (defaults to swebench_pro.yaml for --subset pro, otherwise swebench.yaml)", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
 ) -> None:
@@ -249,7 +266,27 @@ def main(
     instances = list(load_dataset(dataset_path, split=split))
 
     instances = filter_instances(instances, filter_spec=filter_spec, slice_spec=slice_spec, shuffle=shuffle)
-    if not redo_existing and (output_path / "preds.json").exists():
+    if redo_exit_status is not None:
+        before_status_filter = len(instances)
+        missing_traj_count = 0
+        matching_status_count = 0
+        matching_instances = []
+        for instance in instances:
+            instance_id = instance["instance_id"]
+            traj_path = output_path / instance_id / f"{instance_id}.traj.json"
+            exit_status = get_instance_exit_status(traj_path)
+            if exit_status is None:
+                missing_traj_count += 1
+                matching_instances.append(instance)
+            elif exit_status == redo_exit_status:
+                matching_status_count += 1
+                matching_instances.append(instance)
+        instances = matching_instances
+        logger.info(
+            f"Exit status filter '{redo_exit_status}': {before_status_filter} -> {len(instances)} instances "
+            f"({matching_status_count} matched status, {missing_traj_count} missing traj)"
+        )
+    elif not redo_existing and (output_path / "preds.json").exists():
         existing_instances = list(json.loads((output_path / "preds.json").read_text()).keys())
         logger.info(f"Skipping {len(existing_instances)} existing instances")
         instances = [instance for instance in instances if instance["instance_id"] not in existing_instances]

@@ -52,6 +52,17 @@ DATASET_MAPPING = {
     "pro": "ScaleAI/SWE-bench_Pro",
 }
 
+
+def get_instance_exit_status(traj_path: Path) -> str | None:
+    """Read info.exit_status from a trajectory file if it exists and is valid JSON."""
+    if not traj_path.exists():
+        return None
+    try:
+        data = json.loads(traj_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data.get("info", {}).get("exit_status")
+
 _OUTPUT_FILE_LOCK = threading.Lock()
 _REPRODUCTION_LOCK = threading.Lock()
 
@@ -404,6 +415,12 @@ def main(
     pre_pull: bool = typer.Option(False, "--pre-pull", help="Pull all required Docker images before starting any tasks", rich_help_panel="Basic"),
     redo_existing: bool = typer.Option(False, "--redo-existing", help="Redo existing instances", rich_help_panel="Data selection"),
     redo_existing_repro: bool = typer.Option(False, "--redo-existing-repro", help="Redo existing reproduction instances", rich_help_panel="Data selection"),
+    redo_exit_status: str | None = typer.Option(
+        None,
+        "--redo-exit-status",
+        help="Redo instances whose traj info.exit_status matches this value, plus instances with no existing traj",
+        rich_help_panel="Data selection",
+    ),
     reproduce_only: bool = typer.Option(False, "--reproduce-only", help="Only run reproduction stage, skip fixing", rich_help_panel="Reproduction"),
     config_spec: Path | None = typer.Option(None, "-c", "--config", help="Path to a config file (defaults to swebench_ts_pro.yaml for --subset pro, otherwise swebench_ts.yaml)", rich_help_panel="Basic"),
     environment_class: str | None = typer.Option( None, "--environment-class", help="Environment type to use. Recommended are docker or singularity", rich_help_panel="Advanced"),
@@ -446,8 +463,52 @@ def main(
     instances_to_process = instances.copy()
     instances_to_reproduce = instances.copy()
 
+    if redo_exit_status is not None:
+        before_fix_filter = len(instances_to_process)
+        before_repro_filter = len(instances_to_reproduce)
+
+        fix_missing_traj_count = 0
+        fix_matching_status_count = 0
+        filtered_fix_instances = []
+        for instance in instances_to_process:
+            traj_exit_status = get_instance_exit_status(
+                output_path / instance["instance_id"] / f"{instance['instance_id']}.traj.json"
+            )
+            if traj_exit_status is None:
+                fix_missing_traj_count += 1
+                filtered_fix_instances.append(instance)
+            elif traj_exit_status == redo_exit_status:
+                fix_matching_status_count += 1
+                filtered_fix_instances.append(instance)
+
+        repro_missing_traj_count = 0
+        repro_matching_status_count = 0
+        filtered_repro_instances = []
+        for instance in instances_to_reproduce:
+            traj_exit_status = get_instance_exit_status(
+                output_path / instance["instance_id"] / f"{instance['instance_id']}.reproduction.traj.json"
+            )
+            if traj_exit_status is None:
+                repro_missing_traj_count += 1
+                filtered_repro_instances.append(instance)
+            elif traj_exit_status == redo_exit_status:
+                repro_matching_status_count += 1
+                filtered_repro_instances.append(instance)
+
+        instances_to_process = filtered_fix_instances
+        instances_to_reproduce = filtered_repro_instances
+
+        logger.info(
+            f"Fix exit status filter '{redo_exit_status}': {before_fix_filter} -> {len(instances_to_process)} instances "
+            f"({fix_matching_status_count} matched status, {fix_missing_traj_count} missing traj)"
+        )
+        logger.info(
+            f"Reproduction exit status filter '{redo_exit_status}': {before_repro_filter} -> {len(instances_to_reproduce)} instances "
+            f"({repro_matching_status_count} matched status, {repro_missing_traj_count} missing traj)"
+        )
+
     # Check for existing fix results
-    if not redo_existing and (output_path / "preds.json").exists():
+    if redo_exit_status is None and not redo_existing and (output_path / "preds.json").exists():
         existing_results = json.loads((output_path / "preds.json").read_text())
         existing_instance_ids = set(existing_results.keys())
         redo_instance_ids = {
@@ -464,7 +525,7 @@ def main(
 
     # Check for existing reproduction results; this is controlled separately from redo_existing.
     reproduction_patch_files = sorted(reproductions_dir.glob("*.patch"))
-    if not redo_existing_repro and reproduction_patch_files:
+    if redo_exit_status is None and not redo_existing_repro and reproduction_patch_files:
         reproductions_data = _load_reproduction_results(reproductions_dir)
         existing_repro_ids = {r.get("instance_id") for r in reproductions_data}
         redo_repro_ids = {
