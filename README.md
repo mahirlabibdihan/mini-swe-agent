@@ -207,6 +207,10 @@ retain the original testbed-backed `RunTests` action when testbed access is
 configured. With the flag enabled, evaluate the generated patch afterward
 using the standard SWE-bench Docker harness.
 
+For model-provider troubleshooting, add `--litellm-debug`. This enables
+LiteLLM's in-process verbose debugging; redact credentials and sensitive
+request content before sharing the resulting logs.
+
 ## DeepSWE Experiments
 
 DeepSWE uses Harbor task directories and program-based verifiers rather than
