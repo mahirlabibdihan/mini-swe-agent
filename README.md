@@ -216,6 +216,10 @@ If the legacy LiteLLM version fails in its OpenRouter adapter, add
 OpenAI-compatible endpoint using `OPENROUTER_API_KEY`; tree search and agent
 settings remain unchanged.
 
+The runner enables SWE-Search's LLM value function by default, using the same
+model at temperature 0.0 as the reproducibility code. Use
+`--no-value-function` only for an explicit reward-free ablation.
+
 ## DeepSWE Experiments
 
 DeepSWE uses Harbor task directories and program-based verifiers rather than
