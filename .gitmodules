@@ -17,4 +17,4 @@
 	branch = main
 [submodule "swesearch"]
 	path = swesearch
-	url = https://github.com/aorwall/moatless-tree-search.git
+	url = https://github.com/mahirlabibdihan/swe-search.git

@@ -169,6 +169,7 @@ export OPENROUTER_API_KEY="<your-key>"
 python -m moatless.benchmark.run_evaluation \
   --config gpt4o_mini \
   --split verified \
+  --slice 0:10 \
   --model openrouter/openai/gpt-5-mini \
   --max-iterations 51 \
   --max-expansions 2 \
@@ -187,7 +188,10 @@ selection, value evaluation, feedback, and discrimination may make additional
 model calls.
 
 Use `--instance-ids <instance_id>` during initial smoke tests before launching
-the complete Verified split.
+the complete Verified split. Use `--slice START:STOP[:STEP]` to select a stable
+range from the ordered instance list; for example, `--slice 0:10` runs the
+first ten Verified instances. The slice is also applied when explicit
+`--instance-ids` are supplied.
 
 ## DeepSWE Experiments
 
