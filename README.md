@@ -220,6 +220,10 @@ The runner enables SWE-Search's LLM value function by default, using the same
 model at temperature 0.0 as the reproducibility code. Use
 `--no-value-function` only for an explicit reward-free ablation.
 
+Use `--redo-existing` to rerun the selected instances from scratch under an
+existing evaluation name. Their previous artifacts are preserved under the
+evaluation's `.redo_backups/` directory.
+
 ## DeepSWE Experiments
 
 DeepSWE uses Harbor task directories and program-based verifiers rather than
