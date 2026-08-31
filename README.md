@@ -170,6 +170,7 @@ python -m moatless.benchmark.run_evaluation \
   --config gpt4o_mini \
   --split verified \
   --slice 0:10 \
+  --no-index \
   --model openrouter/openai/gpt-5-mini \
   --max-iterations 51 \
   --max-expansions 2 \
@@ -192,6 +193,12 @@ the complete Verified split. Use `--slice START:STOP[:STEP]` to select a stable
 range from the ordered instance list; for example, `--slice 0:10` runs the
 first ten Verified instances. The slice is also applied when explicit
 `--instance-ids` are supplied.
+
+The example uses `--no-index` because the historical prebuilt Moatless index
+store is no longer available. Indexed search remains the default when this
+flag is omitted. In no-index mode, the agent uses directory listing, exact
+snippet search, and direct code viewing instead of semantic, class, and
+function index searches.
 
 ## DeepSWE Experiments
 
