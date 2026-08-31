@@ -171,6 +171,7 @@ python -m moatless.benchmark.run_evaluation \
   --split verified \
   --slice 0:10 \
   --no-index \
+  --no-testbed \
   --model openrouter/openai/gpt-5-mini \
   --max-iterations 51 \
   --max-expansions 2 \
@@ -199,6 +200,12 @@ store is no longer available. Indexed search remains the default when this
 flag is omitted. In no-index mode, the agent uses directory listing, exact
 snippet search, and direct code viewing instead of semantic, class, and
 function index searches.
+
+The example also uses `--no-testbed`, which avoids the hosted Moatless testbed
+service and removes in-search test execution from the agent. Omit the flag to
+retain the original testbed-backed `RunTests` action when testbed access is
+configured. With the flag enabled, evaluate the generated patch afterward
+using the standard SWE-bench Docker harness.
 
 ## DeepSWE Experiments
 
