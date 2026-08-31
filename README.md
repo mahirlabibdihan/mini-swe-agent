@@ -211,6 +211,11 @@ For model-provider troubleshooting, add `--litellm-debug`. This enables
 LiteLLM's in-process verbose debugging; redact credentials and sensitive
 request content before sharing the resulting logs.
 
+If the legacy LiteLLM version fails in its OpenRouter adapter, add
+`--openrouter-direct`. The agent then calls OpenRouter through its
+OpenAI-compatible endpoint using `OPENROUTER_API_KEY`; tree search and agent
+settings remain unchanged.
+
 ## DeepSWE Experiments
 
 DeepSWE uses Harbor task directories and program-based verifiers rather than
