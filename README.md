@@ -31,6 +31,7 @@ Claude Code, and OpenCode.
 | `experiments/openhands-swebench/` | OpenHands baseline on SWE-bench Verified |
 | `experiments/claude-code-swebench/` | Claude Code baseline using GPT-5 mini on SWE-bench Verified |
 | `experiments/opencode-swebench/` | OpenCode baseline using GPT-5 Mini on SWE-bench Verified |
+| `swesearch/` | Official Moatless Tree Search implementation used for SWE-Search experiments |
 | `pier/` | Pier evaluation framework, pinned as a submodule |
 | `openhands/` | OpenHands release used by the baseline, pinned as a submodule |
 | `swebench/` | SWE-bench evaluation tooling |
@@ -153,6 +154,40 @@ python -m swebench.harness.run_evaluation \
 The run IDs in these examples are experiment labels. Keep each inference output,
 evaluation `run_id`, model name, configuration, and step budget aligned in real
 runs.
+
+### SWE-Search baseline
+
+The official Moatless Tree Search repository is pinned as the `swesearch/`
+submodule. The following configuration runs SWE-Search on SWE-bench Verified
+with GPT-5 Mini, a maximum branching factor of two, and a global budget of at
+most 50 newly created child nodes:
+
+```bash
+cd swesearch
+export OPENROUTER_API_KEY="<your-key>"
+
+python -m moatless.benchmark.run_evaluation \
+  --config gpt4o_mini \
+  --split verified \
+  --model openrouter/openai/gpt-5-mini \
+  --max-iterations 51 \
+  --max-expansions 2 \
+  --num-workers 1 \
+  --evaluation-name swe-search-gpt-5-mini-verified-b2-e50
+```
+
+In this implementation, `max_iterations` limits the total number of nodes and
+counts the root. Consequently, `--max-iterations 51` permits the root plus at
+most 50 successful child-node expansions. `--max-expansions 2` limits each
+node to two children; it does not create two children per search iteration.
+Runs can finish before reaching the node budget because of another termination
+condition, such as the cost limit, a completion threshold, or no remaining
+expandable nodes. LLM calls are not equivalent to node expansions because
+selection, value evaluation, feedback, and discrimination may make additional
+model calls.
+
+Use `--instance-ids <instance_id>` during initial smoke tests before launching
+the complete Verified split.
 
 ## DeepSWE Experiments
 

@@ -15,3 +15,6 @@
 	path = swebench
 	url = https://github.com/mahirlabibdihan/SWE-bench.git
 	branch = main
+[submodule "swesearch"]
+	path = swesearch
+	url = https://github.com/aorwall/moatless-tree-search.git
