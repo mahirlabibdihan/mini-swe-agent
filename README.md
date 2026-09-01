@@ -220,6 +220,24 @@ The runner enables SWE-Search's LLM value function by default, using the same
 model at temperature 0.0 as the reproducibility code. Use
 `--no-value-function` only for an explicit reward-free ablation.
 
+Export generated SWE-Search patches and evaluate them with the official
+SWE-bench Docker harness:
+
+```bash
+cd swesearch
+poetry run python -m moatless.benchmark.export_predictions \
+  ./evals/<evaluation-name>
+
+cd ../swebench
+python -m swebench.harness.run_evaluation \
+  --dataset_name princeton-nlp/SWE-bench_Verified \
+  --split test \
+  --predictions_path ../swesearch/evals/<evaluation-name>/predictions.json \
+  --max_workers 5 \
+  --run_id <evaluation-name> \
+  --cache_level instance
+```
+
 Use `--redo-existing` to rerun the selected instances from scratch under an
 existing evaluation name. Their previous artifacts are preserved under the
 evaluation's `.redo_backups/` directory.
